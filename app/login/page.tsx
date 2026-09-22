@@ -61,15 +61,12 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F5F7FB] px-6">
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-2 mb-1">
-          <Mark className="h-7 w-7" />
-          <h1 className="font-display font-bold text-3xl text-ink tracking-tight">
-            Licencias
-          </h1>
+        <div className="mb-8">
+          <Mark className="h-10" />
+          <p className="text-ink/60 text-sm mt-3">
+            Control de licencias de software
+          </p>
         </div>
-        <p className="text-ink/60 text-sm mb-8">
-          Control de licencias de software · Accusys
-        </p>
 
         <div className="card p-6 space-y-4">
           <button
