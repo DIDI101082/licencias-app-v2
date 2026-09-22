@@ -39,15 +39,12 @@ export default function Nav({ nombre, rol }: { nombre: string; rol: string }) {
     <header className="border-b border-black/[0.06] bg-white">
       <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-8">
-          <span className="flex items-center gap-2">
-            <Mark className="h-5 w-5" />
-            <span className="font-display font-bold text-lg text-ink tracking-tight">
+          <Link href="/" className="flex items-center gap-3">
+            <Mark className="h-6" />
+            <span className="font-display font-bold text-lg text-ink tracking-tight border-l border-black/10 pl-3">
               Licencias
             </span>
-            <span className="hidden sm:inline text-xs text-ink/40 font-medium border-l border-black/10 pl-2 ml-1">
-              Accusys
-            </span>
-          </span>
+          </Link>
           <nav className="flex gap-1">
             {visibleLinks.map((l) => (
               <Link
