@@ -241,6 +241,11 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
                 {vivo.antivirus_activo === false && <Dato t="Antivirus"><span className="text-red-600">Desactivado</span></Dato>}
               </dl>
               <div className="space-y-2">{(vivo.discos as Disco[]).map((d) => <BarraDisco key={d.unidad} d={d} />)}</div>
+              {vivo.apps_cantidad != null && (
+                <Link href={`/inventario/aplicaciones?vista=equipo&equipo=${vivo.id}`} className="inline-block mt-3 text-sm text-brand-600 hover:underline">
+                  Ver las {vivo.apps_cantidad} aplicaciones instaladas
+                </Link>
+              )}
             </div>
           )}
           <div className="card p-5">

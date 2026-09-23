@@ -173,6 +173,13 @@ export default function Monitoreo() {
                           <div><dt className="text-ink/50 text-xs">Dominio</dt><dd>{d.dominio ?? "—"}</dd></div>
                           <div><dt className="text-ink/50 text-xs">Reporta desde</dt><dd>{new Date(d.primer_reporte).toLocaleDateString("es-AR")}</dd></div>
                           <div><dt className="text-ink/50 text-xs">Versión del agente</dt><dd>{d.agente_version ?? "—"}</dd></div>
+                          <div><dt className="text-ink/50 text-xs">Aplicaciones</dt>
+                            <dd>
+                              {d.apps_cantidad != null
+                                ? <Link href={`/inventario/aplicaciones?vista=equipo&equipo=${d.id}`} className="text-brand-600 hover:underline">Ver las {d.apps_cantidad} instaladas</Link>
+                                : <span className="text-ink/50">Requiere agente 1.1</span>}
+                            </dd>
+                          </div>
                           {esAdmin && (
                             <div className="flex items-end">
                               <button className="text-sm text-ink/50 hover:text-red-600 hover:underline" onClick={() => quitar(d)}>Quitar del monitoreo</button>
