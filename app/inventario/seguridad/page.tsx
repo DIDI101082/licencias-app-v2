@@ -111,7 +111,7 @@ export default function Seguridad() {
         <div>
           <h1 className="font-display text-2xl text-ink">Seguridad de los equipos</h1>
           <p className="text-ink/60 text-sm mt-1">
-            Cifrado (ESET o BitLocker), parches, firewall, antivirus y administradores locales. El agente lo informa cuando cambia algo o cada 6 horas.
+            Cifrado (ESET o BitLocker), parches, firewall, antivirus, administradores locales y clave del BIOS. El agente lo informa cuando cambia algo o cada 6 horas.
           </p>
         </div>
         <div className="flex gap-2">
@@ -122,7 +122,7 @@ export default function Seguridad() {
 
       {verConfig && esAdmin && <AdminsPermitidos lista={permitidos} onCambio={setPermitidos} />}
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {CONTROLES.map((c) => {
           const n = cuenta(c.k);
           return (
@@ -166,7 +166,7 @@ export default function Seguridad() {
                   </tr>
                   {abierto === d.id && (
                     <tr>
-                      <td colSpan={7} className="bg-[#F5F7FB]">
+                      <td colSpan={CONTROLES.length + 1} className="bg-[#F5F7FB]">
                         <div className="grid md:grid-cols-3 gap-5 text-sm py-1">
                           <div>
                             {d.cifrado_producto && (
@@ -217,6 +217,13 @@ export default function Seguridad() {
                             {d.av_firmas_fecha && <div className="text-xs text-ink/50">Firmas de Defender: {fecha(d.av_firmas_fecha)}</div>}
                             <div className="text-xs text-ink/50 mt-3 mb-1">Hardware</div>
                             <div>TPM {d.tpm_presente ? d.tpm_version : "no detectado"} · Secure Boot {d.secure_boot ? "activo" : "apagado"}</div>
+                            <div>
+                              BIOS:{" "}
+                              {d.bios_fuente
+                                ? `clave de administrador ${d.bios_clave_admin ? "sí" : "no"} · clave de encendido ${d.bios_clave_sistema ? "sí" : "no"}`
+                                : "sin datos (requiere agente 1.5)"}
+                            </div>
+                            {d.bios_fuente && <div className="text-xs text-ink/50">Leído con {d.bios_fuente}</div>}
                             <div className="text-xs text-ink/50 mt-3">
                               Informado {hace(d.seguridad_actualizado)}
                               {d.inv_equipos && <> · <Link href={`/inventario/equipos/${d.inv_equipos.id}`} className="text-brand-600 hover:underline">{d.inv_equipos.codigo}</Link></>}
@@ -230,7 +237,7 @@ export default function Seguridad() {
               );
             })}
             {!cargando && ordenadas.length === 0 && (
-              <tr><td colSpan={7} className="text-center text-ink/40 py-10">
+              <tr><td colSpan={CONTROLES.length + 1} className="text-center text-ink/40 py-10">
                 {filtro ? "Ningún equipo tiene este problema." : "Todavía ningún equipo informó datos de seguridad."}
               </td></tr>
             )}

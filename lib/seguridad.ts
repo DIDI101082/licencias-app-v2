@@ -4,7 +4,7 @@ export const DIAS_MAX_FIRMAS_AV = 3;
 
 export type Nivel = "ok" | "aviso" | "problema" | "sin_datos";
 export type Resultado = { nivel: Nivel; texto: string };
-export type Control = "bitlocker" | "parches" | "firewall" | "antivirus" | "admins" | "win11";
+export type Control = "bitlocker" | "parches" | "firewall" | "antivirus" | "admins" | "bios" | "win11";
 
 export const CONTROLES: { k: Control; titulo: string; tarjeta: string }[] = [
   { k: "bitlocker", titulo: "Cifrado", tarjeta: "Disco sin cifrar" },
@@ -12,6 +12,7 @@ export const CONTROLES: { k: Control; titulo: string; tarjeta: string }[] = [
   { k: "firewall", titulo: "Firewall", tarjeta: "Firewall apagado" },
   { k: "antivirus", titulo: "Antivirus", tarjeta: "Antivirus con problemas" },
   { k: "admins", titulo: "Admins locales", tarjeta: "Admins no permitidos" },
+  { k: "bios", titulo: "Clave BIOS", tarjeta: "BIOS sin clave de administrador" },
   { k: "win11", titulo: "Windows 11", tarjeta: "Sin TPM 2.0 o Secure Boot" },
 ];
 
@@ -32,7 +33,7 @@ export function adminsExtra(admins: any[] | null, permitidos: string[]) {
 export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado> {
   const sin: Resultado = { nivel: "sin_datos", texto: "Sin datos" };
   if (!d.seguridad_actualizado) {
-    return { bitlocker: sin, parches: sin, firewall: sin, antivirus: sin, admins: sin, win11: sin };
+    return { bitlocker: sin, parches: sin, firewall: sin, antivirus: sin, admins: sin, bios: sin, win11: sin };
   }
 
   // BitLocker
@@ -99,13 +100,20 @@ export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado
       : { nivel: "ok", texto: "Solo permitidos" };
   }
 
+  // Clave del BIOS: la importante es la de administrador (impide cambiar la configuración o arrancar desde USB)
+  const bios: Resultado = !d.bios_fuente || d.bios_clave_admin == null
+    ? { nivel: "sin_datos", texto: d.bios_fuente ? "No se pudo leer" : "Sin datos" }
+    : d.bios_clave_admin
+      ? { nivel: "ok", texto: d.bios_clave_sistema ? "Con clave (admin y encendido)" : "Con clave de administrador" }
+      : { nivel: "problema", texto: "Sin clave de administrador" };
+
   // Windows 11
   const tpm2 = d.tpm_presente && String(d.tpm_version ?? "").startsWith("2");
   const win11: Resultado = tpm2 && d.secure_boot ? { nivel: "ok", texto: "Apto" }
     : !tpm2 ? { nivel: "aviso", texto: d.tpm_presente ? `TPM ${d.tpm_version}` : "Sin TPM" }
     : { nivel: "aviso", texto: "Secure Boot apagado" };
 
-  return { bitlocker, parches, firewall, antivirus, admins, win11 };
+  return { bitlocker, parches, firewall, antivirus, admins, bios, win11 };
 }
 
 export const ESTILO: Record<Nivel, { punto: string; texto: string; etiqueta: string }> = {

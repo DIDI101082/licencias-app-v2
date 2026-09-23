@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.4";
+export const AGENTE_VERSION = "1.5";
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -307,9 +307,61 @@ function Obtener-CifradoEset {
   return $null
 }
 
+function Obtener-ClaveBios {
+  # Dell (modelos 2018 en adelante): WMI nativo, sin instalar nada
+  try {
+    $p = @(Get-CimInstance -Namespace 'root\dcim\sysman\wmisecurity' -ClassName PasswordObject -ErrorAction Stop)
+    if ($p.Count -gt 0) {
+      $adm = $p | Where-Object { $_.NameId -eq 'Admin' } | Select-Object -First 1
+      $sis = $p | Where-Object { $_.NameId -eq 'System' } | Select-Object -First 1
+      return @{
+        admin   = $(if ($adm) { [int]$adm.IsPasswordSet -eq 1 } else { $null })
+        sistema = $(if ($sis) { [int]$sis.IsPasswordSet -eq 1 } else { $null })
+        fuente  = 'Dell (WMI del BIOS)'
+      }
+    }
+  } catch { }
+  # Dell modelos anteriores: requiere Dell Command | Monitor
+  try {
+    $p = @(Get-CimInstance -Namespace 'root\dcim\sysman' -ClassName DCIM_BIOSPassword -ErrorAction Stop)
+    if ($p.Count -gt 0) {
+      $adm = $p | Where-Object { $_.AttributeName -match 'Admin|Setup' } | Select-Object -First 1
+      $sis = $p | Where-Object { $_.AttributeName -match 'System' } | Select-Object -First 1
+      return @{
+        admin   = $(if ($adm) { [string]$adm.IsSet -match 'true|1' } else { $null })
+        sistema = $(if ($sis) { [string]$sis.IsSet -match 'true|1' } else { $null })
+        fuente  = 'Dell Command Monitor'
+      }
+    }
+  } catch { }
+  # Lenovo: PasswordState es una suma de bits (1 encendido, 2 supervisor)
+  try {
+    $l = Get-CimInstance -Namespace 'root\wmi' -ClassName Lenovo_BiosPasswordSettings -ErrorAction Stop | Select-Object -First 1
+    if ($l) {
+      $e = [int]$l.PasswordState
+      return @{ admin = (($e -band 2) -ne 0); sistema = (($e -band 1) -ne 0); fuente = 'Lenovo (WMI del BIOS)' }
+    }
+  } catch { }
+  # HP
+  try {
+    $h = @(Get-CimInstance -Namespace 'root\HP\InstrumentedBIOS' -ClassName HP_BIOSPassword -ErrorAction Stop)
+    if ($h.Count -gt 0) {
+      $adm = $h | Where-Object { $_.Name -match 'Setup' } | Select-Object -First 1
+      $sis = $h | Where-Object { $_.Name -match 'Power-On' } | Select-Object -First 1
+      return @{
+        admin   = $(if ($adm) { [int]$adm.IsSet -eq 1 } else { $null })
+        sistema = $(if ($sis) { [int]$sis.IsSet -eq 1 } else { $null })
+        fuente  = 'HP (WMI del BIOS)'
+      }
+    }
+  } catch { }
+  return $null
+}
+
 try {
   $bl = Obtener { Obtener-BitLocker }
   $eset = Obtener { Obtener-CifradoEset }
+  $bios = Obtener { Obtener-ClaveBios }
   if (-not $bl) { $bl = @{ estado = 'no_disponible'; detalle = @() } }
   $parche = Obtener-UltimoParche
   $reinicio = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or
@@ -345,6 +397,9 @@ try {
     cifrado_producto     = $(if ($eset) { $eset.producto } else { $null })
     cifrado_estado       = $(if ($eset) { $eset.estado } else { $null })
     cifrado_detalle      = $(if ($eset) { $eset.detalle } else { $null })
+    bios_clave_admin     = $(if ($bios) { $bios.admin } else { $null })
+    bios_clave_sistema   = $(if ($bios) { $bios.sistema } else { $null })
+    bios_fuente          = $(if ($bios) { $bios.fuente } else { $null })
   }
 
   $jsonSeg = ConvertTo-Json -InputObject $seguridad -Depth 5 -Compress
