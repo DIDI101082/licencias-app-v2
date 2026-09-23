@@ -27,6 +27,7 @@ const modulos = [
     links: [
       { href: "/inventario", label: "Panel" },
       { href: "/inventario/equipos", label: "Equipos" },
+      { href: "/inventario/escanear", label: "Escanear" },
       { href: "/inventario/personas", label: "Por persona" },
       { href: "/inventario/monitoreo", label: "Monitoreo" },
       { href: "/inventario/aplicaciones", label: "Aplicaciones" },
@@ -65,13 +66,13 @@ export default function Nav({ nombre, rol }: { nombre: string; rol: string }) {
 
   return (
     <header className="border-b border-black/[0.06] bg-white print:hidden">
-      <div className="mx-auto max-w-6xl px-6 pt-4 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-6">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 sm:gap-6 min-w-0">
           <Link href="/" className="flex items-center">
             <Mark className="h-6" />
           </Link>
           {/* Solapas de módulos */}
-          <div role="tablist" aria-label="Módulos" className="flex gap-1 border-l border-black/10 pl-6">
+          <div role="tablist" aria-label="Módulos" className="flex gap-1 border-l border-black/10 pl-3 sm:pl-6">
             {modulos.map((m) => {
               const sel = m.id === activo.id;
               return (
@@ -80,7 +81,7 @@ export default function Nav({ nombre, rol }: { nombre: string; rol: string }) {
                   href={m.inicio}
                   role="tab"
                   aria-selected={sel}
-                  className={`font-display font-bold tracking-tight px-4 py-2 rounded-t-lg border-x border-t -mb-px transition-colors ${
+                  className={`font-display font-bold tracking-tight px-3 sm:px-4 py-2 whitespace-nowrap text-sm sm:text-base rounded-t-lg border-x border-t -mb-px transition-colors ${
                     sel
                       ? "bg-[#F5F7FB] border-black/[0.06] text-ink"
                       : "border-transparent text-ink/45 hover:text-ink"
@@ -103,7 +104,7 @@ export default function Nav({ nombre, rol }: { nombre: string; rol: string }) {
               Usuarios
             </Link>
           )}
-          <div className="text-right leading-tight">
+          <div className="text-right leading-tight hidden sm:block">
             <div className="text-sm font-medium text-ink">{nombre}</div>
             <div className="text-xs text-ink/50">{rolLabel[rol] ?? rol}</div>
           </div>

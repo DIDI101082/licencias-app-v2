@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { ESTADOS, CONDICIONES, dinero, fecha } from "@/lib/inventario";
 import { usePerfil } from "@/components/PerfilContext";
+import AbrirEnCelular from "@/components/AbrirEnCelular";
 
 type Equipo = Record<string, any>;
 
@@ -84,6 +85,7 @@ function Listado() {
           <button className="btn-secondary" onClick={() => exportarCSV(filtrados)} disabled={!filtrados.length}>
             Exportar a Excel
           </button>
+          {puedeEditar && <AbrirEnCelular />}
           {esAdmin && <Link className="btn-secondary" href="/inventario/equipos/importar">Importar desde Excel</Link>}
           {puedeEditar && <Link className="btn-primary" href="/inventario/equipos/nuevo">+ Cargar equipo</Link>}
         </div>
