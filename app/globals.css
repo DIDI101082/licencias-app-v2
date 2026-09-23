@@ -64,3 +64,8 @@ table.data td {
   body.solo-etiqueta .etiqueta-print, body.solo-etiqueta .etiqueta-print * { visibility: visible; }
   body.solo-etiqueta .etiqueta-print { position: fixed; top: 0; left: 0; border: 1px solid #000; box-shadow: none; }
 }
+
+/* Periféricos: etiqueta celeste para distinguirlos de computadoras y otros equipos */
+.tag-per {
+  @apply bg-[#7DD3FC] text-[#082f49] border-[#082f49];
+}

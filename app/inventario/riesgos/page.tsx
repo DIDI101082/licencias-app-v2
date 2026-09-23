@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
-import { fecha } from "@/lib/inventario";
+import { fecha, claseCodigo } from "@/lib/inventario";
 import { hace } from "@/lib/monitoreo";
 import { soporteWindows, estadoAmenaza, archivoAmenaza, SEVERIDAD, SUGERIDOS, DIAS_AVISO_SOPORTE } from "@/lib/riesgos";
 
@@ -215,7 +215,7 @@ function Sistemas() {
               <tr key={d.id}>
                 <td>
                   <span className="font-medium text-ink">{d.hostname}</span>
-                  {d.inv_equipos && <Link href={`/inventario/equipos/${d.inv_equipos.id}`} className="tag-inv ml-2">{d.inv_equipos.codigo}</Link>}
+                  {d.inv_equipos && <Link href={`/inventario/equipos/${d.inv_equipos.id}`} className={`${claseCodigo(d.inv_equipos.codigo)} ml-2`}>{d.inv_equipos.codigo}</Link>}
                   <div className="text-xs text-ink/50">{d.usuario ?? ""}</div>
                 </td>
                 <td className="text-ink/70">

@@ -28,3 +28,12 @@ export function diasHasta(v: string | null | undefined) {
   if (!v) return null;
   return Math.ceil((new Date(v + "T12:00:00").getTime() - Date.now()) / 86400000);
 }
+
+// Etiqueta del código: los periféricos (P-xxxxx) van en otro color
+export function esPeriferico(codigo?: string | null) {
+  return /^P-\d+$/.test(codigo ?? "");
+}
+
+export function claseCodigo(codigo?: string | null, base = "tag-inv") {
+  return `${base}${esPeriferico(codigo) ? " tag-per" : ""}`;
+}

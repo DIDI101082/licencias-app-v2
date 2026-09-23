@@ -4,7 +4,7 @@ import { Fragment, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { fecha } from "@/lib/inventario";
+import { fecha, claseCodigo } from "@/lib/inventario";
 import { hace } from "@/lib/monitoreo";
 
 type Vista = "apps" | "equipo" | "cambios";
@@ -97,7 +97,7 @@ function PorAplicacion() {
                           {equipos.map((e, i) => (
                             <li key={i} className="flex items-center gap-3 flex-wrap">
                               {e.inv_dispositivos?.inv_equipos
-                                ? <Link href={`/inventario/equipos/${e.inv_dispositivos.inv_equipos.id}`} className="tag-inv">{e.inv_dispositivos.inv_equipos.codigo}</Link>
+                                ? <Link href={`/inventario/equipos/${e.inv_dispositivos.inv_equipos.id}`} className={claseCodigo(e.inv_dispositivos.inv_equipos.codigo)}>{e.inv_dispositivos.inv_equipos.codigo}</Link>
                                 : null}
                               <Link href={`/inventario/aplicaciones?vista=equipo&equipo=${e.inv_dispositivos?.id}`} className="font-medium text-brand-600 hover:underline">
                                 {e.inv_dispositivos?.hostname}

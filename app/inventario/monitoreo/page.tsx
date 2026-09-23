@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
 import { conectado, hace, discoCritico, encendidoDesde, MINUTOS_CONECTADO, type Disco } from "@/lib/monitoreo";
+import { claseCodigo } from "@/lib/inventario";
 
 type Dispositivo = Record<string, any> & { discos: Disco[]; ultimo_reporte: string };
 
@@ -136,7 +137,7 @@ export default function Monitoreo() {
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
                       {d.inv_equipos ? (
-                        <Link href={`/inventario/equipos/${d.inv_equipos.id}`} className="tag-inv">{d.inv_equipos.codigo}</Link>
+                        <Link href={`/inventario/equipos/${d.inv_equipos.id}`} className={claseCodigo(d.inv_equipos.codigo)}>{d.inv_equipos.codigo}</Link>
                       ) : esAdmin ? (
                         <button className="text-sm text-brand-600 hover:underline" onClick={() => crearEnInventario(d)}>Cargar en inventario</button>
                       ) : (

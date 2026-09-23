@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { clasificar, nombreFormato, type Clasificacion } from "@/lib/escaneo";
 import { eanValido } from "@/lib/productos";
+import { claseCodigo } from "@/lib/inventario";
 
 const Escaner = dynamic(() => import("@/components/Escaner"), { ssr: false });
 
@@ -371,7 +372,7 @@ export default function Escanear() {
             {cargados.map((c) => (
               <li key={c.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
                 <span className="flex items-center gap-2 min-w-0">
-                  <Link href={`/inventario/equipos/${c.id}`} className="tag-inv">{c.codigo}</Link>
+                  <Link href={`/inventario/equipos/${c.id}`} className={claseCodigo(c.codigo)}>{c.codigo}</Link>
                   <span className="truncate text-ink/70">{c.serie}</span>
                 </span>
                 <button className="text-xs text-ink/40 hover:text-red-600 shrink-0" onClick={() => deshacer(c)}>Deshacer</button>

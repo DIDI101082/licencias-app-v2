@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { ESTADOS, CONDICIONES, dinero, fecha } from "@/lib/inventario";
+import { ESTADOS, CONDICIONES, dinero, fecha, claseCodigo } from "@/lib/inventario";
 import { usePerfil } from "@/components/PerfilContext";
 import AbrirEnCelular from "@/components/AbrirEnCelular";
 
@@ -127,7 +127,7 @@ function Listado() {
           <tbody>
             {filtrados.map((e) => (
               <tr key={e.id} className="hover:bg-black/[0.015]">
-                <td><Link href={`/inventario/equipos/${e.id}`} className="tag-inv">{e.codigo}</Link></td>
+                <td><Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link></td>
                 <td>
                   <span className="font-medium text-ink">{e.marca} {e.modelo}</span>
                   {e.cantidad > 1 && <b> ×{e.cantidad}</b>}

@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { ESTADOS, dinero, fecha, diasHasta } from "@/lib/inventario";
+import { ESTADOS, dinero, fecha, diasHasta, claseCodigo } from "@/lib/inventario";
 
 export const dynamic = "force-dynamic";
 
@@ -167,7 +167,7 @@ export default async function InventarioPanel() {
                 {garantias.map((e) => (
                   <li key={e.id} className="flex items-center justify-between gap-3 text-sm border-b border-black/[0.04] pb-2 last:border-0">
                     <span className="flex items-center gap-2">
-                      <Link href={`/inventario/equipos/${e.id}`} className="tag-inv">{e.codigo}</Link>
+                      <Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link>
                       {e.categoria} {e.marca} {e.modelo}
                     </span>
                     <span className={`pill ${e.dias! < 0 ? "bg-red-50 text-red-600" : "bg-amber-500/10 text-amber-600"}`}>
@@ -188,7 +188,7 @@ export default async function InventarioPanel() {
                 {recambio.slice(0, 12).map((e) => (
                   <li key={e.id} className="flex items-center justify-between gap-3 text-sm border-b border-black/[0.04] pb-2 last:border-0">
                     <span className="flex items-center gap-2">
-                      <Link href={`/inventario/equipos/${e.id}`} className="tag-inv">{e.codigo}</Link>
+                      <Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link>
                       {e.categoria} {e.marca} {e.modelo}
                     </span>
                     <span className={`pill ${e.vencido ? "bg-red-50 text-red-600" : "bg-amber-500/10 text-amber-600"}`}>

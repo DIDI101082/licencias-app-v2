@@ -6,6 +6,7 @@ import Link from "next/link";
 import EmpleadosExcel, { exportarEmpleados } from "@/components/EmpleadosExcel";
 import EntraSync from "@/components/EntraSync";
 import { createClient } from "@/lib/supabase/client";
+import { claseCodigo } from "@/lib/inventario";
 
 type Empleado = {
   id: string;
@@ -250,7 +251,7 @@ export default function EmpleadosClient({
                     <ul className="space-y-1">
                       {suyos.map((e) => (
                         <li key={e.id} className="flex items-center gap-2 whitespace-nowrap">
-                          <Link href={`/inventario/equipos/${e.id}`} className="tag-inv">
+                          <Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>
                             {e.codigo}
                           </Link>
                           <span className="text-ink/70 text-xs">

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { claseCodigo } from "@/lib/inventario";
 
 // Qué equipos tiene cada empleado (útil para entregas y bajas de personal)
 export default function PorPersona() {
@@ -62,7 +63,7 @@ export default function PorPersona() {
                     <ul className="space-y-1">
                       {p.suyos.map((e: any) => (
                         <li key={e.id} className="flex items-center gap-2">
-                          <Link href={`/inventario/equipos/${e.id}`} className="tag-inv">{e.codigo}</Link>
+                          <Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link>
                           <span className="text-ink/70">{e.categoria} {e.marca} {e.modelo}</span>
                         </li>
                       ))}

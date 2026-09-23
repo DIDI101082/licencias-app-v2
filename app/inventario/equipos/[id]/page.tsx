@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/client";
-import { ESTADOS, CONDICIONES, dinero, fecha, diasHasta } from "@/lib/inventario";
+import { ESTADOS, CONDICIONES, dinero, fecha, diasHasta, claseCodigo } from "@/lib/inventario";
 import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
 import { conectado, hace, encendidoDesde, type Disco } from "@/lib/monitoreo";
@@ -15,7 +15,7 @@ const CAMPOS_LOG: Record<string, string> = {
   estado: "Estado", condicion: "Condición", area: "Área", ubicacion_id: "Ubicación", empleado_id: "Asignado a",
   ubicacion_detalle: "Detalle de ubicación", hostname: "Hostname", ip: "IP", ram_gb: "RAM", almacenamiento: "Almacenamiento",
   sistema_operativo: "Sistema operativo", costo: "Costo", garantia_hasta: "Garantía", numero_serie: "N° de serie",
-  marca: "Marca", modelo: "Modelo", notas: "Notas", categoria_id: "Categoría", proveedor_id: "Proveedor",
+  marca: "Marca", modelo: "Modelo", notas: "Notas", codigo: "Código", categoria_id: "Categoría", proveedor_id: "Proveedor",
 };
 
 function Dato({ t, children }: { t: string; children: React.ReactNode }) {
@@ -107,7 +107,10 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <span className="tag-inv-grande">{e.codigo}</span>
+          <span className={claseCodigo(e.codigo, "tag-inv-grande")}>{e.codigo}</span>
+          {/^NWKS-\d+$/.test(e.codigo) && (
+            <span className="ml-3 text-xs text-ink/50">Código provisorio: pasa al hostname cuando el agente reporta este equipo</span>
+          )}
           <h1 className="font-display text-2xl text-ink mt-3">{[e.marca, e.modelo].filter(Boolean).join(" ") || e.categoria}</h1>
           <p className="text-sm text-ink/60 mt-1 flex items-center gap-2">
             {e.categoria} <span className={`est-${e.estado}`}>{ESTADOS[e.estado]}</span>
@@ -222,7 +225,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
           <div className="card p-5 flex gap-5 items-center etiqueta-print">
             {qr && <img src={qr} alt={`Código QR de ${e.codigo}`} width={110} height={110} />}
             <div>
-              <span className="tag-inv text-base">{e.codigo}</span>
+              <span className={`${claseCodigo(e.codigo)} text-base`}>{e.codigo}</span>
               <p className="text-sm mt-2">{e.categoria}<span className="block text-ink/50">S/N {e.numero_serie ?? "—"}</span></p>
             </div>
           </div>
