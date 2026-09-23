@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import EmpleadosExcel, { exportarEmpleados } from "@/components/EmpleadosExcel";
+import EntraSync from "@/components/EntraSync";
 import { createClient } from "@/lib/supabase/client";
 
 type Empleado = {
@@ -12,18 +15,39 @@ type Empleado = {
   area: string;
   puesto: string | null;
   activo: boolean;
+  entra_id?: string | null;
+};
+
+type EquipoAsignado = {
+  id: string;
+  codigo: string;
+  categoria: string;
+  marca: string | null;
+  modelo: string | null;
+  empleado_id: string;
 };
 
 export default function EmpleadosClient({
   empleados,
+  equipos,
   soloArea,
   puedeEditar,
+  esAdmin,
+  ultimaSyncEntra,
 }: {
   empleados: Empleado[];
+  equipos: EquipoAsignado[];
+  esAdmin: boolean;
+  ultimaSyncEntra: string | null;
   soloArea: string | null;
   puedeEditar: boolean;
 }) {
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [panel, setPanel] = useState<"excel" | "entra" | null>(null);
+  const equiposPorEmpleado = equipos.reduce<Record<string, string[]>>((acc, e) => {
+    (acc[e.empleado_id] ??= []).push(e.codigo);
+    return acc;
+  }, {});
   const [editando, setEditando] = useState<Empleado | null>(null);
   const [form, setForm] = useState({
     nombre: "",
@@ -73,6 +97,16 @@ export default function EmpleadosClient({
   }
 
   async function toggleActivo(emp: Empleado) {
+    const suyos = equipos.filter((e) => e.empleado_id === emp.id);
+    if (
+      emp.activo &&
+      suyos.length > 0 &&
+      !confirm(
+        `${emp.nombre} ${emp.apellido} todavía tiene ${suyos.length} ${suyos.length === 1 ? "equipo asignado" : "equipos asignados"} ` +
+          `(${suyos.map((e) => e.codigo).join(", ")}). ¿Desactivarlo igual? Vas a poder ver qué recuperar en Inventario IT → Por persona.`
+      )
+    )
+      return;
     await supabase
       .from("empleados")
       .update({ activo: !emp.activo })
@@ -82,14 +116,34 @@ export default function EmpleadosClient({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="font-display text-2xl text-ink">Empleados</h1>
-        {puedeEditar && (
-          <button className="btn-primary" onClick={abrirNuevo}>
-            + Nuevo empleado
+        <div className="flex gap-2 flex-wrap">
+          <button className="btn-secondary" onClick={() => exportarEmpleados(empleados, equiposPorEmpleado)} disabled={!empleados.length}>
+            Exportar a Excel
           </button>
-        )}
+          {esAdmin && (
+            <>
+              <button className={`btn-secondary ${panel === "excel" ? "ring-2 ring-brand-500/30" : ""}`}
+                onClick={() => setPanel(panel === "excel" ? null : "excel")} aria-expanded={panel === "excel"}>
+                Importar desde Excel
+              </button>
+              <button className={`btn-secondary ${panel === "entra" ? "ring-2 ring-brand-500/30" : ""}`}
+                onClick={() => setPanel(panel === "entra" ? null : "entra")} aria-expanded={panel === "entra"}>
+                Sincronizar con Entra ID
+              </button>
+            </>
+          )}
+          {puedeEditar && (
+            <button className="btn-primary" onClick={abrirNuevo}>
+              + Nuevo empleado
+            </button>
+          )}
+        </div>
       </div>
+
+      {esAdmin && panel === "excel" && <EmpleadosExcel empleados={empleados as any} />}
+      {esAdmin && panel === "entra" && <EntraSync ultima={ultimaSyncEntra} />}
 
       {mostrarForm && (
         <form onSubmit={guardar} className="card p-5 grid md:grid-cols-2 gap-4">
@@ -161,27 +215,56 @@ export default function EmpleadosClient({
         </form>
       )}
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="data w-full">
           <thead>
             <tr>
               <th>Nombre</th>
-              <th>Email</th>
               <th>Área</th>
               <th>Puesto</th>
+              <th>Equipos IT</th>
               <th>Estado</th>
               {puedeEditar && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {empleados.map((emp) => (
-              <tr key={emp.id}>
-                <td className="font-medium text-ink">
-                  {emp.nombre} {emp.apellido}
+            {empleados.map((emp) => {
+              const suyos = equipos.filter((e) => e.empleado_id === emp.id);
+              return (
+              <tr key={emp.id} className="align-top">
+                <td>
+                  <div className="font-medium text-ink">
+                    {emp.nombre} {emp.apellido}
+                  </div>
+                  <div className="text-xs text-ink/50">
+                    {emp.email}
+                    {emp.entra_id && <span className="ml-1.5 text-brand-600" title="Sincronizado con Entra ID">· Entra ID</span>}
+                  </div>
                 </td>
-                <td className="text-ink/60">{emp.email}</td>
                 <td className="text-ink/60">{emp.area}</td>
                 <td className="text-ink/60">{emp.puesto || "—"}</td>
+                <td>
+                  {suyos.length === 0 ? (
+                    <span className="text-ink/40">—</span>
+                  ) : (
+                    <ul className="space-y-1">
+                      {suyos.map((e) => (
+                        <li key={e.id} className="flex items-center gap-2 whitespace-nowrap">
+                          <Link href={`/inventario/equipos/${e.id}`} className="tag-inv">
+                            {e.codigo}
+                          </Link>
+                          <span className="text-ink/70 text-xs">
+                            {e.categoria}
+                            {e.marca || e.modelo ? ` · ${[e.marca, e.modelo].filter(Boolean).join(" ")}` : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {!emp.activo && suyos.length > 0 && (
+                    <span className="pill bg-red-50 text-red-600 mt-1">Recuperar equipos</span>
+                  )}
+                </td>
                 <td>
                   <span
                     className={`text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -210,7 +293,8 @@ export default function EmpleadosClient({
                   </td>
                 )}
               </tr>
-            ))}
+              );
+            })}
             {empleados.length === 0 && (
               <tr>
                 <td colSpan={puedeEditar ? 6 : 5} className="text-center text-ink/40 py-8">
