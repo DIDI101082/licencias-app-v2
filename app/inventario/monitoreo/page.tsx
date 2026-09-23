@@ -166,8 +166,10 @@ export default function Monitoreo() {
                           <div><dt className="text-ink/50 text-xs">Encendido hace</dt><dd>{encendidoDesde(d.arranque)}</dd></div>
                           <div><dt className="text-ink/50 text-xs">Batería</dt><dd>{d.bateria_pct != null ? `${d.bateria_pct}%` : "Sin batería"}</dd></div>
                           <div><dt className="text-ink/50 text-xs">Antivirus</dt>
-                            <dd className={d.antivirus_activo === false ? "text-red-600" : ""}>
-                              {d.antivirus_activo == null ? "Sin datos" : d.antivirus_activo ? "Activo" : "Desactivado"}
+                            <dd className={(Array.isArray(d.av_productos) ? !d.av_productos.some((p: any) => p.activo) : d.antivirus_activo === false) ? "text-red-600" : ""}>
+                              {Array.isArray(d.av_productos)
+                                ? (d.av_productos.filter((p: any) => p.activo).map((p: any) => p.nombre).join(", ") || "Sin antivirus activo")
+                                : d.antivirus_activo == null ? "Sin datos" : d.antivirus_activo ? "Activo" : "Desactivado"}
                             </dd>
                           </div>
                           <div><dt className="text-ink/50 text-xs">MAC</dt><dd>{d.mac ?? "—"}</dd></div>

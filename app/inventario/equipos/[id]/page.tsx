@@ -37,6 +37,9 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
   const [empleados, setEmpleados] = useState<any[]>([]);
   const [qr, setQr] = useState("");
   const [vivo, setVivo] = useState<any>(null);
+  const [otros, setOtros] = useState<any[]>([]);
+  const [stockPer, setStockPer] = useState<any[]>([]);
+  const [perSel, setPerSel] = useState("");
   const [permitidos, setPermitidos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [empSel, setEmpSel] = useState("");
@@ -58,6 +61,19 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
       setPermitidos((p as string[]) ?? []);
     }
     setE(eq.data); setAsig(a.data ?? []); setMant(m.data ?? []); setLog(l.data ?? []);
+    // Otros equipos de la misma persona (periféricos primero) y periféricos disponibles para entregarle
+    if (eq.data?.empleado_id) {
+      const [o, st] = await Promise.all([
+        sb.from("inv_v_equipos").select("id, codigo, categoria, grupo, marca, modelo, numero_serie")
+          .eq("empleado_id", eq.data.empleado_id).neq("id", params.id).order("codigo"),
+        sb.from("inv_v_equipos").select("id, codigo, categoria, marca, modelo, numero_serie")
+          .eq("estado", "en_stock").eq("grupo", "Periféricos").order("categoria").limit(300),
+      ]);
+      setOtros((o.data ?? []).sort((x: any, y: any) => Number(y.grupo === "Periféricos") - Number(x.grupo === "Periféricos")));
+      setStockPer(st.data ?? []);
+    } else {
+      setOtros([]);
+    }
     if (eq.data) setQr(await QRCode.toDataURL(`${window.location.origin}/inventario/equipos/${params.id}`, { margin: 0, width: 160 }));
   }, [params.id]);
 
@@ -176,6 +192,55 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
             )}
           </div>
 
+          {e.empleado && (
+            <div className="card p-5 space-y-3">
+              <h2 className="font-medium text-ink">Otros equipos de {e.empleado}</h2>
+              {otros.length === 0 ? (
+                <p className="text-sm text-ink/50">No tiene periféricos ni otros equipos asignados.</p>
+              ) : (
+                <ul className="divide-y divide-black/[0.05]">
+                  {otros.map((o) => (
+                    <li key={o.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                      <span className="flex items-center gap-2 min-w-0">
+                        <Link href={`/inventario/equipos/${o.id}`} className={claseCodigo(o.codigo)}>{o.codigo}</Link>
+                        <span className="min-w-0">
+                          <span className="text-ink">{o.categoria}</span>
+                          <span className="text-ink/60">{[o.marca, o.modelo].filter(Boolean).length ? ` · ${[o.marca, o.modelo].filter(Boolean).join(" ")}` : ""}</span>
+                          {o.numero_serie && <span className="block text-xs text-ink/40 truncate">S/N {o.numero_serie}</span>}
+                        </span>
+                      </span>
+                      {puedeEditarEquipo(e.area) && (
+                        <button className="text-xs text-ink/40 hover:text-red-600 shrink-0"
+                          onClick={async () => {
+                            if (!confirm(`¿Registrar la devolución de ${o.codigo}? Vuelve al stock.`)) return;
+                            await rpc("inv_devolver_equipo", { p_equipo: o.id, p_condicion: "bueno" });
+                          }}>
+                          Devolver
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {puedeEditarEquipo(e.area) && (
+                <div className="flex gap-2 pt-1 print:hidden">
+                  <select className="input flex-1" value={perSel} onChange={(x) => setPerSel(x.target.value)} aria-label="Periférico en stock">
+                    <option value="">{stockPer.length ? "Entregarle un periférico en stock…" : "No hay periféricos en stock"}</option>
+                    {stockPer.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.codigo} · {p.categoria}{p.marca || p.modelo ? ` ${[p.marca, p.modelo].filter(Boolean).join(" ")}` : ""}{p.numero_serie ? ` · S/N ${p.numero_serie}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="btn-secondary" disabled={!perSel}
+                    onClick={async () => { await rpc("inv_asignar_equipo", { p_equipo: perSel, p_empleado: e.empleado_id }); setPerSel(""); }}>
+                    Asignar
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="card p-5 space-y-3">
             <h2 className="font-medium text-ink">Mantenimientos y reparaciones</h2>
             {mant.length === 0 && <p className="text-sm text-ink/50">Sin registros.</p>}
@@ -247,7 +312,13 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
                 <Dato t="RAM">{vivo.ram_total_gb} GB · {vivo.ram_libre_gb} GB libres</Dato>
                 <Dato t="Encendido hace">{encendidoDesde(vivo.arranque)}</Dato>
                 {vivo.bateria_pct != null && <Dato t="Batería">{vivo.bateria_pct}%</Dato>}
-                {vivo.antivirus_activo === false && <Dato t="Antivirus"><span className="text-red-600">Desactivado</span></Dato>}
+                {Array.isArray(vivo.av_productos) ? (
+                  <Dato t="Antivirus">
+                    {vivo.av_productos.some((p: any) => p.activo)
+                      ? vivo.av_productos.filter((p: any) => p.activo).map((p: any) => p.nombre).join(", ")
+                      : <span className="text-red-600">Sin antivirus activo</span>}
+                  </Dato>
+                ) : vivo.antivirus_activo === false && <Dato t="Antivirus"><span className="text-red-600">Desactivado</span></Dato>}
               </dl>
               <div className="space-y-2">{(vivo.discos as Disco[]).map((d) => <BarraDisco key={d.unidad} d={d} />)}</div>
               {vivo.seguridad_actualizado && (() => {
