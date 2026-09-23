@@ -111,7 +111,7 @@ export default function Seguridad() {
         <div>
           <h1 className="font-display text-2xl text-ink">Seguridad de los equipos</h1>
           <p className="text-ink/60 text-sm mt-1">
-            Cifrado, parches, firewall, antivirus y administradores locales. El agente lo informa cuando cambia algo o cada 6 horas.
+            Cifrado (ESET o BitLocker), parches, firewall, antivirus y administradores locales. El agente lo informa cuando cambia algo o cada 6 horas.
           </p>
         </div>
         <div className="flex gap-2">
@@ -169,7 +169,20 @@ export default function Seguridad() {
                       <td colSpan={7} className="bg-[#F5F7FB]">
                         <div className="grid md:grid-cols-3 gap-5 text-sm py-1">
                           <div>
-                            <div className="text-xs text-ink/50 mb-1">Unidades</div>
+                            {d.cifrado_producto && (
+                              <>
+                                <div className="text-xs text-ink/50 mb-1">Cifrado: {d.cifrado_producto}</div>
+                                <div>{String(d.cifrado_estado ?? "desconocido").replace("_", " ")}</div>
+                                {d.cifrado_detalle && (
+                                  <details className="mt-1">
+                                    <summary className="text-xs text-brand-600 cursor-pointer">Ver lo que informa ESET</summary>
+                                    <p className="text-xs text-ink/60 mt-1 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">{d.cifrado_detalle}</p>
+                                  </details>
+                                )}
+                                <div className="text-xs text-ink/50 mt-3 mb-1">BitLocker (Windows)</div>
+                              </>
+                            )}
+                            {!d.cifrado_producto && <div className="text-xs text-ink/50 mb-1">Unidades (BitLocker)</div>}
                             {(d.bitlocker_detalle ?? []).length === 0 ? <span className="text-ink/50">Sin información de BitLocker</span> :
                               d.bitlocker_detalle.map((u: any) => (
                                 <div key={u.unidad}>{u.unidad} · {u.estado.replace("_", " ")}{u.porcentaje != null && u.estado !== "sin_cifrar" ? ` (${u.porcentaje}%)` : ""}</div>

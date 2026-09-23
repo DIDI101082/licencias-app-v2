@@ -45,7 +45,20 @@ export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado
     descifrando: { nivel: "problema", texto: "Descifrando" },
     no_disponible: { nivel: "aviso", texto: "No disponible" },
   };
-  const bitlocker = bl[d.bitlocker_estado] ?? sin;
+  // Si hay cifrado de ESET, manda ESET (es el cifrado corporativo); si no, BitLocker de Windows
+  const eset: Record<string, Resultado> = {
+    cifrado: { nivel: "ok", texto: "Cifrado (ESET)" },
+    cifrando: { nivel: "aviso", texto: "Cifrando… (ESET)" },
+    pendiente: { nivel: "aviso", texto: "ESET: falta activar (contraseña de inicio o reinicio)" },
+    error: { nivel: "problema", texto: "ESET: falló el cifrado" },
+    sin_cifrar: { nivel: "problema", texto: "Sin cifrar (ESET instalado)" },
+    desconocido: { nivel: "aviso", texto: "ESET: estado sin confirmar" },
+  };
+  const bitlocker = d.cifrado_producto
+    ? (eset[d.cifrado_estado] ?? eset.desconocido)
+    : d.bitlocker_estado === "cifrado"
+      ? { nivel: "ok" as const, texto: "Cifrado (BitLocker)" }
+      : bl[d.bitlocker_estado] ?? sin;
 
   // Parches
   let parches: Resultado = { nivel: "aviso", texto: "Sin historial" };

@@ -31,12 +31,29 @@ const modulos = [
       { href: "/inventario/personas", label: "Por persona" },
       { href: "/inventario/monitoreo", label: "Monitoreo" },
       { href: "/inventario/aplicaciones", label: "Aplicaciones" },
-      { href: "/inventario/seguridad", label: "Seguridad" },
-      { href: "/inventario/riesgos", label: "Riesgos" },
     ],
     admin: [{ href: "/inventario/catalogos", label: "Categorías y ubicaciones" }],
   },
+  {
+    id: "seguridad",
+    label: "Seguridad",
+    inicio: "/inventario/seguridad",
+    links: [
+      { href: "/inventario/seguridad", label: "Estado de los equipos" },
+      { href: "/inventario/riesgos", label: "Riesgos" },
+    ],
+    admin: [] as { href: string; label: string }[],
+  },
 ];
+
+// Las pantallas de seguridad viven bajo /inventario, pero se muestran en su propia solapa
+const RUTAS_SEGURIDAD = ["/inventario/seguridad", "/inventario/riesgos"];
+
+function moduloDe(pathname: string) {
+  if (RUTAS_SEGURIDAD.some((r) => pathname.startsWith(r))) return modulos[2];
+  if (pathname.startsWith("/inventario")) return modulos[1];
+  return modulos[0];
+}
 
 const rolLabel: Record<string, string> = {
   administrador: "Administrador",
@@ -50,7 +67,7 @@ export default function Nav({ nombre, rol }: { nombre: string; rol: string }) {
   const supabase = createClient();
   const esAdmin = rol === "administrador";
 
-  const activo = pathname.startsWith("/inventario") ? modulos[1] : modulos[0];
+  const activo = moduloDe(pathname);
   const subLinks = [...activo.links, ...(esAdmin ? activo.admin : [])];
 
   function esActual(href: string) {

@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.3";
+export const AGENTE_VERSION = "1.4";
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -262,8 +262,54 @@ function Fecha-Iso($f) {
   return $null
 }
 
+function Obtener-CifradoEset {
+  # 1) ESET Endpoint Encryption (ex DESlock): herramienta oficial de consulta
+  $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+  $candidatos = @(
+    (Join-Path $env:ProgramFiles 'ESET Endpoint Encryption\DLPCmd64.exe'),
+    (Join-Path $env:ProgramFiles 'ESET Endpoint Encryption\dlpcmd.exe')
+  )
+  if ($pf86) { $candidatos += (Join-Path $pf86 'ESET Endpoint Encryption\dlpcmd.exe') }
+  $dlp = $candidatos | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($dlp) {
+    $letra = $env:SystemDrive.TrimEnd(':')
+    $proc = Start-Process -FilePath $dlp -ArgumentList @('query', ('-l:' + $letra)) -Wait -PassThru -WindowStyle Hidden
+    $c = [int]$proc.ExitCode
+    $estado = 'desconocido'
+    if ($c -eq -103 -or $c -eq 100) { $estado = 'cifrado' }
+    elseif ($c -eq -101) { $estado = 'sin_cifrar' }
+    elseif ($c -eq -102 -or ($c -ge 0 -and $c -lt 100)) { $estado = 'cifrando' }
+    $detalle = 'Codigo devuelto por DLPCmd: ' + $c
+    if ($c -ge 0 -and $c -le 100) { $detalle = 'Unidad ' + $letra + ': ' + $c + '% cifrado' }
+    return @{ producto = 'ESET Endpoint Encryption'; estado = $estado; detalle = $detalle }
+  }
+
+  # 2) ESET Full Disk Encryption (ESET PROTECT): estado que escribe el propio cliente
+  $carpeta = Join-Path $env:ProgramData 'ESET\ESET Full Disk Encryption'
+  $archivo = Join-Path $carpeta 'AIS\Logs\Status.html'
+  if (Test-Path $archivo) {
+    $texto = (Get-Content -Path $archivo -Raw -ErrorAction Stop) -replace '(?s)<(script|style)[^>]*>.*?</\1>', ' ' -replace '<[^>]+>', ' ' -replace '&nbsp;', ' ' -replace '&amp;', '&' -replace '\s+', ' '
+    $texto = $texto.Trim()
+    $t = $texto.ToLower()
+    $estado = 'desconocido'
+    if ($t -match 'not encrypted|is not encrypted|no est. cifrad|sin cifrar|unencrypted') { $estado = 'sin_cifrar' }
+    elseif ($t -match 'failed|error al|fall. ') { $estado = 'error' }
+    elseif ($t -match 'waiting for|pre-boot password|restart is required|safe start|must restart|reinicio|reiniciar') { $estado = 'pendiente' }
+    elseif ($t -match 'encrypting|encryption in progress|in progress|cifrando|en curso|decrypting') { $estado = 'cifrando' }
+    elseif ($t -match 'encrypted|cifrad') { $estado = 'cifrado' }
+    $corto = $texto
+    if ($corto.Length -gt 800) { $corto = $corto.Substring(0, 800) }
+    return @{ producto = 'ESET Full Disk Encryption'; estado = $estado; detalle = $corto }
+  }
+  if (Test-Path $carpeta) {
+    return @{ producto = 'ESET Full Disk Encryption'; estado = 'desconocido'; detalle = 'Cliente EFDE instalado, sin archivo de estado' }
+  }
+  return $null
+}
+
 try {
   $bl = Obtener { Obtener-BitLocker }
+  $eset = Obtener { Obtener-CifradoEset }
   if (-not $bl) { $bl = @{ estado = 'no_disponible'; detalle = @() } }
   $parche = Obtener-UltimoParche
   $reinicio = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or
@@ -296,6 +342,9 @@ try {
     tpm_presente         = [bool]$tpm
     tpm_version          = $(if ($tpm) { ([string]$tpm.SpecVersion).Split(',')[0].Trim() } else { $null })
     secure_boot          = [bool]$secureBoot
+    cifrado_producto     = $(if ($eset) { $eset.producto } else { $null })
+    cifrado_estado       = $(if ($eset) { $eset.estado } else { $null })
+    cifrado_detalle      = $(if ($eset) { $eset.detalle } else { $null })
   }
 
   $jsonSeg = ConvertTo-Json -InputObject $seguridad -Depth 5 -Compress
