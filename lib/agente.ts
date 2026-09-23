@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.1";
+export const AGENTE_VERSION = "1.2";
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -138,6 +138,145 @@ try {
 }
 catch {
   Set-Content -Path (Join-Path $Carpeta 'ultimas-apps.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+}
+
+# ---- Seguridad: se envia si cambio algo o cada 6 horas ----
+function Obtener-BitLocker {
+  $vols = @(Get-CimInstance -Namespace 'root\cimv2\Security\MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume -ErrorAction Stop)
+  $detalle = @(foreach ($v in $vols) {
+    if (-not $v.DriveLetter) { continue }
+    $pct = $null
+    try { $pct = (Invoke-CimMethod -InputObject $v -MethodName GetConversionStatus).EncryptionPercentage } catch { }
+    $estado = switch ([int]$v.ConversionStatus) {
+      0 { 'sin_cifrar' } 1 { 'cifrado' } 2 { 'cifrando' } 3 { 'descifrando' } 4 { 'pausado' } 5 { 'pausado' } default { 'desconocido' }
+    }
+    if ($estado -eq 'cifrado' -and [int]$v.ProtectionStatus -eq 0) { $estado = 'suspendido' }
+    [ordered]@{ unidad = $v.DriveLetter; estado = $estado; porcentaje = $pct; proteccion = ([int]$v.ProtectionStatus -eq 1) }
+  })
+  $so = $detalle | Where-Object { $_.unidad -eq $env:SystemDrive } | Select-Object -First 1
+  $general = 'no_disponible'
+  if ($so) { $general = $so.estado }
+  return @{ estado = $general; detalle = $detalle }
+}
+
+function Obtener-UltimoParche {
+  $resultado = $null
+  try {
+    $buscador = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()
+    $total = $buscador.GetTotalHistoryCount()
+    if ($total -gt 0) {
+      $resultado = $buscador.QueryHistory(0, [math]::Min($total, 100)) |
+        Where-Object { $_.Operation -eq 1 -and $_.ResultCode -eq 2 -and $_.Title -and
+                       $_.Title -notmatch 'Defender|Security Intelligence|inteligencia de seguridad|Antimalware|KB2267602|KB890830|Malicious Software|software malintencionado' } |
+        Sort-Object Date -Descending | Select-Object -First 1 |
+        ForEach-Object { @{ fecha = $_.Date.ToUniversalTime().ToString('o'); titulo = $_.Title } }
+    }
+  } catch { }
+  if (-not $resultado) {
+    $hf = Get-HotFix -ErrorAction SilentlyContinue | Where-Object { $_.InstalledOn } | Sort-Object InstalledOn -Descending | Select-Object -First 1
+    if ($hf) { $resultado = @{ fecha = $hf.InstalledOn.ToUniversalTime().ToString('o'); titulo = $hf.HotFixID } }
+  }
+  return $resultado
+}
+
+function Obtener-Admins {
+  $sidGrupo = 'S-1-5-32-544'
+  try {
+    return @(Get-LocalGroupMember -SID $sidGrupo -ErrorAction Stop | ForEach-Object {
+      [ordered]@{
+        nombre    = [string]$_.Name
+        tipo      = [string]$_.ObjectClass
+        origen    = [string]$_.PrincipalSource
+        integrado = ([string]$_.SID -match '-500$')
+      }
+    })
+  } catch {
+    # Plan B (falla conocida de Get-LocalGroupMember con cuentas de Entra ID o SIDs huerfanos)
+    $nombreGrupo = (New-Object System.Security.Principal.SecurityIdentifier($sidGrupo)).Translate([System.Security.Principal.NTAccount]).Value.Split('\')[1]
+    $grupo = [ADSI]('WinNT://./' + $nombreGrupo + ',group')
+    return @($grupo.psbase.Invoke('Members') | ForEach-Object {
+      $ruta = $_.GetType().InvokeMember('ADsPath', 'GetProperty', $null, $_, $null)
+      $clase = $_.GetType().InvokeMember('Class', 'GetProperty', $null, $_, $null)
+      $partes = $ruta -replace '^WinNT://', '' -split '/'
+      $nombre = ($partes | Select-Object -Last 2) -join '\'
+      [ordered]@{ nombre = $nombre; tipo = $clase; origen = ''; integrado = $false }
+    })
+  }
+}
+
+function Obtener-Antivirus {
+  $productos = @()
+  try {
+    $productos = @(Get-CimInstance -Namespace 'root\SecurityCenter2' -ClassName AntiVirusProduct -ErrorAction Stop | ForEach-Object {
+      $estado = [int]$_.productState
+      [ordered]@{
+        nombre      = $_.displayName
+        activo      = ((($estado -shr 12) -band 0xF) -eq 1)
+        actualizado = ((($estado -shr 4) -band 0xF) -eq 0)
+      }
+    })
+  } catch { }
+  $mp = Obtener { Get-MpComputerStatus }
+  if ($productos.Count -eq 0 -and $mp) {
+    # Servidores: no tienen Centro de seguridad, se usa Defender directo
+    $productos = @([ordered]@{
+      nombre      = 'Microsoft Defender'
+      activo      = [bool]$mp.RealTimeProtectionEnabled
+      actualizado = ($mp.AntivirusSignatureLastUpdated -gt (Get-Date).AddDays(-3))
+    })
+  }
+  $firmas = $null
+  if ($mp -and $mp.AntivirusSignatureLastUpdated) { $firmas = $mp.AntivirusSignatureLastUpdated.ToUniversalTime().ToString('o') }
+  return @{ productos = $productos; firmas = $firmas }
+}
+
+try {
+  $bl = Obtener { Obtener-BitLocker }
+  if (-not $bl) { $bl = @{ estado = 'no_disponible'; detalle = @() } }
+  $parche = Obtener-UltimoParche
+  $reinicio = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or
+              (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
+  $admins = @(Obtener { Obtener-Admins } | Where-Object { $_ })
+  $fw = [ordered]@{}
+  Obtener { Get-NetFirewallProfile | ForEach-Object { $fw[[string]$_.Name] = ([string]$_.Enabled -eq 'True') } } | Out-Null
+  $av = Obtener-Antivirus
+  $tpm = Obtener { Get-CimInstance -Namespace 'root\cimv2\Security\MicrosoftTpm' -ClassName Win32_Tpm }
+  $secureBoot = Obtener { Confirm-SecureBootUEFI }
+  if ($null -eq $secureBoot) { $secureBoot = $false }
+
+  $seguridad = [ordered]@{
+    bitlocker_estado     = $bl.estado
+    bitlocker_detalle    = @($bl.detalle)
+    ultimo_parche        = $(if ($parche) { $parche.fecha } else { $null })
+    ultimo_parche_titulo = $(if ($parche) { $parche.titulo } else { $null })
+    reinicio_pendiente   = [bool]$reinicio
+    admins_locales       = $(if ($admins.Count -gt 0) { $admins } else { $null })
+    firewall_perfiles    = $fw
+    firewall_activo      = ($fw.Count -gt 0 -and -not ($fw.Values -contains $false))
+    av_productos         = @($av.productos)
+    av_firmas_fecha      = $av.firmas
+    tpm_presente         = [bool]$tpm
+    tpm_version          = $(if ($tpm) { ([string]$tpm.SpecVersion).Split(',')[0].Trim() } else { $null })
+    secure_boot          = [bool]$secureBoot
+  }
+
+  $jsonSeg = ConvertTo-Json -InputObject $seguridad -Depth 5 -Compress
+  $sha2 = [System.Security.Cryptography.SHA256]::Create()
+  $hashSeg = [BitConverter]::ToString($sha2.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($jsonSeg))) -replace '-', ''
+  $archivoSeg = Join-Path $Carpeta 'seguridad.hash'
+  $anteriorSeg = Get-Content $archivoSeg -ErrorAction SilentlyContinue
+  $vencidoSeg = (-not (Test-Path $archivoSeg)) -or ((Get-Item $archivoSeg).LastWriteTime -lt (Get-Date).AddHours(-6))
+
+  if (($hashSeg -ne $anteriorSeg) -or $vencidoSeg) {
+    $cuerpoSeg = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
+                 ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_datos":' + $jsonSeg + '}'
+    Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_reportar_seguridad') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoSeg)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 60 | Out-Null
+    Set-Content -Path $archivoSeg -Value $hashSeg
+    Set-Content -Path (Join-Path $Carpeta 'ultima-seguridad.txt') -Value ('OK ' + (Get-Date).ToString('s'))
+  }
+}
+catch {
+  Set-Content -Path (Join-Path $Carpeta 'ultima-seguridad.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
 }
 `;
 

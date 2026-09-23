@@ -30,6 +30,7 @@ const modulos = [
       { href: "/inventario/personas", label: "Por persona" },
       { href: "/inventario/monitoreo", label: "Monitoreo" },
       { href: "/inventario/aplicaciones", label: "Aplicaciones" },
+      { href: "/inventario/seguridad", label: "Seguridad" },
     ],
     admin: [{ href: "/inventario/catalogos", label: "Categorías y ubicaciones" }],
   },

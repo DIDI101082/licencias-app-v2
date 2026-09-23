@@ -9,6 +9,7 @@ import { ESTADOS, CONDICIONES, dinero, fecha, diasHasta } from "@/lib/inventario
 import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
 import { conectado, hace, encendidoDesde, type Disco } from "@/lib/monitoreo";
+import { CONTROLES, ESTILO, evaluar } from "@/lib/seguridad";
 
 const CAMPOS_LOG: Record<string, string> = {
   estado: "Estado", condicion: "Condición", area: "Área", ubicacion_id: "Ubicación", empleado_id: "Asignado a",
@@ -36,6 +37,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
   const [empleados, setEmpleados] = useState<any[]>([]);
   const [qr, setQr] = useState("");
   const [vivo, setVivo] = useState<any>(null);
+  const [permitidos, setPermitidos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [empSel, setEmpSel] = useState("");
   const [condDev, setCondDev] = useState("bueno");
@@ -51,6 +53,10 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
       sb.from("inv_dispositivos").select("*").eq("equipo_id", params.id).order("ultimo_reporte", { ascending: false }).limit(1),
     ]);
     setVivo(dv.data?.[0] ?? null);
+    if (dv.data?.[0]?.seguridad_actualizado) {
+      const { data: p } = await sb.rpc("inv_admins_permitidos");
+      setPermitidos((p as string[]) ?? []);
+    }
     setE(eq.data); setAsig(a.data ?? []); setMant(m.data ?? []); setLog(l.data ?? []);
     if (eq.data) setQr(await QRCode.toDataURL(`${window.location.origin}/inventario/equipos/${params.id}`, { margin: 0, width: 160 }));
   }, [params.id]);
@@ -241,6 +247,23 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
                 {vivo.antivirus_activo === false && <Dato t="Antivirus"><span className="text-red-600">Desactivado</span></Dato>}
               </dl>
               <div className="space-y-2">{(vivo.discos as Disco[]).map((d) => <BarraDisco key={d.unidad} d={d} />)}</div>
+              {vivo.seguridad_actualizado && (() => {
+                const ev = evaluar(vivo, permitidos);
+                return (
+                  <div className="mt-4 pt-3 border-t border-black/[0.06]">
+                    <div className="text-xs text-ink/50 mb-2">Seguridad</div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      {CONTROLES.map((c) => (
+                        <div key={c.k} className="flex items-center gap-1.5 text-sm">
+                          <span className={`h-2 w-2 rounded-full shrink-0 ${ESTILO[ev[c.k].nivel].punto}`} aria-hidden />
+                          <span className="text-ink/50">{c.titulo}:</span>
+                          <span className={ESTILO[ev[c.k].nivel].texto}>{ev[c.k].texto}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               {vivo.apps_cantidad != null && (
                 <Link href={`/inventario/aplicaciones?vista=equipo&equipo=${vivo.id}`} className="inline-block mt-3 text-sm text-brand-600 hover:underline">
                   Ver las {vivo.apps_cantidad} aplicaciones instaladas
