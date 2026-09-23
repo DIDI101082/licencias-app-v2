@@ -28,6 +28,7 @@ const modulos = [
       { href: "/inventario", label: "Panel" },
       { href: "/inventario/equipos", label: "Equipos" },
       { href: "/inventario/personas", label: "Por persona" },
+      { href: "/inventario/monitoreo", label: "Monitoreo" },
     ],
     admin: [{ href: "/inventario/catalogos", label: "Categorías y ubicaciones" }],
   },

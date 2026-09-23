@@ -7,6 +7,8 @@ import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/client";
 import { ESTADOS, CONDICIONES, dinero, fecha, diasHasta } from "@/lib/inventario";
 import { usePerfil } from "@/components/PerfilContext";
+import BarraDisco from "@/components/BarraDisco";
+import { conectado, hace, encendidoDesde, type Disco } from "@/lib/monitoreo";
 
 const CAMPOS_LOG: Record<string, string> = {
   estado: "Estado", condicion: "Condición", area: "Área", ubicacion_id: "Ubicación", empleado_id: "Asignado a",
@@ -33,6 +35,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
   const [log, setLog] = useState<any[]>([]);
   const [empleados, setEmpleados] = useState<any[]>([]);
   const [qr, setQr] = useState("");
+  const [vivo, setVivo] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [empSel, setEmpSel] = useState("");
   const [condDev, setCondDev] = useState("bueno");
@@ -40,12 +43,14 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
 
   const cargar = useCallback(async () => {
     const sb = createClient();
-    const [eq, a, m, l] = await Promise.all([
+    const [eq, a, m, l, dv] = await Promise.all([
       sb.from("inv_v_equipos").select("*").eq("id", params.id).single(),
       sb.from("inv_asignaciones").select("*, empleados(nombre, apellido)").eq("equipo_id", params.id).order("fecha_entrega", { ascending: false }),
       sb.from("inv_mantenimientos").select("*, inv_proveedores(nombre)").eq("equipo_id", params.id).order("fecha", { ascending: false }),
       sb.from("inv_equipos_log").select("*").eq("equipo_id", params.id).order("fecha", { ascending: false }).limit(50),
+      sb.from("inv_dispositivos").select("*").eq("equipo_id", params.id).order("ultimo_reporte", { ascending: false }).limit(1),
     ]);
+    setVivo(dv.data?.[0] ?? null);
     setE(eq.data); setAsig(a.data ?? []); setMant(m.data ?? []); setLog(l.data ?? []);
     if (eq.data) setQr(await QRCode.toDataURL(`${window.location.origin}/inventario/equipos/${params.id}`, { margin: 0, width: 160 }));
   }, [params.id]);
@@ -216,6 +221,28 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
             </div>
           </div>
 
+
+          {vivo && (
+            <div className="card p-5 print:hidden">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-medium text-ink flex items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-full ${conectado(vivo.ultimo_reporte) ? "bg-emerald-500" : "bg-black/20"}`} />
+                  {conectado(vivo.ultimo_reporte) ? "Conectado" : "Desconectado"}
+                </h2>
+                <span className="text-xs text-ink/50">Último reporte {hace(vivo.ultimo_reporte)}</span>
+              </div>
+              <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 text-sm mb-3">
+                <Dato t="Usuario">{vivo.usuario ?? "Sin sesión iniciada"}</Dato>
+                <Dato t="IP">{vivo.ip ?? "—"}</Dato>
+                <Dato t="Sistema">{vivo.so_nombre} {vivo.so_version}</Dato>
+                <Dato t="RAM">{vivo.ram_total_gb} GB · {vivo.ram_libre_gb} GB libres</Dato>
+                <Dato t="Encendido hace">{encendidoDesde(vivo.arranque)}</Dato>
+                {vivo.bateria_pct != null && <Dato t="Batería">{vivo.bateria_pct}%</Dato>}
+                {vivo.antivirus_activo === false && <Dato t="Antivirus"><span className="text-red-600">Desactivado</span></Dato>}
+              </dl>
+              <div className="space-y-2">{(vivo.discos as Disco[]).map((d) => <BarraDisco key={d.unidad} d={d} />)}</div>
+            </div>
+          )}
           <div className="card p-5">
             <h2 className="font-medium text-ink mb-3">Datos</h2>
             <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 text-sm">
