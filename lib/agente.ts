@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.2";
+export const AGENTE_VERSION = "1.3";
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -230,6 +230,38 @@ function Obtener-Antivirus {
   return @{ productos = $productos; firmas = $firmas }
 }
 
+function Obtener-Amenazas {
+  $desde = (Get-Date).AddDays(-90)
+  $catalogo = @{}
+  Get-MpThreat -ErrorAction SilentlyContinue | ForEach-Object { $catalogo[[string]$_.ThreatID] = $_ }
+  @(Get-MpThreatDetection -ErrorAction Stop |
+    Where-Object { $_.InitialDetectionTime -and $_.InitialDetectionTime -gt $desde } |
+    Sort-Object InitialDetectionTime -Descending | Select-Object -First 100 |
+    ForEach-Object {
+      $t = $catalogo[[string]$_.ThreatID]
+      $cambio = $null
+      if ($_.LastThreatStatusChangeTime) { $cambio = $_.LastThreatStatusChangeTime.ToUniversalTime().ToString('o') }
+      [ordered]@{
+        deteccion_id  = [string]$_.DetectionID
+        nombre        = $(if ($t) { [string]$t.ThreatName } else { $null })
+        severidad     = $(if ($t) { [int]$t.SeverityID } else { $null })
+        categoria     = $(if ($t) { [int]$t.CategoryID } else { $null })
+        ejecutada     = $(if ($t) { [bool]$t.DidThreatExecute } else { $null })
+        estado_id     = [int]$_.ThreatStatusID
+        recursos      = @($_.Resources | Select-Object -First 5 | ForEach-Object { [string]$_ })
+        usuario       = [string]$_.DomainUser
+        proceso       = [string]$_.ProcessName
+        detectada     = $_.InitialDetectionTime.ToUniversalTime().ToString('o')
+        cambio_estado = $cambio
+      }
+    })
+}
+
+function Fecha-Iso($f) {
+  if ($f -and $f -is [datetime] -and $f.Year -gt 2000) { return $f.ToUniversalTime().ToString('o') }
+  return $null
+}
+
 try {
   $bl = Obtener { Obtener-BitLocker }
   if (-not $bl) { $bl = @{ estado = 'no_disponible'; detalle = @() } }
@@ -240,6 +272,8 @@ try {
   $fw = [ordered]@{}
   Obtener { Get-NetFirewallProfile | ForEach-Object { $fw[[string]$_.Name] = ([string]$_.Enabled -eq 'True') } } | Out-Null
   $av = Obtener-Antivirus
+  $mpEstado = Obtener { Get-MpComputerStatus }
+  $amenazas = Obtener { Obtener-Amenazas }
   $tpm = Obtener { Get-CimInstance -Namespace 'root\cimv2\Security\MicrosoftTpm' -ClassName Win32_Tpm }
   $secureBoot = Obtener { Confirm-SecureBootUEFI }
   if ($null -eq $secureBoot) { $secureBoot = $false }
@@ -255,6 +289,10 @@ try {
     firewall_activo      = ($fw.Count -gt 0 -and -not ($fw.Values -contains $false))
     av_productos         = @($av.productos)
     av_firmas_fecha      = $av.firmas
+    av_escaneo_rapido    = $(if ($mpEstado) { Fecha-Iso $mpEstado.QuickScanEndTime } else { $null })
+    av_escaneo_completo  = $(if ($mpEstado) { Fecha-Iso $mpEstado.FullScanEndTime } else { $null })
+    av_proteccion_alteraciones = $(if ($mpEstado -and $null -ne $mpEstado.IsTamperProtected) { [bool]$mpEstado.IsTamperProtected } else { $null })
+    amenazas             = @($amenazas | Where-Object { $_ })
     tpm_presente         = [bool]$tpm
     tpm_version          = $(if ($tpm) { ([string]$tpm.SpecVersion).Split(',')[0].Trim() } else { $null })
     secure_boot          = [bool]$secureBoot
