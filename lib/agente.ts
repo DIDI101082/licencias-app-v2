@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.0";
+export const AGENTE_VERSION = "1.1";
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -80,6 +80,64 @@ try {
 }
 catch {
   Set-Content -Path (Join-Path $Carpeta 'ultimo-reporte.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+  exit 1
+}
+
+# ---- Aplicaciones instaladas: se envian solo si cambiaron o una vez por dia ----
+function Obtener-Aplicaciones {
+  $rutas = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+  )
+  # Apps instaladas solo para el usuario (Teams, Zoom, etc.) de las sesiones abiertas
+  $rutasUsuarios = @(Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue |
+    Where-Object { $_.PSChildName -match '^S-1-5-21-[\d-]+$' } |
+    ForEach-Object { 'Registry::HKEY_USERS\' + $_.PSChildName + '\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' })
+  $rutas = $rutas + $rutasUsuarios
+
+  $vistos = @{}
+  foreach ($ruta in $rutas) {
+    Get-ItemProperty -Path $ruta -ErrorAction SilentlyContinue | Where-Object {
+      $_.DisplayName -and ($_.SystemComponent -ne 1) -and (-not $_.ParentKeyName) -and
+      ($_.DisplayName -notmatch '^(Update for|Security Update|Hotfix)|\(KB\d+\)')
+    } | ForEach-Object {
+      $nombre = ($_.DisplayName -replace '\s+', ' ').Trim()
+      $version = [string]$_.DisplayVersion
+      $clave = $nombre + '|' + $version
+      if (-not $vistos.ContainsKey($clave)) {
+        $vistos[$clave] = $true
+        [ordered]@{
+          nombre            = $nombre
+          version           = $version
+          editor            = [string]$_.Publisher
+          fecha_instalacion = [string]$_.InstallDate
+        }
+      }
+    }
+  }
+}
+
+try {
+  $apps = @(Obtener-Aplicaciones | Sort-Object { $_.nombre })
+  $jsonApps = ConvertTo-Json -InputObject $apps -Depth 3 -Compress
+  if ($apps.Count -eq 0) { $jsonApps = '[]' }
+
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $hash = [BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($jsonApps))) -replace '-', ''
+  $archivoHash = Join-Path $Carpeta 'apps.hash'
+  $anterior = Get-Content $archivoHash -ErrorAction SilentlyContinue
+  $vencido = (-not (Test-Path $archivoHash)) -or ((Get-Item $archivoHash).LastWriteTime -lt (Get-Date).AddHours(-24))
+
+  if (($hash -ne $anterior) -or $vencido) {
+    $cuerpo = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
+              ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_apps":' + $jsonApps + '}'
+    Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_reportar_aplicaciones') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpo)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 60 | Out-Null
+    Set-Content -Path $archivoHash -Value $hash
+    Set-Content -Path (Join-Path $Carpeta 'ultimas-apps.txt') -Value ('OK ' + (Get-Date).ToString('s') + ' ' + $apps.Count + ' aplicaciones')
+  }
+}
+catch {
+  Set-Content -Path (Join-Path $Carpeta 'ultimas-apps.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
 }
 `;
 
