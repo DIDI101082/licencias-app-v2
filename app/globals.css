@@ -41,3 +41,26 @@ table.data th {
 table.data td {
   @apply px-4 py-3 text-sm border-b border-black/[0.04];
 }
+
+/* ---------- Inventario IT ---------- */
+.tag-inv {
+  @apply inline-flex items-center whitespace-nowrap rounded font-display font-bold text-xs tracking-wide
+    bg-[#F2C230] text-[#2a2200] pl-2 pr-2 py-0.5 border-l-4 border-double border-[#2a2200];
+}
+.tag-inv-grande {
+  @apply tag-inv text-2xl px-4 py-1 border-l-8;
+}
+.pill {
+  @apply inline-block text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap;
+}
+.est-en_stock { @apply pill bg-emerald-50 text-emerald-700; }
+.est-asignado { @apply pill bg-brand-50 text-brand-700; }
+.est-prestado { @apply pill bg-violet-50 text-violet-700; }
+.est-en_reparacion { @apply pill bg-amber-500/10 text-amber-700; }
+.est-dado_de_baja, .est-perdido { @apply pill bg-black/[0.05] text-ink/50; }
+
+@media print {
+  body.solo-etiqueta main * { visibility: hidden; }
+  body.solo-etiqueta .etiqueta-print, body.solo-etiqueta .etiqueta-print * { visibility: visible; }
+  body.solo-etiqueta .etiqueta-print { position: fixed; top: 0; left: 0; border: 1px solid #000; box-shadow: none; }
+}

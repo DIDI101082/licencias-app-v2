@@ -103,3 +103,18 @@ Environment Variables.
 - Si asignás una licencia sin seats libres, el sistema te avisa pero te deja
   igual continuar (por si compraste seats extra sin actualizar el registro
   todavía).
+
+---
+
+## Módulo Inventario IT
+
+La app tiene dos solapas: **Licencias** e **Inventario IT**. Comparten login (Microsoft Entra ID),
+usuarios, roles y empleados.
+
+Para activarlo en un proyecto existente: abrí el SQL Editor de Supabase y ejecutá una vez
+`supabase/inventario.sql`. No toca ninguna tabla de licencias; todas las tablas nuevas empiezan con `inv_`.
+
+Permisos en el inventario:
+- **Administrador**: todo, incluidas categorías, ubicaciones, proveedores e importación desde Excel.
+- **Lectura y escritura**: ve todo el inventario; carga y edita equipos de su área (o sin área) y los asigna a empleados de su área.
+- **Solo lectura**: ve todo, no edita.

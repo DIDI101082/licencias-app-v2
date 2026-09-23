@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans, Inter } from "next/font/google";
 import "./globals.css";
 import { getPerfil } from "@/lib/supabase/server";
 import Nav from "@/components/Nav";
+import { PerfilProvider } from "@/components/PerfilContext";
 
 const display = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -12,8 +13,8 @@ const display = Plus_Jakarta_Sans({
 const body = Inter({ subsets: ["latin"], variable: "--font-body" });
 
 export const metadata: Metadata = {
-  title: "Licencias | Accusys",
-  description: "Control de licencias de software de la empresa",
+  title: "Gestión IT | Accusys",
+  description: "Licencias de software e inventario de equipos IT",
 };
 
 export default async function RootLayout({
@@ -26,8 +27,10 @@ export default async function RootLayout({
   return (
     <html lang="es">
       <body className={`${display.variable} ${body.variable} font-sans`}>
-        {perfil && <Nav nombre={perfil.nombre} rol={perfil.rol} />}
-        <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+        <PerfilProvider perfil={perfil}>
+          {perfil && <Nav nombre={perfil.nombre} rol={perfil.rol} />}
+          <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+        </PerfilProvider>
       </body>
     </html>
   );

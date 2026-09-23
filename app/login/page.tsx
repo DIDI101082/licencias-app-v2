@@ -64,7 +64,7 @@ export default function LoginPage() {
         <div className="mb-8">
           <Mark className="h-10" />
           <p className="text-ink/60 text-sm mt-3">
-            Control de licencias de software
+            Licencias de software e inventario IT
           </p>
         </div>
 
