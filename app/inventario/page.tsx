@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ESTADOS, dinero, fecha, diasHasta } from "@/lib/inventario";
@@ -19,10 +20,28 @@ export default async function InventarioPanel() {
   const activos = equipos.filter((e) => !["dado_de_baja", "perdido"].includes(e.estado));
 
   const porEstado = Object.keys(ESTADOS).map((k) => ({ k, n: equipos.filter((e) => e.estado === k).length }));
-  const porGrupo = Object.entries(
-    activos.reduce<Record<string, number>>((acc, e) => ((acc[e.grupo] = (acc[e.grupo] ?? 0) + e.cantidad), acc), {})
-  ).sort((a, b) => b[1] - a[1]);
-  const maxGrupo = Math.max(1, ...porGrupo.map(([, n]) => n));
+  // Detalle por tipo de equipo (categoría), agrupado por familia
+  type Conteo = { categoria: string; grupo: string; total: number; stock: number; asignados: number; reparacion: number; otros: number };
+  const porCategoria = Object.values(
+    activos.reduce<Record<string, Conteo>>((acc, e) => {
+      const c = (acc[e.categoria] ??= { categoria: e.categoria, grupo: e.grupo, total: 0, stock: 0, asignados: 0, reparacion: 0, otros: 0 });
+      c.total += e.cantidad;
+      if (e.estado === "en_stock") c.stock += e.cantidad;
+      else if (e.estado === "asignado") c.asignados += e.cantidad;
+      else if (e.estado === "en_reparacion") c.reparacion += e.cantidad;
+      else c.otros += e.cantidad;
+      return acc;
+    }, {})
+  );
+  const grupos = Array.from(new Set(porCategoria.map((c) => c.grupo)))
+    .map((g) => ({
+      grupo: g,
+      filas: porCategoria.filter((c) => c.grupo === g).sort((a, b) => b.total - a.total),
+      total: porCategoria.filter((c) => c.grupo === g).reduce((s, c) => s + c.total, 0),
+    }))
+    .sort((a, b) => b.total - a.total);
+  const totalActivos = porCategoria.reduce((s, c) => s + c.total, 0);
+  const hayOtros = porCategoria.some((c) => c.otros > 0);
 
   const valorARS = activos.filter((e) => e.moneda === "ARS").reduce((s, e) => s + (e.costo ?? 0) * e.cantidad, 0);
   const valorUSD = activos.filter((e) => e.moneda === "USD").reduce((s, e) => s + (e.costo ?? 0) * e.cantidad, 0);
@@ -69,23 +88,76 @@ export default async function InventarioPanel() {
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className="card p-5">
-          <h2 className="font-medium text-ink mb-3">Por tipo de equipo</h2>
-          {porGrupo.length === 0 && <p className="text-sm text-ink/50">Todavía no hay equipos cargados.</p>}
-          <ul className="space-y-3">
-            {porGrupo.map(([g, n]) => (
-              <li key={g} className="text-sm">
-                <div className="flex justify-between"><span>{g}</span><span className="font-medium">{n}</span></div>
-                <div className="h-1.5 bg-black/[0.05] rounded-full mt-1 overflow-hidden">
-                  <div className="h-full bg-brand-500 rounded-full" style={{ width: `${(n / maxGrupo) * 100}%` }} />
-                </div>
-              </li>
-            ))}
-          </ul>
+      <div className="card overflow-x-auto">
+        <div className="px-5 pt-5 pb-3 flex items-baseline justify-between gap-3">
+          <h2 className="font-medium text-ink">Detalle por tipo de equipo</h2>
+          <span className="text-xs text-ink/50">Tocá un tipo para ver la lista</span>
         </div>
+        {grupos.length === 0 ? (
+          <p className="px-5 pb-5 text-sm text-ink/50">Todavía no hay equipos cargados.</p>
+        ) : (
+          <table className="data w-full">
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th className="text-right">Total</th>
+                <th className="text-right">En stock</th>
+                <th className="text-right">Asignados</th>
+                <th className="text-right">En reparación</th>
+                {hayOtros && <th className="text-right">Prestados</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {grupos.map((g) => (
+                <Fragment key={g.grupo}>
+                  <tr className="bg-[#F5F7FB]">
+                    <td className="text-xs font-semibold uppercase tracking-wide text-ink/50">{g.grupo}</td>
+                    <td className="text-right text-xs font-semibold text-ink/50">{g.total}</td>
+                    <td colSpan={hayOtros ? 4 : 3}></td>
+                  </tr>
+                  {g.filas.map((c) => (
+                    <tr key={c.categoria} className="hover:bg-black/[0.015]">
+                      <td>
+                        <Link href={`/inventario/equipos?categoria=${encodeURIComponent(c.categoria)}`} className="text-ink hover:text-brand-700 hover:underline">
+                          {c.categoria}
+                        </Link>
+                      </td>
+                      <td className="text-right font-display text-lg text-ink">{c.total}</td>
+                      <td className="text-right">
+                        {c.stock ? (
+                          <Link href={`/inventario/equipos?categoria=${encodeURIComponent(c.categoria)}&estado=en_stock`} className="text-emerald-700 hover:underline">{c.stock}</Link>
+                        ) : <span className="text-ink/30">0</span>}
+                      </td>
+                      <td className="text-right">
+                        {c.asignados ? (
+                          <Link href={`/inventario/equipos?categoria=${encodeURIComponent(c.categoria)}&estado=asignado`} className="text-brand-700 hover:underline">{c.asignados}</Link>
+                        ) : <span className="text-ink/30">0</span>}
+                      </td>
+                      <td className="text-right">
+                        {c.reparacion ? (
+                          <Link href={`/inventario/equipos?categoria=${encodeURIComponent(c.categoria)}&estado=en_reparacion`} className="text-amber-700 hover:underline">{c.reparacion}</Link>
+                        ) : <span className="text-ink/30">0</span>}
+                      </td>
+                      {hayOtros && <td className="text-right text-ink/60">{c.otros || <span className="text-ink/30">0</span>}</td>}
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
+              <tr className="border-t-2 border-black/[0.08]">
+                <td className="font-medium text-ink">Total</td>
+                <td className="text-right font-display text-lg text-ink">{totalActivos}</td>
+                <td className="text-right text-ink/70">{porCategoria.reduce((s, c) => s + c.stock, 0)}</td>
+                <td className="text-right text-ink/70">{porCategoria.reduce((s, c) => s + c.asignados, 0)}</td>
+                <td className="text-right text-ink/70">{porCategoria.reduce((s, c) => s + c.reparacion, 0)}</td>
+                {hayOtros && <td className="text-right text-ink/70">{porCategoria.reduce((s, c) => s + c.otros, 0)}</td>}
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </div>
 
-        <div className="space-y-6">
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="contents">
           <div className="card p-5">
             <h2 className="font-medium text-ink mb-3">Garantías que vencen en 60 días</h2>
             {garantias.length === 0 ? (

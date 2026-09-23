@@ -44,7 +44,7 @@ function Listado() {
   const [texto, setTexto] = useState("");
   const [estado, setEstado] = useState(params.get("estado") ?? "");
   const [grupo, setGrupo] = useState("");
-  const [categoria, setCategoria] = useState("");
+  const [categoria, setCategoria] = useState(params.get("categoria") ?? "");
   const [ubicacion, setUbicacion] = useState("");
   const [area, setArea] = useState("");
 
