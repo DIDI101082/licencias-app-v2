@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -90,53 +91,35 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
 
   return (
     <header className="border-b border-black/[0.06] bg-white print:hidden">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 sm:gap-6 min-w-0">
-          <Link href="/" className="flex items-end gap-1.5" aria-label="Accusys Hub, inicio">
-            <Mark className="h-6" />
-            <span className="font-display font-extrabold text-lg text-brand-600 leading-none tracking-tight">Hub</span>
-          </Link>
-          {/* Solapas de módulos */}
-          <div role="tablist" aria-label="Módulos" className="flex gap-1 border-l border-black/10 pl-3 sm:pl-6">
-            {visibles.map((m) => {
-              const sel = m.id === activo.id;
-              return (
-                <Link
-                  key={m.id}
-                  href={m.inicio}
-                  role="tab"
-                  aria-selected={sel}
-                  className={`font-display font-bold tracking-tight px-3 sm:px-4 py-2 whitespace-nowrap text-sm sm:text-base rounded-t-lg border-x border-t -mb-px transition-colors ${
-                    sel
-                      ? "bg-[#F5F7FB] border-black/[0.06] text-ink"
-                      : "border-transparent text-ink/45 hover:text-ink"
-                  }`}
-                >
-                  {m.label}
-                </Link>
-              );
-            })}
-          </div>
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-4 flex items-center gap-3 sm:gap-5">
+        <Link href="/" className="flex items-end gap-1.5 shrink-0" aria-label="Accusys Hub, inicio">
+          <Mark className="h-6" />
+          <span className="font-display font-extrabold text-lg text-brand-600 leading-none tracking-tight">Hub</span>
+        </Link>
+        {/* Solapas de módulos: si no entran, se desplazan en lugar de encimarse */}
+        <div
+          role="tablist"
+          aria-label="Módulos"
+          className="flex gap-1 border-l border-black/10 pl-3 sm:pl-5 min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {visibles.map((m) => {
+            const sel = m.id === activo.id;
+            return (
+              <Link
+                key={m.id}
+                href={m.inicio}
+                role="tab"
+                aria-selected={sel}
+                className={`font-display font-bold tracking-tight px-3 lg:px-4 py-2 whitespace-nowrap text-sm lg:text-base rounded-t-lg border-x border-t -mb-px transition-colors shrink-0 ${
+                  sel ? "bg-[#F5F7FB] border-black/[0.06] text-ink" : "border-transparent text-ink/45 hover:text-ink"
+                }`}
+              >
+                {m.label}
+              </Link>
+            );
+          })}
         </div>
-        <div className="flex items-center gap-3 pb-2">
-          {esAdmin && (
-            <Link
-              href="/usuarios"
-              className={`text-sm font-medium px-3 py-1.5 rounded-md ${
-                pathname.startsWith("/usuarios") ? "bg-brand-50 text-brand-700" : "text-ink/60 hover:text-ink"
-              }`}
-            >
-              Usuarios
-            </Link>
-          )}
-          <div className="text-right leading-tight hidden sm:block">
-            <div className="text-sm font-medium text-ink">{nombre}</div>
-            <div className="text-xs text-ink/50">{rolLabel[rol] ?? rol}</div>
-          </div>
-          <button onClick={salir} className="btn-secondary">
-            Salir
-          </button>
-        </div>
+        <MenuUsuario nombre={nombre} rol={rol} esAdmin={esAdmin} enUsuarios={pathname.startsWith("/usuarios")} onSalir={salir} />
       </div>
       {/* Secciones de la solapa activa */}
       <nav className="bg-[#F5F7FB] border-t border-black/[0.06]">
@@ -158,5 +141,61 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
         </div>
       </nav>
     </header>
+  );
+}
+
+// Iniciales para el botón del usuario (sirve con nombre o con email)
+function iniciales(nombre: string) {
+  const base = nombre.includes("@") ? nombre.split("@")[0].replace(/[._-]+/g, " ") : nombre;
+  const partes = base.trim().split(/\s+/).filter(Boolean);
+  return ((partes[0]?.[0] ?? "") + (partes.length > 1 ? partes[partes.length - 1][0] : partes[0]?.[1] ?? "")).toUpperCase() || "?";
+}
+
+function MenuUsuario({ nombre, rol, esAdmin, enUsuarios, onSalir }: {
+  nombre: string; rol: string; esAdmin: boolean; enUsuarios: boolean; onSalir: () => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!abierto) return;
+    const fuera = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setAbierto(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setAbierto(false); };
+    document.addEventListener("mousedown", fuera);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", fuera); document.removeEventListener("keydown", esc); };
+  }, [abierto]);
+
+  return (
+    <div ref={ref} className="relative shrink-0 pb-2">
+      <button
+        onClick={() => setAbierto(!abierto)}
+        aria-haspopup="menu"
+        aria-expanded={abierto}
+        aria-label={`Menú de ${nombre}`}
+        className={`h-9 w-9 rounded-full font-display font-bold text-sm flex items-center justify-center transition-colors ${
+          abierto || enUsuarios ? "bg-brand-600 text-white" : "bg-brand-50 text-brand-700 hover:bg-brand-100"
+        }`}
+      >
+        {iniciales(nombre)}
+      </button>
+      {abierto && (
+        <div role="menu" className="absolute right-0 top-11 z-50 w-64 card p-2 shadow-lg">
+          <div className="px-3 py-2 border-b border-black/[0.06] mb-1">
+            <div className="text-sm font-medium text-ink break-all">{nombre}</div>
+            <div className="text-xs text-ink/50">{rolLabel[rol] ?? rol}</div>
+          </div>
+          {esAdmin && (
+            <Link href="/usuarios" role="menuitem" onClick={() => setAbierto(false)}
+              className="block px-3 py-2 rounded-md text-sm text-ink hover:bg-black/[0.04]">
+              Usuarios y accesos
+            </Link>
+          )}
+          <button role="menuitem" onClick={onSalir} className="w-full text-left px-3 py-2 rounded-md text-sm text-red-600 hover:bg-red-50">
+            Cerrar sesión
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
