@@ -531,13 +531,45 @@ export function generarInstalador(url: string, anon: string, token: string, inte
   return INSTALADOR.replace("__AGENTE__", () => agente).replace("__INTERVALO__", () => String(intervalo));
 }
 
+// Lanzador .cmd: un solo archivo que se abre con doble clic. Pide permisos de administrador
+// y ejecuta EN MEMORIA el script de PowerShell que lleva adentro (despues de la marca):
+// no se escribe ningun archivo temporal que otro programa pueda reemplazar antes de ejecutarse.
+// No depende de la politica de ejecucion de PowerShell ni de la carpeta donde se guarde.
+const LANZADOR = String.raw`@echo off
+rem __TITULO__ - hacer doble clic para ejecutar.
+title __TITULO__
+net session >nul 2>&1
+if errorlevel 1 (
+  echo Pidiendo permisos de administrador...
+  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+  exit /b
+)
+echo __TITULO__
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText('%~f0'); $i=$t.IndexOf('#==INICIO'+'_SCRIPT==#'); & ([ScriptBlock]::Create($t.Substring($i)))"
+echo.
+pause
+exit /b
+#==INICIO_SCRIPT==#
+`;
+
+export function generarInstaladorCmd(url: string, anon: string, token: string, intervalo: number) {
+  return LANZADOR.replace(/__TITULO__/g, () => "Instalador del agente de Accusys Cyber") + generarInstalador(url, anon, token, intervalo);
+}
+
+export function generarDesinstaladorCmd() {
+  return LANZADOR.replace(/__TITULO__/g, () => "Desinstalador del agente de Accusys Cyber") + generarDesinstalador();
+}
+
 export function generarDesinstalador() {
   return DESINSTALADOR;
 }
 
 export function descargar(nombre: string, contenido: string) {
-  // BOM + CRLF: formato que Windows PowerShell 5.1 lee sin problemas
-  const blob = new Blob(["\uFEFF" + contenido.replace(/\r?\n/g, "\r\n")], { type: "text/plain;charset=utf-8" });
+  // CRLF para Windows. Los .ps1 llevan BOM (Windows PowerShell 5.1 los lee mejor); los .cmd NO,
+  // porque la consola interpretaria el BOM como parte del primer comando.
+  const bom = nombre.toLowerCase().endsWith(".cmd") ? "" : "\uFEFF";
+  const blob = new Blob([bom + contenido.replace(/\r?\n/g, "\r\n")], { type: "text/plain;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = nombre;

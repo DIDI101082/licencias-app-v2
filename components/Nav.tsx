@@ -92,9 +92,9 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
   return (
     <header className="border-b border-black/[0.06] bg-white print:hidden">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-4 flex items-center gap-3 sm:gap-5">
-        <Link href="/" className="flex items-end gap-1.5 shrink-0" aria-label="Accusys Hub, inicio">
+        <Link href="/" className="flex items-end gap-1.5 shrink-0" aria-label="Accusys Cyber, inicio">
           <Mark className="h-6" />
-          <span className="font-display font-extrabold text-lg text-brand-600 leading-none tracking-tight">Hub</span>
+          <span className="font-display font-extrabold text-lg text-brand-600 leading-none tracking-tight">Cyber</span>
         </Link>
         {/* Solapas de módulos: si no entran, se desplazan en lugar de encimarse */}
         <div

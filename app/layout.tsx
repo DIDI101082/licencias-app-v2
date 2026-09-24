@@ -14,7 +14,7 @@ const display = Plus_Jakarta_Sans({
 const body = Inter({ subsets: ["latin"], variable: "--font-body" });
 
 export const metadata: Metadata = {
-  title: "Accusys Hub",
+  title: "Accusys Cyber",
   description: "Empleados, licencias, inventario IT y seguridad en un solo lugar",
 };
 

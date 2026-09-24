@@ -64,7 +64,7 @@ export default function LoginPage() {
         <div className="mb-8">
           <div className="flex items-end gap-2">
             <Mark className="h-10" />
-            <span className="font-display font-extrabold text-3xl text-brand-600 leading-none tracking-tight">Hub</span>
+            <span className="font-display font-extrabold text-3xl text-brand-600 leading-none tracking-tight">Cyber</span>
           </div>
           <p className="text-ink/60 text-sm mt-3">
             Empleados, licencias, inventario IT y seguridad en un solo lugar
