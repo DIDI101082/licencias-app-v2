@@ -119,6 +119,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
             );
           })}
         </div>
+        <Reloj />
         <MenuUsuario nombre={nombre} rol={rol} esAdmin={esAdmin} enUsuarios={pathname.startsWith("/usuarios")} onSalir={salir} />
       </div>
       {/* Secciones de la solapa activa */}
@@ -197,5 +198,38 @@ function MenuUsuario({ nombre, rol, esAdmin, enUsuarios, onSalir }: {
         </div>
       )}
     </div>
+  );
+}
+
+// Fecha y hora actuales (hora de Argentina), junto al botón del usuario
+function Reloj() {
+  const [ahora, setAhora] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setAhora(new Date());
+    // se actualiza al cambiar cada minuto
+    let intervalo: ReturnType<typeof setInterval> | undefined;
+    const alinear = setTimeout(() => {
+      setAhora(new Date());
+      intervalo = setInterval(() => setAhora(new Date()), 60000);
+    }, 60000 - (Date.now() % 60000));
+    return () => { clearTimeout(alinear); if (intervalo) clearInterval(intervalo); };
+  }, []);
+
+  if (!ahora) return <div className="hidden md:block w-40 shrink-0" aria-hidden />;
+  const zona = "America/Argentina/Buenos_Aires";
+  const dia = ahora.toLocaleDateString("es-AR", { weekday: "short", timeZone: zona }).replace(".", "");
+  const fecha = ahora.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: zona });
+  const hora = ahora.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: zona });
+
+  return (
+    <time
+      dateTime={ahora.toISOString()}
+      className="hidden md:flex flex-col items-end leading-tight shrink-0 pb-2 text-right"
+      title={ahora.toLocaleString("es-AR", { dateStyle: "full", timeStyle: "short", timeZone: zona })}
+    >
+      <span className="font-display font-bold text-ink text-base tabular-nums">{hora}</span>
+      <span className="text-xs text-ink/50 capitalize">{dia} {fecha}</span>
+    </time>
   );
 }
