@@ -70,7 +70,7 @@ export default function EntraSync({ ultima }: { ultima: string | null }) {
         <div className="text-sm rounded-md bg-amber-500/10 text-amber-800 px-4 py-3 space-y-2">
           <b>Falta conectar la app con Entra ID.</b>
           <ol className="list-decimal pl-5 space-y-1">
-            <li>En el portal de Entra: <b>Registros de aplicaciones → Nuevo registro</b>, por ejemplo “Gestión IT – Sincronización”.</li>
+            <li>En el portal de Entra: <b>Registros de aplicaciones → Nuevo registro</b>, por ejemplo “Accusys Hub – Sincronización”.</li>
             <li>En <b>Permisos de API → Agregar → Microsoft Graph → Permisos de aplicación</b>, agregá <code>User.Read.All</code> y tocá <b>Conceder consentimiento de administrador</b>.</li>
             <li>En <b>Certificados y secretos</b> creá un secreto de cliente y copiá su <b>Valor</b>.</li>
             <li>En Vercel → Settings → Environment Variables, cargá <code>AZURE_TENANT_ID</code>, <code>AZURE_CLIENT_ID</code> y <code>AZURE_CLIENT_SECRET</code>, y hacé Redeploy.</li>

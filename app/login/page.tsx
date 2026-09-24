@@ -62,9 +62,12 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-[#F5F7FB] px-6">
       <div className="w-full max-w-sm">
         <div className="mb-8">
-          <Mark className="h-10" />
+          <div className="flex items-end gap-2">
+            <Mark className="h-10" />
+            <span className="font-display font-extrabold text-3xl text-brand-600 leading-none tracking-tight">Hub</span>
+          </div>
           <p className="text-ink/60 text-sm mt-3">
-            Licencias de software e inventario IT
+            Empleados, licencias, inventario IT y seguridad en un solo lugar
           </p>
         </div>
 
