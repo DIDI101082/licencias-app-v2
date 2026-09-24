@@ -40,6 +40,8 @@ function Redes() {
         <h2 className="font-medium text-ink">Redes de la empresa</h2>
         <p className="text-sm text-ink/60 mt-1">
           Con estas redes se decide dónde está cada equipo. Los cambios se aplican en el siguiente reporte de cada agente (unos minutos).
+          En el nombre del WiFi, <code className="text-xs">%</code> es un comodín: <code className="text-xs">Accusys%P5</code> acepta
+          “Accusys_P5” y “Accusys_Wifi_P5”, sin importar mayúsculas.
         </p>
       </div>
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
@@ -70,7 +72,7 @@ function Redes() {
             <option value="corporativa">Oficina</option><option value="invitados">Invitados</option><option value="vpn">VPN</option>
           </select>
         </div>
-        <div><label className="label">WiFi (opcional)</label><input className="input" value={nueva.ssid} onChange={(e) => setNueva({ ...nueva, ssid: e.target.value })} /></div>
+        <div><label className="label">WiFi (opcional)</label><input className="input" value={nueva.ssid} onChange={(e) => setNueva({ ...nueva, ssid: e.target.value })} placeholder="Accusys%P6" /></div>
         <div className="col-span-2 md:col-span-6"><button className="btn-secondary">Agregar red</button></div>
       </form>
     </div>

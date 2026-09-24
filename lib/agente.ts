@@ -488,8 +488,10 @@ New-Item -ItemType Directory -Force -Path $Carpeta | Out-Null
 # Se protege la carpeta y los archivos que ya existan pasan a heredar esos permisos (tambien repara
 # instalaciones anteriores que dejaban archivos sin permisos y daban "Acceso denegado" al reinstalar).
 & icacls.exe $Carpeta /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /Q | Out-Null
-if (Get-ChildItem -Path $Carpeta -Force -ErrorAction SilentlyContinue) {
-  & icacls.exe (Join-Path $Carpeta '*') /reset /T /C /Q | Out-Null
+# Archivos que dejo una version anterior: se toma posesion (Administradores) y se les devuelven los permisos heredados
+Get-ChildItem -Path $Carpeta -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
+  & takeown.exe /F $_.FullName /A 2>&1 | Out-Null
+  & icacls.exe $_.FullName /reset /Q 2>&1 | Out-Null
 }
 
 $agente = @'
