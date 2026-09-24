@@ -56,7 +56,10 @@ const modulos = [
     id: "ubicacion",
     label: "Oficina / Home office",
     inicio: "/inventario/ubicacion",
-    links: [{ href: "/inventario/ubicacion", label: "Dónde están los equipos" }],
+    links: [
+      { href: "/inventario/ubicacion", label: "Dónde están los equipos" },
+      { href: "/inventario/ubicacion/asistencia", label: "Asistencia semanal" },
+    ],
     admin: [] as { href: string; label: string }[],
   },
 ];
@@ -79,7 +82,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
   const subLinks = [...activo.links, ...(esAdmin ? activo.admin : [])];
 
   function esActual(href: string) {
-    if (href === "/" || href === "/inventario") return pathname === href;
+    if (href === "/" || href === "/inventario" || href === "/inventario/ubicacion") return pathname === href;
     return pathname.startsWith(href);
   }
 
