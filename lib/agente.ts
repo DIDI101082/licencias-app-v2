@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.6";
+export const AGENTE_VERSION = "1.7";
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -94,6 +94,42 @@ try {
 catch {
   Set-Content -Path (Join-Path $Carpeta 'ultimo-reporte.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
   exit 1
+}
+
+# ---- Ubicacion: todas las IP del equipo (incluida la de la VPN) y el WiFi conectado ----
+function Obtener-Redes {
+  @(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' | ForEach-Object {
+    $adaptador = [string]$_.Description
+    $gw = [bool]$_.DefaultIPGateway
+    foreach ($dir in @($_.IPAddress)) {
+      if ($dir -match '^\d+\.\d+\.\d+\.\d+$' -and $dir -notmatch '^(127\.|169\.254\.)') {
+        [ordered]@{ ip = $dir; adaptador = $adaptador; gateway = $gw }
+      }
+    }
+  })
+}
+
+function Obtener-Ssid {
+  $salida = & netsh.exe wlan show interfaces 2>$null
+  foreach ($linea in @($salida)) {
+    if ($linea -match '^\s*SSID\s*:\s*(.+?)\s*$') { return $Matches[1] }
+  }
+  return $null
+}
+
+try {
+  if ($Estado -eq 'aprobado') {
+    $redesEquipo = @(Obtener-Redes)
+    $ssid = Obtener { Obtener-Ssid }
+    $cuerpoUb = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
+                ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_secreto":' + (ConvertTo-Json ([string]$Secreto)) +
+                ',"p_redes":' + (ConvertTo-Json -InputObject $redesEquipo -Depth 3 -Compress) +
+                ',"p_ssid":' + (ConvertTo-Json ([string]$ssid)) + '}'
+    Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_reportar_ubicacion') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoUb)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 30 | Out-Null
+  }
+}
+catch {
+  Set-Content -Path (Join-Path $Carpeta 'ultima-ubicacion.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
 }
 
 # ---- Aplicaciones instaladas: se envian solo si cambiaron o una vez por dia ----
