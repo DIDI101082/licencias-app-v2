@@ -484,8 +484,13 @@ $Script  = Join-Path $Carpeta 'agente.ps1'
 $Tarea   = 'AccusysInventarioAgente'
 
 New-Item -ItemType Directory -Force -Path $Carpeta | Out-Null
-# Carpeta accesible solo para SYSTEM y Administradores: un usuario comun no puede leer el token ni la clave del equipo
-& icacls.exe $Carpeta /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /T /Q | Out-Null
+# Carpeta accesible solo para SYSTEM y Administradores: un usuario comun no puede leer el token ni la clave del equipo.
+# Se protege la carpeta y los archivos que ya existan pasan a heredar esos permisos (tambien repara
+# instalaciones anteriores que dejaban archivos sin permisos y daban "Acceso denegado" al reinstalar).
+& icacls.exe $Carpeta /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /Q | Out-Null
+if (Get-ChildItem -Path $Carpeta -Force -ErrorAction SilentlyContinue) {
+  & icacls.exe (Join-Path $Carpeta '*') /reset /T /C /Q | Out-Null
+}
 
 $agente = @'
 __AGENTE__
