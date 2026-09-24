@@ -4,16 +4,17 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
-import { generarInstalador, generarDesinstalador, generarInstaladorCmd, generarDesinstaladorCmd, descargar } from "@/lib/agente";
+import { generarDesinstalador, generarDesinstaladorCmd, descargar } from "@/lib/agente";
+import CodigosInstalacion from "@/components/CodigosInstalacion";
 
 export default function ConfigAgente() {
   const { esAdmin } = usePerfil();
-  const [config, setConfig] = useState<{ token: string; intervalo_min: number; dominios_autoaprobados: string[] } | null>(null);
+  const [config, setConfig] = useState<{ token: string; intervalo_min: number; dominios_autoaprobados: string[]; permitir_token_general?: boolean } | null>(null);
   const [nuevoDominio, setNuevoDominio] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const cargar = () =>
-    createClient().from("inv_agente_config").select("token, intervalo_min, dominios_autoaprobados").eq("id", 1).single()
+    createClient().from("inv_agente_config").select("*").eq("id", 1).single()
       .then(({ data, error }) => {
         if (error) setError("No se encontró la configuración del agente. ¿Ejecutaste monitoreo.sql en Supabase?");
         setConfig(data);
@@ -21,7 +22,7 @@ export default function ConfigAgente() {
   useEffect(() => { if (esAdmin) cargar(); }, [esAdmin]);
 
   async function regenerar() {
-    if (!confirm("Los agentes ya instalados van a dejar de reportar hasta que los reinstales con el instalador nuevo. ¿Generar un token nuevo?")) return;
+    if (!confirm("¿Generar un token general nuevo? Los equipos ya registrados no se ven afectados (usan su propia clave).")) return;
     const nuevo = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
     const { error } = await createClient().from("inv_agente_config").update({ token: nuevo }).eq("id", 1);
     if (error) return setError(error.message);
@@ -35,11 +36,11 @@ export default function ConfigAgente() {
     cargar();
   }
 
-  function bajarInstalador(formato: "cmd" | "ps1") {
-    if (!config) return;
-    const args = [process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, config.token, config.intervalo_min] as const;
-    if (formato === "cmd") descargar("Instalar Agente Accusys Cyber.cmd", generarInstaladorCmd(...args));
-    else descargar("instalar-agente-accusys.ps1", generarInstalador(...args));
+  async function permitirTokenGeneral(valor: boolean) {
+    if (valor && !confirm("El token general no vence ni tiene límite de equipos. ¿Habilitarlo para instaladores anteriores?")) return;
+    const { error } = await createClient().from("inv_agente_config").update({ permitir_token_general: valor }).eq("id", 1);
+    if (error) return setError(error.message);
+    cargar();
   }
 
   const [copiado, setCopiado] = useState(false);
@@ -71,30 +72,7 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
 
       {error && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
 
-      <div className="card p-5 space-y-3">
-        <h2 className="font-medium text-ink">1. Descargá el instalador</h2>
-        <p className="text-sm text-ink/60">
-          Es un solo archivo que se abre con <b>doble clic</b>: pide permisos de administrador, instala el agente y muestra el resultado.
-          Ya viene configurado con la dirección de esta app y el token de tu empresa. Sirve para instalar y para actualizar.
-        </p>
-        <div className="flex gap-2 flex-wrap">
-          <button className="btn-primary" onClick={() => bajarInstalador("cmd")} disabled={!config}>Descargar instalador (doble clic)</button>
-          <button className="btn-secondary" onClick={() => descargar("Desinstalar Agente Accusys Cyber.cmd", generarDesinstaladorCmd())}>
-            Descargar desinstalador
-          </button>
-        </div>
-        <details className="text-sm">
-          <summary className="text-brand-600 cursor-pointer">Versión PowerShell (.ps1) para Intune, GPO o ESET PROTECT</summary>
-          <div className="mt-2 space-y-2 text-ink/70">
-            <p>Para distribución masiva conviene el script sin el lanzador. Se ejecuta como SYSTEM o administrador:</p>
-            <pre className="bg-ink text-white text-xs rounded-lg p-3 overflow-x-auto">powershell -ExecutionPolicy Bypass -File instalar-agente-accusys.ps1</pre>
-            <div className="flex gap-2 flex-wrap">
-              <button className="btn-secondary" onClick={() => bajarInstalador("ps1")} disabled={!config}>Descargar .ps1</button>
-              <button className="btn-secondary" onClick={() => descargar("desinstalar-agente-accusys.ps1", generarDesinstalador())}>Desinstalador .ps1</button>
-            </div>
-          </div>
-        </details>
-      </div>
+      {config && <CodigosInstalacion intervalo={config.intervalo_min} />}
 
       <div className="card p-5 space-y-3">
         <h2 className="font-medium text-ink">2. Pasáselo a la persona</h2>
@@ -107,9 +85,18 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
           {copiado ? "¡Copiado!" : "Copiar mensaje"}
         </button>
         <p className="text-xs text-ink/50">
-          El archivo contiene el token de registro de la empresa: no lo publiques en lugares abiertos. Igual, un equipo que se registre
-          con él queda <b>pendiente</b> hasta que lo apruebes en Monitoreo.
+          Mandalo solo por canales internos (Teams o correo de la empresa) y avisale a la persona que se lo vas a mandar: así sabe que es
+          legítimo y desconfía de cualquier "instalador de IT" que le llegue por otro lado. Aunque se filtre, el código vence, tiene límite de
+          equipos, y todo equipo nuevo queda <b>pendiente</b> hasta que lo apruebes.
         </p>
+        <div className="flex gap-2 flex-wrap pt-1">
+          <button className="btn-secondary" onClick={() => descargar("Desinstalar Agente Accusys Cyber.cmd", generarDesinstaladorCmd())}>
+            Descargar desinstalador (doble clic)
+          </button>
+          <button className="btn-secondary" onClick={() => descargar("desinstalar-agente-accusys.ps1", generarDesinstalador())}>
+            Desinstalador .ps1
+          </button>
+        </div>
       </div>
 
       <div className="card p-5 space-y-3">
@@ -163,14 +150,20 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
         </form>
       </div>
 
-      <div className="card p-5 space-y-3">
-        <h2 className="font-medium text-ink">Token del agente</h2>
-        <p className="text-sm text-ink/60">
-          Es la clave que usan los agentes para reportar. Si se filtra, generá uno nuevo y volvé a distribuir el instalador.
-        </p>
-        <code className="block bg-black/[0.04] rounded-md px-3 py-2 text-xs break-all">{config?.token ?? "…"}</code>
-        <button className="btn-secondary" onClick={regenerar} disabled={!config}>Generar token nuevo</button>
-      </div>
+      <details className="card p-5">
+        <summary className="font-medium text-ink cursor-pointer">Token general (solo para instaladores anteriores)</summary>
+        <div className="space-y-3 mt-3">
+          <p className="text-sm text-ink/60">
+            Los instaladores descargados antes de los códigos traen un token general que no vence. Por seguridad, ya no permite registrar
+            equipos nuevos. Habilitalo solo si tenés que usar uno de esos instaladores viejos, y deshabilitalo después.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-ink/80">
+            <input type="checkbox" checked={!!config?.permitir_token_general} onChange={(e) => permitirTokenGeneral(e.target.checked)} disabled={!config} />
+            Permitir registrar equipos con el token general
+          </label>
+          <button className="btn-secondary" onClick={regenerar} disabled={!config}>Generar token general nuevo</button>
+        </div>
+      </details>
     </div>
   );
 }

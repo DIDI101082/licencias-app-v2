@@ -23,7 +23,7 @@ export default function Monitoreo() {
   useEffect(() => {
     const sb = createClient();
     const cargar = () =>
-      sb.from("inv_dispositivos").select("*, inv_equipos(id, codigo)").order("hostname")
+      sb.from("inv_dispositivos").select("*, inv_equipos(id, codigo), inv_codigos_instalacion(descripcion)").order("hostname")
         .then(({ data }) => { setTodos((data ?? []) as Dispositivo[]); setCargando(false); });
     cargar();
 
@@ -49,8 +49,8 @@ export default function Monitoreo() {
   }
 
   async function restablecerClave(d: Dispositivo) {
-    if (!confirm(`¿Restablecer la clave de ${d.hostname}? Usalo solo si reinstalaste el agente desde cero en ese equipo: el próximo reporte que llegue con este nombre recibe una clave nueva.`)) return;
-    const { error } = await createClient().from("inv_dispositivos").update({ secreto_hash: null, clave_confirmada: false }).eq("id", d.id);
+    if (!confirm(`¿Restablecer la clave de ${d.hostname}? Usalo solo si reinstalaste el agente desde cero en ese equipo: durante las próximas 24 horas, el primer reporte de este equipo recibe una clave nueva.`)) return;
+    const { error } = await createClient().from("inv_dispositivos").update({ secreto_hash: null, clave_confirmada: false, clave_restablecida_hasta: new Date(Date.now() + 86400000).toISOString() }).eq("id", d.id);
     if (error) setError(error.message);
   }
 
@@ -147,6 +147,7 @@ export default function Monitoreo() {
                   <div className="text-xs text-ink/50">
                     Se registró el {new Date(d.primer_reporte).toLocaleString("es-AR")} desde la IP pública {d.ip_registro ?? "desconocida"}
                     {d.ip ? ` (IP local ${d.ip})` : ""}
+                    {d.inv_codigos_instalacion ? ` · con el instalador "${d.inv_codigos_instalacion.descripcion}"` : ""}
                   </div>
                 </div>
                 <div className="flex gap-2">
