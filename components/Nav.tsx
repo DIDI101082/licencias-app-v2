@@ -30,7 +30,6 @@ const modulos = [
       { href: "/inventario/escanear", label: "Escanear" },
       { href: "/inventario/personas", label: "Por persona" },
       { href: "/inventario/monitoreo", label: "Monitoreo" },
-      { href: "/inventario/ubicacion", label: "Oficina / Home office" },
       { href: "/inventario/aplicaciones", label: "Aplicaciones" },
     ],
     admin: [{ href: "/inventario/catalogos", label: "Categorías y ubicaciones" }],
@@ -45,12 +44,20 @@ const modulos = [
     ],
     admin: [] as { href: string; label: string }[],
   },
+  {
+    id: "ubicacion",
+    label: "Oficina / Home office",
+    inicio: "/inventario/ubicacion",
+    links: [{ href: "/inventario/ubicacion", label: "Dónde están los equipos" }],
+    admin: [] as { href: string; label: string }[],
+  },
 ];
 
 // Las pantallas de seguridad viven bajo /inventario, pero se muestran en su propia solapa
 const RUTAS_SEGURIDAD = ["/inventario/seguridad", "/inventario/riesgos"];
 
 function moduloDe(pathname: string) {
+  if (pathname.startsWith("/inventario/ubicacion")) return modulos[3];
   if (RUTAS_SEGURIDAD.some((r) => pathname.startsWith(r))) return modulos[2];
   if (pathname.startsWith("/inventario")) return modulos[1];
   return modulos[0];
