@@ -33,7 +33,7 @@ export default function PorPersona() {
       <div>
         <h1 className="font-display text-2xl text-ink">Equipos por persona</h1>
         <p className="text-ink/60 text-sm mt-1">
-          Los empleados se cargan en la solapa Licencias → Empleados y se comparten entre los dos módulos.
+          Los empleados se cargan en la solapa Empleados y se comparten entre todos los módulos.
         </p>
       </div>
       <div className="flex gap-3 items-center flex-wrap">

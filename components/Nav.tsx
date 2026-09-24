@@ -8,13 +8,19 @@ import Mark from "./Mark";
 // Cada solapa es un módulo con sus propias secciones
 const modulos = [
   {
+    id: "empleados",
+    label: "Empleados",
+    inicio: "/empleados",
+    links: [{ href: "/empleados", label: "Empleados" }],
+    admin: [] as { href: string; label: string }[],
+  },
+  {
     id: "licencias",
     label: "Licencias",
     inicio: "/",
     links: [
       { href: "/", label: "Panel" },
       { href: "/licencias", label: "Licencias" },
-      { href: "/empleados", label: "Empleados" },
       { href: "/asignaciones", label: "Asignaciones" },
       { href: "/reportes", label: "Reportes" },
     ],
@@ -57,10 +63,12 @@ const modulos = [
 const RUTAS_SEGURIDAD = ["/inventario/seguridad", "/inventario/riesgos"];
 
 function moduloDe(pathname: string) {
-  if (pathname.startsWith("/inventario/ubicacion")) return modulos[3];
-  if (RUTAS_SEGURIDAD.some((r) => pathname.startsWith(r))) return modulos[2];
-  if (pathname.startsWith("/inventario")) return modulos[1];
-  return modulos[0];
+  const por = (id: string) => modulos.find((m) => m.id === id)!;
+  if (pathname.startsWith("/empleados")) return por("empleados");
+  if (pathname.startsWith("/inventario/ubicacion")) return por("ubicacion");
+  if (RUTAS_SEGURIDAD.some((r) => pathname.startsWith(r))) return por("seguridad");
+  if (pathname.startsWith("/inventario")) return por("inventario");
+  return por("licencias");
 }
 
 const rolLabel: Record<string, string> = {
