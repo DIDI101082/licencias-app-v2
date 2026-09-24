@@ -44,6 +44,9 @@ export function soporteWindows(nombre: string | null, version: string | null, bu
     if (!fin) return { nivel: "sin_datos", texto: `Versión ${v || "desconocida"}`, fin: null, accion: "" };
   } else {
     const regla = OTROS.find(([re]) => re.test(nombre));
+    if (!regla && /ubuntu|debian|red hat|rhel|rocky|alma|centos|suse|fedora|linux/i.test(nombre)) {
+      return { nivel: "sin_datos", texto: "Linux: revisar a mano", fin: null, accion: "Verificar el fin de soporte de la versión en el sitio de la distribución" };
+    }
     if (!regla) return { nivel: "sin_datos", texto: "Sistema no reconocido", fin: null, accion: "" };
     fin = regla[1];
     accion = /server/i.test(nombre) ? "Planificar migración a una versión de Server soportada"

@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { generarDesinstalador, generarDesinstaladorCmd, descargar } from "@/lib/agente";
 import CodigosInstalacion from "@/components/CodigosInstalacion";
+import { generarDesinstaladorLinux } from "@/lib/agente-linux";
 
 export default function ConfigAgente() {
   const { esAdmin } = usePerfil();
@@ -65,7 +66,7 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
         <Link href="/inventario/monitoreo" className="text-sm text-brand-600 hover:underline">← Volver a Monitoreo</Link>
         <h1 className="font-display text-2xl text-ink mt-2">Instalar el agente</h1>
         <p className="text-ink/60 text-sm mt-1">
-          El agente es un script de PowerShell que corre como tarea programada de Windows cada {config?.intervalo_min ?? 5} minutos
+          El agente corre cada {config?.intervalo_min ?? 5} minutos (tarea programada en Windows, systemd o cron en Linux)
           y envía los datos del equipo a esta app. No abre puertos ni queda residente: solo necesita salida a internet por HTTPS.
         </p>
       </div>
@@ -95,6 +96,9 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
           </button>
           <button className="btn-secondary" onClick={() => descargar("desinstalar-agente-accusys.ps1", generarDesinstalador())}>
             Desinstalador .ps1
+          </button>
+          <button className="btn-secondary" onClick={() => descargar("desinstalar-agente-accusys.sh", generarDesinstaladorLinux())}>
+            Desinstalador Linux
           </button>
         </div>
       </div>

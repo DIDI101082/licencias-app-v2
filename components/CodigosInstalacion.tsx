@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { generarInstalador, generarInstaladorCmd, descargar } from "@/lib/agente";
+import { generarInstaladorLinux } from "@/lib/agente-linux";
 
 type Codigo = {
   id: number; descripcion: string; creado_en: string; vence: string; usos: number; usos_max: number;
@@ -25,7 +26,7 @@ export default function CodigosInstalacion({ intervalo }: { intervalo: number })
   const [descripcion, setDescripcion] = useState("");
   const [dias, setDias] = useState(7);
   const [usos, setUsos] = useState(1);
-  const [formato, setFormato] = useState<"cmd" | "ps1">("cmd");
+  const [formato, setFormato] = useState<"cmd" | "ps1" | "linux">("cmd");
   const [generando, setGenerando] = useState(false);
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
 
@@ -52,7 +53,8 @@ export default function CodigosInstalacion({ intervalo }: { intervalo: number })
 
     const args = [process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, codigo, intervalo] as const;
     if (formato === "cmd") descargar("Instalar Agente Accusys Cyber.cmd", generarInstaladorCmd(...args));
-    else descargar("instalar-agente-accusys.ps1", generarInstalador(...args));
+    else if (formato === "ps1") descargar("instalar-agente-accusys.ps1", generarInstalador(...args));
+    else descargar("instalar-agente-accusys.sh", generarInstaladorLinux(...args), { linux: true });
     setAviso({
       ok: true,
       texto: `Instalador para "${descripcion.trim()}" descargado: sirve para ${usos === 1 ? "1 equipo" : `${usos} equipos`} y vence en ${dias} ${dias === 1 ? "día" : "días"}.`,
@@ -99,13 +101,21 @@ export default function CodigosInstalacion({ intervalo }: { intervalo: number })
         </div>
         <div>
           <label className="label">Formato</label>
-          <select className="input" value={formato} onChange={(e) => setFormato(e.target.value as "cmd" | "ps1")}>
-            <option value="cmd">Doble clic (.cmd)</option>
-            <option value="ps1">PowerShell (.ps1) para ESET, Intune o GPO</option>
+          <select className="input" value={formato} onChange={(e) => setFormato(e.target.value as "cmd" | "ps1" | "linux")}>
+            <option value="cmd">Windows: doble clic (.cmd)</option>
+            <option value="ps1">Windows: PowerShell (.ps1) para ESET, Intune o GPO</option>
+            <option value="linux">Linux (.sh)</option>
           </select>
         </div>
         <button className="btn-primary" disabled={generando || !descripcion.trim()}>{generando ? "Generando…" : "Generar y descargar"}</button>
       </form>
+
+      {formato === "linux" && (
+        <p className="text-xs text-ink/60">
+          En el equipo Linux se ejecuta con <code className="bg-black/[0.04] px-1 rounded">sudo bash instalar-agente-accusys.sh</code>.
+          Funciona en Ubuntu, Debian, Red Hat, Rocky, Alma y derivadas (con systemd o cron). Solo necesita <code>curl</code>.
+        </p>
+      )}
 
       {aviso && (
         <p role="status" className={`text-sm rounded-md px-3 py-2 ${aviso.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>{aviso.texto}</p>

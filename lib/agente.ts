@@ -565,11 +565,14 @@ export function generarDesinstalador() {
   return DESINSTALADOR;
 }
 
-export function descargar(nombre: string, contenido: string) {
-  // CRLF para Windows. Los .ps1 llevan BOM (Windows PowerShell 5.1 los lee mejor); los .cmd NO,
+export function descargar(nombre: string, contenido: string, opciones: { linux?: boolean } = {}) {
+  // Windows: CRLF. Los .ps1 llevan BOM (Windows PowerShell 5.1 los lee mejor); los .cmd NO,
   // porque la consola interpretaria el BOM como parte del primer comando.
-  const bom = nombre.toLowerCase().endsWith(".cmd") ? "" : "\uFEFF";
-  const blob = new Blob([bom + contenido.replace(/\r?\n/g, "\r\n")], { type: "text/plain;charset=utf-8" });
+  // Linux (.sh): saltos de linea LF y sin BOM, o bash no lo puede ejecutar.
+  const linux = opciones.linux || nombre.toLowerCase().endsWith(".sh");
+  const bom = linux || nombre.toLowerCase().endsWith(".cmd") ? "" : "\uFEFF";
+  const texto = linux ? contenido.replace(/\r\n/g, "\n") : contenido.replace(/\r?\n/g, "\r\n");
+  const blob = new Blob([bom + texto], { type: "text/plain;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = nombre;

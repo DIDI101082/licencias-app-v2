@@ -55,7 +55,14 @@ export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado
     sin_cifrar: { nivel: "problema", texto: "Sin cifrar (ESET instalado)" },
     desconocido: { nivel: "aviso", texto: "ESET: estado sin confirmar" },
   };
-  const bitlocker = d.cifrado_producto
+  // Linux: cifrado de disco con LUKS
+  const luks: Record<string, Resultado> = {
+    cifrado: { nivel: "ok", texto: "Cifrado (LUKS)" },
+    sin_cifrar: { nivel: "problema", texto: "Sin cifrar (LUKS)" },
+  };
+  const bitlocker = d.cifrado_producto && /luks/i.test(d.cifrado_producto)
+    ? (luks[d.cifrado_estado] ?? { nivel: "aviso" as const, texto: "LUKS: estado sin confirmar" })
+    : d.cifrado_producto
     ? (eset[d.cifrado_estado] ?? eset.desconocido)
     : d.bitlocker_estado === "cifrado"
       ? { nivel: "ok" as const, texto: "Cifrado (BitLocker)" }
@@ -75,7 +82,7 @@ export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado
   const perfiles = Object.entries(d.firewall_perfiles ?? {});
   const apagados = perfiles.filter(([, v]) => !v).map(([k]) => PERFILES[k] ?? k);
   const firewall: Resultado = perfiles.length === 0 ? sin
-    : apagados.length ? { nivel: "problema", texto: `Apagado: ${apagados.join(", ")}` }
+    : apagados.length ? { nivel: "problema", texto: apagados.length === 1 && apagados[0] === "Firewall" ? "Apagado" : `Apagado: ${apagados.join(", ")}` }
     : { nivel: "ok", texto: "Activo" };
 
   // Antivirus
@@ -100,8 +107,13 @@ export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado
       : { nivel: "ok", texto: "Solo permitidos" };
   }
 
+  // En Linux no aplican la clave del BIOS (no se puede leer) ni el control de Windows 11
+  const esLinux = !!d.so_nombre && !/windows/i.test(d.so_nombre);
+
   // Clave del BIOS: la importante es la de administrador (impide cambiar la configuración o arrancar desde USB)
-  const bios: Resultado = !d.bios_fuente || d.bios_clave_admin == null
+  const bios: Resultado = esLinux
+    ? { nivel: "sin_datos", texto: "No aplica (Linux)" }
+    : !d.bios_fuente || d.bios_clave_admin == null
     ? { nivel: "sin_datos", texto: d.bios_fuente ? "No se pudo leer" : "Sin datos" }
     : d.bios_clave_admin
       ? { nivel: "ok", texto: d.bios_clave_sistema ? "Con clave (admin y encendido)" : "Con clave de administrador" }
@@ -109,7 +121,8 @@ export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado
 
   // Windows 11
   const tpm2 = d.tpm_presente && String(d.tpm_version ?? "").startsWith("2");
-  const win11: Resultado = tpm2 && d.secure_boot ? { nivel: "ok", texto: "Apto" }
+  const win11: Resultado = esLinux ? { nivel: "sin_datos", texto: "No aplica (Linux)" }
+    : tpm2 && d.secure_boot ? { nivel: "ok", texto: "Apto" }
     : !tpm2 ? { nivel: "aviso", texto: d.tpm_presente ? `TPM ${d.tpm_version}` : "Sin TPM" }
     : { nivel: "aviso", texto: "Secure Boot apagado" };
 
