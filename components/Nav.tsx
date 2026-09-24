@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Mark from "./Mark";
+import { moduloDeRuta } from "@/lib/modulos";
 
 // Cada solapa es un módulo con sus propias secciones
 const modulos = [
@@ -59,31 +60,21 @@ const modulos = [
   },
 ];
 
-// Las pantallas de seguridad viven bajo /inventario, pero se muestran en su propia solapa
-const RUTAS_SEGURIDAD = ["/inventario/seguridad", "/inventario/riesgos"];
-
-function moduloDe(pathname: string) {
-  const por = (id: string) => modulos.find((m) => m.id === id)!;
-  if (pathname.startsWith("/empleados")) return por("empleados");
-  if (pathname.startsWith("/inventario/ubicacion")) return por("ubicacion");
-  if (RUTAS_SEGURIDAD.some((r) => pathname.startsWith(r))) return por("seguridad");
-  if (pathname.startsWith("/inventario")) return por("inventario");
-  return por("licencias");
-}
-
 const rolLabel: Record<string, string> = {
   administrador: "Administrador",
   lectura_escritura: "Lectura y escritura",
   solo_lectura: "Solo lectura",
 };
 
-export default function Nav({ nombre, rol }: { nombre: string; rol: string }) {
+export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: string; rol: string; modulos: string[] }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
   const esAdmin = rol === "administrador";
 
-  const activo = moduloDe(pathname);
+  // Solo las solapas habilitadas para el grupo de acceso del usuario
+  const visibles = modulos.filter((m) => permitidos.includes(m.id));
+  const activo = visibles.find((m) => m.id === moduloDeRuta(pathname)) ?? visibles[0] ?? modulos[0];
   const subLinks = [...activo.links, ...(esAdmin ? activo.admin : [])];
 
   function esActual(href: string) {
@@ -106,7 +97,7 @@ export default function Nav({ nombre, rol }: { nombre: string; rol: string }) {
           </Link>
           {/* Solapas de módulos */}
           <div role="tablist" aria-label="Módulos" className="flex gap-1 border-l border-black/10 pl-3 sm:pl-6">
-            {modulos.map((m) => {
+            {visibles.map((m) => {
               const sel = m.id === activo.id;
               return (
                 <Link

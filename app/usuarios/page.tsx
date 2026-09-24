@@ -16,10 +16,10 @@ export default async function UsuariosPage() {
   }
 
   const supabase = createClient();
-  const { data: perfiles } = await supabase
-    .from("perfiles")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const [{ data: perfiles }, { data: grupos }] = await Promise.all([
+    supabase.from("perfiles").select("*").order("created_at", { ascending: false }),
+    supabase.from("grupos_acceso").select("*").order("nombre"),
+  ]);
 
-  return <UsuariosClient perfiles={perfiles ?? []} miPropioId={user?.id ?? ""} />;
+  return <UsuariosClient perfiles={perfiles ?? []} grupos={grupos ?? []} miPropioId={user?.id ?? ""} />;
 }

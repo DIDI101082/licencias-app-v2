@@ -33,11 +33,17 @@ export async function getPerfil() {
   } = await supabase.auth.getUser();
   if (!user) return { user: null, perfil: null };
 
-  const { data: perfil } = await supabase
-    .from("perfiles")
-    .select("*")
-    .eq("id", user.id)
-    .single();
+  const [{ data: perfil }, { data: modulos, error: errorModulos }] = await Promise.all([
+    supabase.from("perfiles").select("*").eq("id", user.id).single(),
+    supabase.rpc("mis_modulos"),
+  ]);
 
+  // Solapas habilitadas según su grupo de acceso (los administradores ven todas).
+  // Si todavía no se ejecutó accesos.sql, se muestran todas como antes.
+  if (perfil) {
+    perfil.modulos = errorModulos
+      ? ["empleados", "licencias", "inventario", "seguridad", "ubicacion"]
+      : ((modulos as string[] | null) ?? []);
+  }
   return { user, perfil };
 }

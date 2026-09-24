@@ -8,6 +8,7 @@ export type Perfil = {
   email: string;
   rol: "administrador" | "lectura_escritura" | "solo_lectura";
   area: string | null;
+  modulos?: string[];
 };
 
 const Ctx = createContext<Perfil | null>(null);

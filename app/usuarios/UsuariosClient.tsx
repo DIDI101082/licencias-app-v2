@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import GruposAcceso, { type Grupo } from "./GruposAcceso";
 
 type Perfil = {
   id: string;
@@ -10,6 +11,7 @@ type Perfil = {
   email: string;
   rol: "administrador" | "lectura_escritura" | "solo_lectura";
   area: string | null;
+  grupo_id: number | null;
   created_at: string;
 };
 
@@ -21,11 +23,16 @@ const rolLabel: Record<string, string> = {
 
 export default function UsuariosClient({
   perfiles,
+  grupos,
   miPropioId,
 }: {
   perfiles: Perfil[];
+  grupos: Grupo[];
   miPropioId: string;
 }) {
+  const [grupo, setGrupo] = useState<string>("");
+  const [verGrupos, setVerGrupos] = useState(false);
+  const nombreGrupo = (id: number | null) => grupos.find((g) => g.id === id)?.nombre;
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [rol, setRol] = useState<string>("solo_lectura");
   const [area, setArea] = useState("");
@@ -38,6 +45,7 @@ export default function UsuariosClient({
     setEditandoId(p.id);
     setRol(p.rol);
     setArea(p.area ?? "");
+    setGrupo(p.grupo_id ? String(p.grupo_id) : "");
     setError(null);
   }
 
@@ -48,6 +56,7 @@ export default function UsuariosClient({
     const payload = {
       rol,
       area: rol === "lectura_escritura" ? area : null,
+      grupo_id: rol === "administrador" || !grupo ? null : Number(grupo),
     };
 
     const { error } = await supabase.from("perfiles").update(payload).eq("id", id);
@@ -65,21 +74,28 @@ export default function UsuariosClient({
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="font-display text-2xl text-ink">Usuarios</h1>
-        <p className="text-ink/60 text-sm mt-1">
-          Asigná el rol y, si corresponde, el área de cada persona que se
-          registró en el sistema.
-        </p>
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-display text-2xl text-ink">Usuarios</h1>
+          <p className="text-ink/60 text-sm mt-1">
+            El <b>rol</b> define si puede editar; el <b>acceso</b> define qué solapas ve. Los administradores ven todo.
+          </p>
+        </div>
+        <button className="btn-secondary" onClick={() => setVerGrupos(!verGrupos)} aria-expanded={verGrupos}>
+          Grupos de acceso
+        </button>
       </div>
 
-      <div className="card overflow-hidden">
+      {verGrupos && <GruposAcceso grupos={grupos} />}
+
+      <div className="card overflow-x-auto">
         <table className="data w-full">
           <thead>
             <tr>
               <th>Nombre</th>
               <th>Email</th>
               <th>Rol</th>
+              <th>Acceso</th>
               <th>Área</th>
               <th></th>
             </tr>
@@ -106,6 +122,18 @@ export default function UsuariosClient({
                         <option value="solo_lectura">Solo lectura</option>
                         <option value="lectura_escritura">Lectura y escritura</option>
                         <option value="administrador">Administrador</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        className="input disabled:bg-black/[0.03]"
+                        value={rol === "administrador" ? "" : grupo}
+                        disabled={rol === "administrador"}
+                        onChange={(e) => setGrupo(e.target.value)}
+                        aria-label="Grupo de acceso"
+                      >
+                        <option value="">{rol === "administrador" ? "Todo (administrador)" : "Sin grupo: ve todo"}</option>
+                        {grupos.map((g) => <option key={g.id} value={g.id}>{g.nombre}</option>)}
                       </select>
                     </td>
                     <td>
@@ -136,6 +164,9 @@ export default function UsuariosClient({
                 ) : (
                   <>
                     <td className="text-ink/60">{rolLabel[p.rol] ?? p.rol}</td>
+                    <td className="text-ink/60">
+                      {p.rol === "administrador" ? "Todo" : nombreGrupo(p.grupo_id) ?? <span className="text-amber-700">Sin grupo (ve todo)</span>}
+                    </td>
                     <td className="text-ink/60">{p.area || "—"}</td>
                     <td className="text-right">
                       <button
@@ -151,7 +182,7 @@ export default function UsuariosClient({
             ))}
             {perfiles.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-ink/40 py-8">
+                <td colSpan={6} className="text-center text-ink/40 py-8">
                   Todavía no hay usuarios registrados.
                 </td>
               </tr>
