@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.5";
+export const AGENTE_VERSION = "1.6";
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -12,6 +12,12 @@ $AnonKey     = '__ANON__'
 $Token       = '__TOKEN__'
 $Version     = '__VERSION__'
 $Carpeta     = 'C:\ProgramData\AccusysAgente'
+$ArchivoClave = Join-Path $Carpeta 'equipo.key'
+
+# Clave propia de este equipo (la entrega el servidor en el primer reporte)
+$Secreto = $null
+if (Test-Path $ArchivoClave) { $Secreto = (Get-Content -Path $ArchivoClave -Raw).Trim() }
+$Estado = 'desconocido'
 
 function Obtener($bloque) { try { & $bloque } catch { $null } }
 
@@ -69,14 +75,21 @@ try {
     agente_version   = $Version
   }
 
-  $cuerpo = @{ p_token = $Token; p_datos = $datos } | ConvertTo-Json -Depth 6 -Compress
+  $cuerpo = @{ p_token = $Token; p_datos = $datos; p_secreto = $Secreto } | ConvertTo-Json -Depth 6 -Compress
   $bytes  = [System.Text.Encoding]::UTF8.GetBytes($cuerpo)
   $headers = @{ apikey = $AnonKey; Authorization = ('Bearer ' + $AnonKey) }
 
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_reportar_dispositivo') -Headers $headers -Body $bytes -ContentType 'application/json; charset=utf-8' -TimeoutSec 30 | Out-Null
+  $respuesta = Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_reportar_dispositivo') -Headers $headers -Body $bytes -ContentType 'application/json; charset=utf-8' -TimeoutSec 30
+  if ($respuesta.secreto) {
+    Set-Content -Path $ArchivoClave -Value $respuesta.secreto -NoNewline
+    $Secreto = [string]$respuesta.secreto
+  }
+  if ($respuesta.estado) { $Estado = [string]$respuesta.estado }
 
-  Set-Content -Path (Join-Path $Carpeta 'ultimo-reporte.txt') -Value ('OK ' + (Get-Date).ToString('s'))
+  $nota = ''
+  if ($Estado -eq 'pendiente') { $nota = ' (pendiente de aprobacion en la app)' }
+  Set-Content -Path (Join-Path $Carpeta 'ultimo-reporte.txt') -Value ('OK ' + (Get-Date).ToString('s') + $nota)
 }
 catch {
   Set-Content -Path (Join-Path $Carpeta 'ultimo-reporte.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
@@ -128,9 +141,9 @@ try {
   $anterior = Get-Content $archivoHash -ErrorAction SilentlyContinue
   $vencido = (-not (Test-Path $archivoHash)) -or ((Get-Item $archivoHash).LastWriteTime -lt (Get-Date).AddHours(-24))
 
-  if (($hash -ne $anterior) -or $vencido) {
+  if ((($hash -ne $anterior) -or $vencido) -and $Estado -eq 'aprobado') {
     $cuerpo = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
-              ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_apps":' + $jsonApps + '}'
+              ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_secreto":' + (ConvertTo-Json ([string]$Secreto)) + ',"p_apps":' + $jsonApps + '}'
     Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_reportar_aplicaciones') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpo)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 60 | Out-Null
     Set-Content -Path $archivoHash -Value $hash
     Set-Content -Path (Join-Path $Carpeta 'ultimas-apps.txt') -Value ('OK ' + (Get-Date).ToString('s') + ' ' + $apps.Count + ' aplicaciones')
@@ -409,9 +422,9 @@ try {
   $anteriorSeg = Get-Content $archivoSeg -ErrorAction SilentlyContinue
   $vencidoSeg = (-not (Test-Path $archivoSeg)) -or ((Get-Item $archivoSeg).LastWriteTime -lt (Get-Date).AddHours(-6))
 
-  if (($hashSeg -ne $anteriorSeg) -or $vencidoSeg) {
+  if ((($hashSeg -ne $anteriorSeg) -or $vencidoSeg) -and $Estado -eq 'aprobado') {
     $cuerpoSeg = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
-                 ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_datos":' + $jsonSeg + '}'
+                 ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_secreto":' + (ConvertTo-Json ([string]$Secreto)) + ',"p_datos":' + $jsonSeg + '}'
     Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_reportar_seguridad') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoSeg)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 60 | Out-Null
     Set-Content -Path $archivoSeg -Value $hashSeg
     Set-Content -Path (Join-Path $Carpeta 'ultima-seguridad.txt') -Value ('OK ' + (Get-Date).ToString('s'))
@@ -435,6 +448,8 @@ $Script  = Join-Path $Carpeta 'agente.ps1'
 $Tarea   = 'AccusysInventarioAgente'
 
 New-Item -ItemType Directory -Force -Path $Carpeta | Out-Null
+# Carpeta accesible solo para SYSTEM y Administradores: un usuario comun no puede leer el token ni la clave del equipo
+& icacls.exe $Carpeta /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /T /Q | Out-Null
 
 $agente = @'
 __AGENTE__
@@ -459,6 +474,7 @@ Write-Host $resultado
 
 const DESINSTALADOR = String.raw`# Desinstala el agente de inventario Accusys (ejecutar como administrador)
 Unregister-ScheduledTask -TaskName 'AccusysInventarioAgente' -Confirm:$false -ErrorAction SilentlyContinue
+# Borra tambien la clave del equipo: si se vuelve a instalar, hay que restablecerla desde Monitoreo en la app
 Remove-Item -Recurse -Force 'C:\ProgramData\AccusysAgente' -ErrorAction SilentlyContinue
 Write-Host 'Agente desinstalado.'
 `;

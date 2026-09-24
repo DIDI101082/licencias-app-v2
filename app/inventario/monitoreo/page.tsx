@@ -12,7 +12,7 @@ type Dispositivo = Record<string, any> & { discos: Disco[]; ultimo_reporte: stri
 
 export default function Monitoreo() {
   const { esAdmin } = usePerfil();
-  const [lista, setLista] = useState<Dispositivo[]>([]);
+  const [todos, setTodos] = useState<Dispositivo[]>([]);
   const [cargando, setCargando] = useState(true);
   const [ahora, setAhora] = useState(Date.now());
   const [filtro, setFiltro] = useState<"todos" | "conectados" | "desconectados" | "disco" | "sin_vincular">("todos");
@@ -24,7 +24,7 @@ export default function Monitoreo() {
     const sb = createClient();
     const cargar = () =>
       sb.from("inv_dispositivos").select("*, inv_equipos(id, codigo)").order("hostname")
-        .then(({ data }) => { setLista((data ?? []) as Dispositivo[]); setCargando(false); });
+        .then(({ data }) => { setTodos((data ?? []) as Dispositivo[]); setCargando(false); });
     cargar();
 
     // Cada reporte nuevo de un agente llega acá sin recargar la página
@@ -35,6 +35,24 @@ export default function Monitoreo() {
     const reloj = setInterval(() => setAhora(Date.now()), 30000);
     return () => { sb.removeChannel(canal); clearInterval(reloj); };
   }, []);
+
+  // Solo los equipos aprobados cuentan; los pendientes y bloqueados se muestran aparte (solo admin)
+  const lista = useMemo(() => todos.filter((d) => d.estado_registro === "aprobado"), [todos]);
+  const pendientes = todos.filter((d) => d.estado_registro === "pendiente");
+  const bloqueados = todos.filter((d) => d.estado_registro === "bloqueado");
+
+  async function cambiarRegistro(d: Dispositivo, estado: "aprobado" | "pendiente" | "bloqueado") {
+    setError(null);
+    if (estado === "bloqueado" && !confirm(`¿Bloquear ${d.hostname}? El agente de ese equipo no va a poder reportar más.`)) return;
+    const { error } = await createClient().from("inv_dispositivos").update({ estado_registro: estado }).eq("id", d.id);
+    if (error) setError(error.message);
+  }
+
+  async function restablecerClave(d: Dispositivo) {
+    if (!confirm(`¿Restablecer la clave de ${d.hostname}? Usalo solo si reinstalaste el agente desde cero en ese equipo: el próximo reporte que llegue con este nombre recibe una clave nueva.`)) return;
+    const { error } = await createClient().from("inv_dispositivos").update({ secreto_hash: null, clave_confirmada: false }).eq("id", d.id);
+    if (error) setError(error.message);
+  }
 
   const cuentas = useMemo(() => ({
     conectados: lista.filter((d) => conectado(d.ultimo_reporte, ahora)).length,
@@ -107,6 +125,58 @@ export default function Monitoreo() {
           </button>
         ))}
       </div>
+
+      {esAdmin && pendientes.length > 0 && (
+        <div className="card p-5 border-2 border-amber-500/50 space-y-3" role="region" aria-label="Equipos pendientes de aprobación">
+          <div>
+            <h2 className="font-medium text-ink">Equipos pendientes de aprobación ({pendientes.length})</h2>
+            <p className="text-sm text-ink/60 mt-1">
+              Instalaron el agente pero todavía no aparecen en ninguna pantalla ni guardan datos. Aprobá solo los que reconozcas; si alguno no
+              es de la empresa, bloquealo y revisá desde qué IP se registró.
+            </p>
+          </div>
+          <ul className="divide-y divide-black/[0.06]">
+            {pendientes.map((d) => (
+              <li key={d.id} className="py-3 flex items-start justify-between gap-4 flex-wrap">
+                <div className="text-sm min-w-0">
+                  <div className="font-medium text-ink">{d.hostname}</div>
+                  <div className="text-ink/60">
+                    {d.usuario ?? "Sin sesión"} · dominio {d.dominio ?? "—"} · {[d.fabricante, d.modelo].filter(Boolean).join(" ") || "modelo desconocido"}
+                    {d.numero_serie ? ` · S/N ${d.numero_serie}` : ""}
+                  </div>
+                  <div className="text-xs text-ink/50">
+                    Se registró el {new Date(d.primer_reporte).toLocaleString("es-AR")} desde la IP pública {d.ip_registro ?? "desconocida"}
+                    {d.ip ? ` (IP local ${d.ip})` : ""}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn-primary" onClick={() => cambiarRegistro(d, "aprobado")}>Aprobar</button>
+                  <button className="btn-secondary text-red-600" onClick={() => cambiarRegistro(d, "bloqueado")}>Bloquear</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {esAdmin && bloqueados.length > 0 && (
+        <details className="card p-4">
+          <summary className="cursor-pointer text-sm font-medium text-ink">Equipos bloqueados ({bloqueados.length})</summary>
+          <ul className="mt-3 divide-y divide-black/[0.06]">
+            {bloqueados.map((d) => (
+              <li key={d.id} className="py-2 flex items-center justify-between gap-3 text-sm">
+                <span>
+                  <b>{d.hostname}</b> <span className="text-ink/50">{d.usuario ?? ""} · IP de registro {d.ip_registro ?? "desconocida"}</span>
+                </span>
+                <span className="flex gap-3">
+                  <button className="text-brand-600 hover:underline" onClick={() => cambiarRegistro(d, "pendiente")}>Desbloquear</button>
+                  <button className="text-ink/50 hover:text-red-600 hover:underline" onClick={() => quitar(d)}>Eliminar</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {error && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
 
@@ -183,8 +253,11 @@ export default function Monitoreo() {
                                 : <span className="text-ink/50">Requiere agente 1.1</span>}
                             </dd>
                           </div>
+                          <div><dt className="text-ink/50 text-xs">IP pública</dt><dd>{d.ip_publica ?? "—"}</dd></div>
                           {esAdmin && (
-                            <div className="flex items-end">
+                            <div className="flex flex-col items-start justify-end gap-1">
+                              <button className="text-sm text-ink/50 hover:text-brand-600 hover:underline" onClick={() => restablecerClave(d)}>Restablecer clave del equipo</button>
+                              <button className="text-sm text-ink/50 hover:text-red-600 hover:underline" onClick={() => cambiarRegistro(d, "bloqueado")}>Bloquear</button>
                               <button className="text-sm text-ink/50 hover:text-red-600 hover:underline" onClick={() => quitar(d)}>Quitar del monitoreo</button>
                             </div>
                           )}

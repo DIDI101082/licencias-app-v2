@@ -138,7 +138,7 @@ function PorEquipo({ inicial }: { inicial: string | null }) {
   const [texto, setTexto] = useState("");
 
   useEffect(() => {
-    createClient().from("inv_dispositivos").select("id, hostname, usuario, apps_cantidad, apps_actualizado")
+    createClient().from("inv_dispositivos").select("id, hostname, usuario, apps_cantidad, apps_actualizado").eq("estado_registro", "aprobado")
       .order("hostname").then(({ data }) => setDispositivos(data ?? []));
   }, []);
 

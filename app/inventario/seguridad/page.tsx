@@ -69,7 +69,7 @@ export default function Seguridad() {
   useEffect(() => {
     const sb = createClient();
     Promise.all([
-      sb.from("inv_dispositivos").select("*, inv_equipos(id, codigo)").order("hostname"),
+      sb.from("inv_dispositivos").select("*, inv_equipos(id, codigo)").eq("estado_registro", "aprobado").order("hostname"),
       sb.rpc("inv_admins_permitidos"),
     ]).then(([d, p]) => {
       setLista(d.data ?? []);

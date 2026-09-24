@@ -43,7 +43,7 @@ function Amenazas() {
     const sb = createClient();
     Promise.all([
       sb.from("inv_amenazas").select("*, inv_dispositivos(id, hostname, usuario)").order("detectada", { ascending: false }).limit(500),
-      sb.from("inv_dispositivos").select("id, hostname, usuario, av_productos, av_escaneo_rapido, av_escaneo_completo, av_proteccion_alteraciones, seguridad_actualizado"),
+      sb.from("inv_dispositivos").select("id, hostname, usuario, av_productos, av_escaneo_rapido, av_escaneo_completo, av_proteccion_alteraciones, seguridad_actualizado").eq("estado_registro", "aprobado"),
     ]).then(([a, d]) => { setAmenazas(a.data ?? []); setDisp(d.data ?? []); setCargando(false); });
   };
   useEffect(cargar, []);
@@ -188,7 +188,7 @@ function Sistemas() {
   const [filtro, setFiltro] = useState<"problema" | "aviso" | null>(null);
 
   useEffect(() => {
-    createClient().from("inv_dispositivos").select("id, hostname, usuario, so_nombre, so_version, so_build, ultimo_reporte, inv_equipos(id, codigo)")
+    createClient().from("inv_dispositivos").select("id, hostname, usuario, so_nombre, so_version, so_build, ultimo_reporte, inv_equipos(id, codigo)").eq("estado_registro", "aprobado")
       .order("hostname").then(({ data }) => { setDisp(data ?? []); setCargando(false); });
   }, []);
 

@@ -53,7 +53,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
       sb.from("inv_asignaciones").select("*, empleados(nombre, apellido)").eq("equipo_id", params.id).order("fecha_entrega", { ascending: false }),
       sb.from("inv_mantenimientos").select("*, inv_proveedores(nombre)").eq("equipo_id", params.id).order("fecha", { ascending: false }),
       sb.from("inv_equipos_log").select("*").eq("equipo_id", params.id).order("fecha", { ascending: false }).limit(50),
-      sb.from("inv_dispositivos").select("*").eq("equipo_id", params.id).order("ultimo_reporte", { ascending: false }).limit(1),
+      sb.from("inv_dispositivos").select("*").eq("equipo_id", params.id).eq("estado_registro", "aprobado").order("ultimo_reporte", { ascending: false }).limit(1),
     ]);
     setVivo(dv.data?.[0] ?? null);
     if (dv.data?.[0]?.seguridad_actualizado) {
