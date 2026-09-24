@@ -234,9 +234,9 @@ export default function EmpleadosClient({
               return (
               <tr key={emp.id} className="align-top">
                 <td>
-                  <div className="font-medium text-ink">
+                  <Link href={`/empleados/${emp.id}`} className="font-medium text-ink hover:text-brand-700 hover:underline">
                     {emp.nombre} {emp.apellido}
-                  </div>
+                  </Link>
                   <div className="text-xs text-ink/50">
                     {emp.email}
                     {emp.entra_id && <span className="ml-1.5 text-brand-600" title="Sincronizado con Entra ID">· Entra ID</span>}

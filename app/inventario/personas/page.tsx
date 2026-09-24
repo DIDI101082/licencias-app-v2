@@ -51,7 +51,7 @@ export default function PorPersona() {
             {filas.map((p) => (
               <tr key={p.id}>
                 <td>
-                  <span className="font-medium text-ink">{p.apellido}, {p.nombre}</span>
+                  <Link href={`/empleados/${p.id}`} className="font-medium text-ink hover:text-brand-700 hover:underline">{p.apellido}, {p.nombre}</Link>
                   <div className="text-xs text-ink/50">{p.email}</div>
                   {!p.activo && p.suyos.length > 0 && (
                     <span className="pill bg-red-50 text-red-600 mt-1">Inactivo con equipos a recuperar</span>
