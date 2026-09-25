@@ -4,7 +4,7 @@
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_VERSION = "1.0";
+export const PUENTE_VERSION = "1.1";
 
 const PUENTE = String.raw`# Puente PRTG -> Accusys Cyber: envia el estado de PRTG a la app cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -46,7 +46,18 @@ function Prtg($consulta) {
   $u = $PrtgUrl.TrimEnd('/') + '/api/table.json?' + $consulta + '&count=5000&apitoken=' + [Uri]::EscapeDataString($PrtgClave)
   Invoke-RestMethod -Uri $u -Method Get -TimeoutSec 90
 }
-function N($v) { if ($null -eq $v -or [string]$v -eq '') { 0 } else { [int]$v } }
+# Numero a partir de lo que devuelve PRTG (a veces viene como HTML: se sacan las etiquetas y se toma el numero)
+function Num($v) {
+  if ($null -eq $v) { return 0 }
+  $m = [regex]::Match(([string]$v -replace '<[^>]+>', ''), '-?\d+')
+  if ($m.Success) { return [int]$m.Value } else { return 0 }
+}
+# PRTG entrega muchos campos dos veces: con formato (HTML) y "_raw" (valor puro). Se usa el _raw si existe.
+function Crudo($o, $campo) {
+  $p = $o.PSObject.Properties[$campo + '_raw']
+  if ($p -and $null -ne $p.Value -and [string]$p.Value -ne '') { return $p.Value }
+  return $o.$campo
+}
 function EstadoSensor($raw) {
   switch ([int]$raw) {
     3 { 'ok' } 4 { 'advertencia' } 5 { 'caido' } 10 { 'inusual' } 13 { 'caido_reconocido' } 14 { 'caido' }
@@ -54,30 +65,31 @@ function EstadoSensor($raw) {
   }
 }
 function EstadoEquipo($d) {
-  if (@(7, 8, 9, 12) -contains (N $d.status_raw)) { return 'pausado' }
-  if ((N $d.downsens) + (N $d.partialdownsens) -gt 0) { return 'caido' }
-  if ((N $d.downacksens) -gt 0) { return 'caido_reconocido' }
-  if ((N $d.warnsens) -gt 0) { return 'advertencia' }
-  if ((N $d.unusualsens) -gt 0) { return 'inusual' }
-  if ((N $d.totalsens) -gt 0 -and (N $d.pausedsens) -ge (N $d.totalsens)) { return 'pausado' }
-  if ((N $d.upsens) -gt 0) { return 'ok' }
+  if (@(7, 8, 9, 12) -contains (Num $d.status_raw)) { return 'pausado' }
+  if ((Num (Crudo $d 'downsens')) + (Num (Crudo $d 'partialdownsens')) -gt 0) { return 'caido' }
+  if ((Num (Crudo $d 'downacksens')) -gt 0) { return 'caido_reconocido' }
+  if ((Num (Crudo $d 'warnsens')) -gt 0) { return 'advertencia' }
+  if ((Num (Crudo $d 'unusualsens')) -gt 0) { return 'inusual' }
+  if ((Num (Crudo $d 'totalsens')) -gt 0 -and (Num (Crudo $d 'pausedsens')) -ge (Num (Crudo $d 'totalsens'))) { return 'pausado' }
+  if ((Num (Crudo $d 'upsens')) -gt 0) { return 'ok' }
   return 'desconocido'
 }
 
 try {
   $sondas = @((Prtg 'content=probenodes&columns=objid,name').probenodes | ForEach-Object {
-    [ordered]@{ objid = N $_.objid; nombre = [string]$_.name }
+    [ordered]@{ objid = Num $_.objid; nombre = [string]$_.name }
   })
   $grupos = @((Prtg 'content=groups&columns=objid,name,parentid').groups | ForEach-Object {
-    [ordered]@{ objid = N $_.objid; nombre = [string]$_.name; padre = N $_.parentid }
+    [ordered]@{ objid = Num $_.objid; nombre = [string]$_.name; padre = Num $_.parentid }
   })
   $cols = 'objid,name,host,parentid,group,probe,status_raw,upsens,warnsens,downsens,partialdownsens,downacksens,pausedsens,unusualsens,undefinedsens,totalsens,location'
   $equipos = @((Prtg ('content=devices&columns=' + $cols)).devices | ForEach-Object {
     [ordered]@{
-      objid = N $_.objid; nombre = [string]$_.name; host = [string]$_.host; padre = N $_.parentid
+      objid = Num $_.objid; nombre = [string]$_.name; host = [string]$_.host; padre = Num $_.parentid
       grupo = [string]$_.group; sonda = [string]$_.probe; estado = (EstadoEquipo $_)
-      ok = N $_.upsens; advertencia = N $_.warnsens; caido = (N $_.downsens) + (N $_.partialdownsens) + (N $_.downacksens)
-      inusual = N $_.unusualsens; pausado = N $_.pausedsens; total = N $_.totalsens
+      ok = Num (Crudo $_ 'upsens'); advertencia = Num (Crudo $_ 'warnsens')
+      caido = (Num (Crudo $_ 'downsens')) + (Num (Crudo $_ 'partialdownsens')) + (Num (Crudo $_ 'downacksens'))
+      inusual = Num (Crudo $_ 'unusualsens'); pausado = Num (Crudo $_ 'pausedsens'); total = Num (Crudo $_ 'totalsens')
       ubicacion = [string]$_.location
     }
   })
@@ -85,8 +97,9 @@ try {
   $sensores = @((Prtg ('content=sensors&columns=objid,name,parentid,status_raw,message_raw,lastvalue,downtimesince&' + $filtro)).sensors |
     Select-Object -First 500 | ForEach-Object {
       [ordered]@{
-        objid = N $_.objid; nombre = [string]$_.name; dispositivo = N $_.parentid; estado = (EstadoSensor $_.status_raw)
-        mensaje = ([string]$_.message_raw -replace '<[^>]+>', ''); valor = [string]$_.lastvalue; desde = [string]$_.downtimesince
+        objid = Num $_.objid; nombre = [string]$_.name; dispositivo = Num $_.parentid; estado = (EstadoSensor $_.status_raw)
+        mensaje = ([string](Crudo $_ 'message') -replace '<[^>]+>', '')
+        valor = ([string]$_.lastvalue -replace '<[^>]+>', ''); desde = ([string]$_.downtimesince -replace '<[^>]+>', '')
       }
     })
 
