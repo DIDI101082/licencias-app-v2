@@ -7,9 +7,10 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { fecha, claseCodigo } from "@/lib/inventario";
 import { hace } from "@/lib/monitoreo";
+import ConexionesInusuales from "@/components/ConexionesInusuales";
 import { soporteWindows, estadoAmenaza, archivoAmenaza, SEVERIDAD, SUGERIDOS, DIAS_AVISO_SOPORTE } from "@/lib/riesgos";
 
-type Vista = "amenazas" | "sistemas" | "prohibido";
+type Vista = "amenazas" | "sistemas" | "prohibido" | "conexiones";
 
 function Tarjeta({ titulo, n, activa, onClick, peligro = true }: { titulo: string; n: number; activa?: boolean; onClick?: () => void; peligro?: boolean }) {
   return (
@@ -357,7 +358,7 @@ function Contenido() {
   const params = useSearchParams();
   const router = useRouter();
   const vista = (params.get("vista") as Vista) || "amenazas";
-  const pestañas: [Vista, string][] = [["amenazas", "Amenazas de Defender"], ["sistemas", "Sistemas sin soporte"], ["prohibido", "Software prohibido"]];
+  const pestañas: [Vista, string][] = [["amenazas", "Amenazas de Defender"], ["sistemas", "Sistemas sin soporte"], ["prohibido", "Software prohibido"], ["conexiones", "Conexiones inusuales"]];
   return (
     <div className="space-y-6">
       <div>
@@ -375,6 +376,7 @@ function Contenido() {
       {vista === "amenazas" && <Amenazas />}
       {vista === "sistemas" && <Sistemas />}
       {vista === "prohibido" && <Prohibido />}
+      {vista === "conexiones" && <ConexionesInusuales />}
     </div>
   );
 }

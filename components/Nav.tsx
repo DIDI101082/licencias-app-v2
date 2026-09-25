@@ -62,6 +62,13 @@ const modulos = [
     ],
     admin: [] as { href: string; label: string }[],
   },
+  {
+    id: "red",
+    label: "Monitoreo de red",
+    inicio: "/red",
+    links: [{ href: "/red", label: "Mapas de PRTG" }],
+    admin: [] as { href: string; label: string }[],
+  },
 ];
 
 const rolLabel: Record<string, string> = {

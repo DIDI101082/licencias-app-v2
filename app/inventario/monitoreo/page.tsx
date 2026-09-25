@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
+import { textoUbicacion, ATRIBUCION_GEO } from "@/lib/geo";
 import { conectado, hace, discoCritico, encendidoDesde, MINUTOS_CONECTADO, type Disco } from "@/lib/monitoreo";
 import { claseCodigo } from "@/lib/inventario";
 
@@ -148,6 +149,7 @@ export default function Monitoreo() {
                     Se registró el {new Date(d.primer_reporte).toLocaleString("es-AR")} desde la IP pública {d.ip_registro ?? "desconocida"}
                     {d.ip ? ` (IP local ${d.ip})` : ""}
                     {d.inv_codigos_instalacion ? ` · con el instalador "${d.inv_codigos_instalacion.descripcion}"` : ""}
+                    {textoUbicacion(d) ? ` · ${textoUbicacion(d)}` : ""}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -255,6 +257,15 @@ export default function Monitoreo() {
                             </dd>
                           </div>
                           <div><dt className="text-ink/50 text-xs">IP pública</dt><dd>{d.ip_publica ?? "—"}</dd></div>
+                          <div className="md:col-span-2">
+                            <dt className="text-ink/50 text-xs">Ubicación aproximada</dt>
+                            <dd>
+                              {textoUbicacion(d) ?? "Sin datos todavía"}
+                              {textoUbicacion(d) && (
+                                <a href={ATRIBUCION_GEO.url} target="_blank" rel="noopener noreferrer" className="block text-[11px] text-ink/40 underline">{ATRIBUCION_GEO.texto}</a>
+                              )}
+                            </dd>
+                          </div>
                           {esAdmin && (
                             <div className="flex flex-col items-start justify-end gap-1">
                               <button className="text-sm text-ink/50 hover:text-brand-600 hover:underline" onClick={() => restablecerClave(d)}>Restablecer clave del equipo</button>

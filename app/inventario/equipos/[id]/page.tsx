@@ -10,6 +10,7 @@ import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
 import { conectado, hace, encendidoDesde, type Disco } from "@/lib/monitoreo";
 import { CONTROLES, ESTILO, evaluar } from "@/lib/seguridad";
+import { textoUbicacion } from "@/lib/geo";
 
 const CAMPOS_LOG: Record<string, string> = {
   estado: "Estado", condicion: "Condición", area: "Área", ubicacion_id: "Ubicación", empleado_id: "Asignado a",
@@ -308,6 +309,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
               <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 text-sm mb-3">
                 <Dato t="Usuario">{vivo.usuario ?? "Sin sesión iniciada"}</Dato>
                 <Dato t="IP">{vivo.ip ?? "—"}</Dato>
+                {textoUbicacion(vivo) && <Dato t="Ubicación">{textoUbicacion(vivo)}</Dato>}
                 <Dato t="Sistema">{vivo.so_nombre} {vivo.so_version}</Dato>
                 <Dato t="RAM">{vivo.ram_total_gb} GB · {vivo.ram_libre_gb} GB libres</Dato>
                 <Dato t="Encendido hace">{encendidoDesde(vivo.arranque)}</Dato>
