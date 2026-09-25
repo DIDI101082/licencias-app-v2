@@ -54,7 +54,8 @@ const modulos = [
   },
   {
     id: "ubicacion",
-    label: "Oficina / Home office",
+    label: "Home office",
+    titulo: "Oficina / Home office",
     inicio: "/inventario/ubicacion",
     links: [
       { href: "/inventario/ubicacion", label: "Dónde están los equipos" },
@@ -64,7 +65,8 @@ const modulos = [
   },
   {
     id: "red",
-    label: "Monitoreo de red",
+    label: "Red",
+    titulo: "Monitoreo de red",
     inicio: "/red",
     links: [{ href: "/red", label: "Mapas de PRTG" }],
     admin: [] as { href: string; label: string }[],
@@ -120,6 +122,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
                 href={m.inicio}
                 role="tab"
                 aria-selected={sel}
+                title={(m as { titulo?: string }).titulo ?? m.label}
                 className={`font-display font-bold tracking-tight px-3 lg:px-4 py-2 whitespace-nowrap text-sm lg:text-base rounded-t-lg border-x border-t -mb-px transition-colors shrink-0 ${
                   sel ? "bg-[#F5F7FB] border-black/[0.06] text-ink" : "border-transparent text-ink/45 hover:text-ink"
                 }`}
