@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
+import MapaAutomatico from "@/components/MapaAutomatico";
 
 type Mapa = { id: number; nombre: string; url: string; alto: number; orden: number };
 
 // Los mapas se cargan desde el navegador de cada usuario: PRTG no necesita estar expuesto a internet,
 // se ve desde la oficina o conectado por VPN.
-export default function MonitoreoRed() {
+function MapasPrtg() {
   const { esAdmin } = usePerfil();
   const [mapas, setMapas] = useState<Mapa[]>([]);
   const [activo, setActivo] = useState<number | null>(null);
@@ -47,10 +48,7 @@ export default function MonitoreoRed() {
   return (
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-2xl text-ink">Monitoreo de red</h1>
-          <p className="text-ink/60 text-sm mt-1">Mapas publicados desde PRTG. Se actualizan solos con el estado de cada sensor.</p>
-        </div>
+        <p className="text-ink/60 text-sm">Mapas publicados desde PRTG. Se actualizan solos con el estado de cada sensor.</p>
         <div className="flex gap-2 flex-wrap">
           {mapa && <button className="btn-secondary" onClick={() => setRecarga((n) => n + 1)}>Actualizar</button>}
           {mapa && <a className="btn-secondary" href={mapa.url} target="_blank" rel="noopener noreferrer">Abrir en PRTG</a>}
@@ -142,6 +140,27 @@ export default function MonitoreoRed() {
       {!cargando && mapas.length === 0 && !esAdmin && (
         <div className="card p-6 text-sm text-ink/60">Todavía no hay mapas configurados. Un administrador los carga desde esta pantalla.</div>
       )}
+    </div>
+  );
+}
+
+export default function MonitoreoRed() {
+  const [vista, setVista] = useState<"auto" | "prtg">("auto");
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="font-display text-2xl text-ink">Monitoreo de red</h1>
+        <p className="text-ink/60 text-sm mt-1">Estado de los equipos monitoreados por PRTG, agrupados por sede.</p>
+      </div>
+      <div role="tablist" className="flex gap-1 border-b border-black/[0.08]">
+        {([["auto", "Mapa automático"], ["prtg", "Mapas de PRTG"]] as const).map(([k, t]) => (
+          <button key={k} role="tab" aria-selected={vista === k} onClick={() => setVista(k)}
+            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${vista === k ? "border-brand-600 text-brand-700" : "border-transparent text-ink/60 hover:text-ink"}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+      {vista === "auto" ? <MapaAutomatico /> : <MapasPrtg />}
     </div>
   );
 }

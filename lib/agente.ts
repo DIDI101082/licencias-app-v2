@@ -557,6 +557,11 @@ export function generarInstaladorCmd(url: string, anon: string, token: string, i
   return LANZADOR.replace(/__TITULO__/g, () => "Instalador del agente de Accusys Cyber") + generarInstalador(url, anon, token, intervalo);
 }
 
+// Envuelve cualquier script de PowerShell en un .cmd de doble clic (pide administrador y lo ejecuta en memoria)
+export function envolverEnCmd(titulo: string, script: string) {
+  return LANZADOR.replace(/__TITULO__/g, () => titulo) + script;
+}
+
 export function generarDesinstaladorCmd() {
   return LANZADOR.replace(/__TITULO__/g, () => "Desinstalador del agente de Accusys Cyber") + generarDesinstalador();
 }
