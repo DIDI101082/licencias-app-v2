@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { hace } from "@/lib/monitoreo";
 import PuentePrtg from "./PuentePrtg";
+import DiagramaRed from "./DiagramaRed";
+import { crearUbicador } from "@/lib/topologia";
 
 type Equipo = { objid: number; nombre: string; host: string; padre: number; grupo: string; sonda: string; estado: string; ok: number; advertencia: number; caido: number; inusual: number; pausado: number; total: number; ubicacion: string };
 type Sensor = { objid: number; nombre: string; dispositivo: number; estado: string; mensaje: string; valor: string; desde: string };
@@ -46,6 +48,11 @@ export default function MapaAutomatico() {
   const [texto, setTexto] = useState("");
   const [verPuente, setVerPuente] = useState(false);
   const [ahora, setAhora] = useState(Date.now());
+  const [vista, setVista] = useState<"diagrama" | "sedes">("diagrama");
+  const [conexiones, setConexiones] = useState<Record<number, number>>({});
+  const cargarConexiones = () => createClient().from("red_conexiones").select("objid, conecta_a")
+    .then(({ data }) => setConexiones(Object.fromEntries((data ?? []).map((c: any) => [c.objid, c.conecta_a]))));
+  useEffect(() => { cargarConexiones(); }, []);
 
   useEffect(() => {
     const sb = createClient();
@@ -97,6 +104,11 @@ export default function MapaAutomatico() {
     }).sort((a, b) => a.peor - b.peor || a.nombre.localeCompare(b.nombre));
   }, [datos, equipos, soloProblemas, texto]);
 
+  const equiposConZona = useMemo(() => {
+    const ubicar = crearUbicador(datos.grupos ?? [], datos.sondas ?? []);
+    return equipos.map((e) => ({ ...e, ...ubicar(e.padre) }));
+  }, [datos, equipos]);
+
   const cuenta = (estados: string[]) => equipos.filter((e) => estados.includes(e.estado)).length;
   const viejo = actualizado && ahora - new Date(actualizado).getTime() > MINUTOS_VIEJO * 60000;
 
@@ -128,13 +140,22 @@ export default function MapaAutomatico() {
       </div>
 
       <div className="flex gap-3 items-center flex-wrap">
+        <div role="tablist" className="flex rounded-lg border border-black/[0.08] overflow-hidden text-sm">
+          {([["diagrama", "Diagrama"], ["sedes", "Por sede"]] as const).map(([k, t]) => (
+            <button key={k} role="tab" aria-selected={vista === k} onClick={() => setVista(k)}
+              className={`px-3 py-1.5 font-medium ${vista === k ? "bg-brand-600 text-white" : "bg-white text-ink/70 hover:text-ink"}`}>{t}</button>
+          ))}
+        </div>
         <input type="search" className="input flex-1 min-w-[220px]" placeholder="Buscar equipo, IP o sede" value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Buscar" />
-        <label className="text-sm text-ink/70 flex items-center gap-2">
+        <label className={`text-sm text-ink/70 flex items-center gap-2 ${vista === "diagrama" ? "hidden" : ""}`}>
           <input type="checkbox" checked={soloProblemas} onChange={(e) => setSoloProblemas(e.target.checked)} /> Solo con problemas
         </label>
       </div>
 
       <div className="grid lg:grid-cols-[1fr_280px] gap-5 items-start">
+        {vista === "diagrama" ? (
+          <DiagramaRed equipos={equiposConZona} sensores={sensores} guardadas={conexiones} base={base} texto={texto} alGuardar={cargarConexiones} />
+        ) : (
         <div className="grid md:grid-cols-2 gap-5 items-start">
           {zonas.map((z) => (
             <section key={z.nombre} className="card overflow-hidden" aria-label={`Sede ${z.nombre}`}>
@@ -191,6 +212,7 @@ export default function MapaAutomatico() {
           ))}
           {!cargando && zonas.length === 0 && <div className="card p-6 text-sm text-ink/50 md:col-span-2">{soloProblemas ? "Ningún equipo con problemas. 👍" : "Ningún equipo coincide con la búsqueda."}</div>}
         </div>
+        )}
 
         <aside className="card p-4">
           <h2 className="font-medium text-ink mb-3">Últimos cambios</h2>
