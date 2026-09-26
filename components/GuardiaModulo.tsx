@@ -19,6 +19,17 @@ export default function GuardiaModulo({ modulos, children }: { modulos: Modulo[]
   }, [permitido, pathname, modulos, router]);
 
   if (permitido) return <>{children}</>;
+  if (modulos.length === 0) {
+    return (
+      <div className="card p-6 max-w-md">
+        <h1 className="font-display text-xl text-ink mb-2">Acceso pendiente</h1>
+        <p className="text-sm text-ink/60">
+          Tu usuario ya está registrado, pero todavía no tiene solapas habilitadas. Pedile a un administrador que te asigne un grupo de
+          acceso; cuando lo haga, refrescá esta página.
+        </p>
+      </div>
+    );
+  }
   if (pathname === "/" && modulos.length) return null;
 
   return (

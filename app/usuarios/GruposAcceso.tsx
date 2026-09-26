@@ -32,7 +32,7 @@ export default function GruposAcceso({ grupos }: { grupos: Grupo[] }) {
   }
 
   async function borrar(g: Grupo) {
-    if (!confirm(`¿Borrar el grupo ${g.nombre}? Los usuarios que lo tengan pasan a "sin grupo" y ven todas las solapas.`)) return;
+    if (!confirm(`¿Borrar el grupo ${g.nombre}? Los usuarios que lo tengan pasan a "sin grupo" y se quedan sin acceso hasta que les asignes otro.`)) return;
     const { error } = await createClient().from("grupos_acceso").delete().eq("id", g.id);
     if (error) return setError(error.message);
     router.refresh();

@@ -132,7 +132,7 @@ export default function UsuariosClient({
                         onChange={(e) => setGrupo(e.target.value)}
                         aria-label="Grupo de acceso"
                       >
-                        <option value="">{rol === "administrador" ? "Todo (administrador)" : "Sin grupo: ve todo"}</option>
+                        <option value="">{rol === "administrador" ? "Todo (administrador)" : "Sin grupo: sin acceso"}</option>
                         {grupos.map((g) => <option key={g.id} value={g.id}>{g.nombre}</option>)}
                       </select>
                     </td>
@@ -165,7 +165,7 @@ export default function UsuariosClient({
                   <>
                     <td className="text-ink/60">{rolLabel[p.rol] ?? p.rol}</td>
                     <td className="text-ink/60">
-                      {p.rol === "administrador" ? "Todo" : nombreGrupo(p.grupo_id) ?? <span className="text-amber-700">Sin grupo (ve todo)</span>}
+                      {p.rol === "administrador" ? "Todo" : nombreGrupo(p.grupo_id) ?? <span className="text-amber-700">Sin grupo (sin acceso)</span>}
                     </td>
                     <td className="text-ink/60">{p.area || "—"}</td>
                     <td className="text-right">
