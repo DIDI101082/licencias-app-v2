@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import TicketsConfig from "@/components/TicketsConfig";
 
 type Alerta = {
+  ticket_ref?: string | null;
   id: number; clave: string; regla: string; severidad: "critica" | "alta" | "media" | "info";
   titulo: string; detalle: string | null; enlace: string | null;
   abierta: string; ultima_vez: string; resuelta: string | null; enviada: string | null; envio_error: string | null;
@@ -118,6 +120,7 @@ export default function Alertas() {
       )}
 
       {configAbierta && config?.es_admin && <Configuracion config={config} onGuardado={cargar} />}
+      {configAbierta && config?.es_admin && <TicketsConfig />}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {(["critica", "alta", "media", "info"] as const).map((s) => (
@@ -155,6 +158,7 @@ export default function Alertas() {
                 <td>
                   {a.enlace ? <Link href={a.enlace} className="text-ink font-medium hover:text-brand-700">{a.titulo}</Link>
                     : <span className="text-ink font-medium">{a.titulo}</span>}
+                  {a.ticket_ref && <span className="ml-2 pill bg-brand-50 text-brand-700 text-xs">Ticket {a.ticket_ref}</span>}
                   {a.detalle && <div className="text-xs text-ink/55 mt-0.5">{a.detalle}</div>}
                 </td>
                 <td className="text-ink/70 whitespace-nowrap">{NOMBRE_REGLA[a.regla] ?? a.regla}</td>
