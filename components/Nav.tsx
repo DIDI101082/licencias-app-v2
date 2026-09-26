@@ -55,6 +55,7 @@ const modulos = [
       { href: "/inventario/seguridad", label: "Estado de los equipos" },
       { href: "/inventario/riesgos", label: "Riesgos" },
       { href: "/inventario/vulnerabilidades", label: "Vulnerabilidades" },
+      { href: "/inventario/identidad", label: "Identidad" },
     ],
     admin: [] as { href: string; label: string }[],
   },

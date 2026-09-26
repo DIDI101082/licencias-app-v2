@@ -26,6 +26,8 @@ export default function Movimiento({ params }: { params: { id: string } }) {
   const [error, setError] = useState<string | null>(null);
   const [acta, setActa] = useState<"entrega" | "devolucion" | null>(null);
   const [notas, setNotas] = useState<Record<number, string>>({});
+  const [cuenta, setCuenta] = useState<any>(null);
+  const [reportes, setReportes] = useState<Record<string, string>>({});
 
   const cargar = async () => {
     const sb = createClient();
@@ -42,6 +44,17 @@ export default function Movimiento({ params }: { params: { id: string } }) {
     setEquipos(eq.data ?? []);
     setLicencias(li.data ?? []);
     setActas(ac.data ?? []);
+    // Último reporte del agente de cada equipo asignado (detecta equipos que se siguen usando después de la baja)
+    const ids = (eq.data ?? []).map((e: any) => e.id);
+    if (ids.length) {
+      const { data: disp } = await sb.from("inv_dispositivos").select("equipo_id, ultimo_reporte").in("equipo_id", ids);
+      const r: Record<string, string> = {};
+      for (const d of disp ?? []) if (!r[d.equipo_id] || d.ultimo_reporte > r[d.equipo_id]) r[d.equipo_id] = d.ultimo_reporte;
+      setReportes(r);
+    }
+    if (m.email) {
+      fetch(`/api/identidad/cuenta?email=${encodeURIComponent(m.email)}`).then((x) => x.json()).then(setCuenta).catch(() => setCuenta(null));
+    }
   };
   useEffect(() => { cargar(); }, [params.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -50,6 +63,15 @@ export default function Movimiento({ params }: { params: { id: string } }) {
     const { error } = await createClient().rpc("empleados_tarea_marcar", { p_tarea: t.id, p_hecha: hecha, p_nota: notas[t.id] ?? null });
     if (error) return setError(error.message);
     setNotas((n) => { const c = { ...n }; delete c[t.id]; return c; });
+    cargar();
+  }
+  async function liberarTodas() {
+    if (!confirm(`¿Liberar las ${licencias.length} licencias de ${mov.nombre} ${mov.apellido}? Quedan en el historial con la fecha de hoy.`)) return;
+    setError(null);
+    const { error } = await createClient().from("asignaciones")
+      .update({ fecha_liberacion: new Date().toISOString().slice(0, 10) })
+      .in("id", licencias.map((l) => l.id));
+    if (error) return setError(error.message);
     cargar();
   }
   async function cerrar(estado: "completo" | "descartado" | "abierto") {
@@ -141,6 +163,7 @@ export default function Movimiento({ params }: { params: { id: string } }) {
         </div>
 
         <div className="space-y-4">
+          <CuentaEntra cuenta={cuenta} esBaja={esBaja} desde={mov.fecha} />
           <div className="card p-5">
             <h2 className="font-medium text-ink mb-1">Equipos asignados</h2>
             {equipos.length === 0 ? <p className="text-sm text-ink/50">{esBaja ? "✅ No tiene equipos pendientes de devolver." : "Todavía sin equipos."}</p> : (
@@ -148,7 +171,15 @@ export default function Movimiento({ params }: { params: { id: string } }) {
                 {equipos.map((e) => (
                   <li key={e.id} className="flex gap-2 items-start">
                     <Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link>
-                    <span className="text-ink/70">{e.categoria} {[e.marca, e.modelo].filter(Boolean).join(" ")}</span>
+                    <span className="text-ink/70 flex-1">
+                      {e.categoria} {[e.marca, e.modelo].filter(Boolean).join(" ")}
+                      {reportes[e.id] && (() => {
+                        const posterior = esBaja && reportes[e.id].slice(0, 10) > mov.fecha;
+                        return <span className={`block text-xs ${posterior ? "text-red-600" : "text-ink/40"}`}>
+                          {posterior ? "⚠ Sigue en uso: " : ""}último reporte del agente {fh(reportes[e.id])}
+                        </span>;
+                      })()}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -162,7 +193,9 @@ export default function Movimiento({ params }: { params: { id: string } }) {
                 {licencias.map((l) => <li key={l.id}>{l.licencias?.nombre} <span className="text-xs text-ink/40">· {l.licencias?.proveedor}</span></li>)}
               </ul>
             )}
-            {esBaja && licencias.length > 0 && <Link href="/asignaciones" className="text-xs text-brand-600 hover:underline mt-2 inline-block">Liberar en Asignaciones →</Link>}
+            {esBaja && licencias.length > 0 && (puedeEditar
+              ? <button onClick={liberarTodas} className="btn-secondary text-xs mt-3 w-full">Liberar todas ({licencias.length})</button>
+              : <Link href="/asignaciones" className="text-xs text-brand-600 hover:underline mt-2 inline-block">Liberar en Asignaciones →</Link>)}
           </div>
           <div className="card p-5">
             <h2 className="font-medium text-ink mb-1">Actas</h2>
@@ -183,6 +216,42 @@ export default function Movimiento({ params }: { params: { id: string } }) {
       </div>
 
       {acta && <NuevaActa empleadoId={mov.empleado_id} tipo={acta} onCerrar={() => setActa(null)} />}
+    </div>
+  );
+}
+
+// Estado real de la cuenta en Entra ID: para confirmar que la baja se hizo (o que el alta tiene MFA)
+function CuentaEntra({ cuenta, esBaja, desde }: { cuenta: any; esBaja: boolean; desde: string }) {
+  if (!cuenta || cuenta.configurado === false || cuenta.error === "Sin acceso.") return null;
+  const Fila = ({ ok, children }: { ok: boolean | null; children: React.ReactNode }) => (
+    <li className="flex gap-2 text-sm"><span>{ok == null ? "·" : ok ? "✅" : "⚠️"}</span><span className={ok === false ? "text-red-600" : "text-ink/70"}>{children}</span></li>
+  );
+  const ingresoPosterior = esBaja && cuenta.ultimo_ingreso && cuenta.ultimo_ingreso.slice(0, 10) > desde;
+  return (
+    <div className="card p-5">
+      <h2 className="font-medium text-ink mb-2">Cuenta en Entra ID</h2>
+      {cuenta.error ? <p className="text-sm text-red-600">{cuenta.error}</p>
+        : !cuenta.encontrada ? <p className="text-sm text-ink/50">{esBaja ? "✅ No existe una cuenta con ese email (ya fue eliminada)." : "⚠️ Todavía no existe la cuenta en Entra ID."}</p>
+        : (
+          <ul className="space-y-1.5">
+            <Fila ok={esBaja ? !cuenta.habilitada : cuenta.habilitada}>{cuenta.habilitada ? "Cuenta habilitada" : "Cuenta deshabilitada"}</Fila>
+            {cuenta.ingresos_disponible && (
+              <Fila ok={esBaja ? !ingresoPosterior : null}>
+                {cuenta.ultimo_ingreso ? `Último ingreso ${fh(cuenta.ultimo_ingreso)}` : "Nunca inició sesión"}
+                {ingresoPosterior ? " (después de la baja)" : ""}
+              </Fila>
+            )}
+            {cuenta.mfa && (
+              <Fila ok={esBaja ? cuenta.mfa.metodos.length === 0 : cuenta.mfa.registrado}>
+                {esBaja
+                  ? (cuenta.mfa.metodos.length ? `Métodos de MFA sin quitar: ${cuenta.mfa.metodos.length}` : "Sin métodos de MFA registrados")
+                  : (cuenta.mfa.registrado ? "MFA configurado" : "MFA sin configurar")}
+              </Fila>
+            )}
+            {cuenta.roles && cuenta.roles.length > 0 && <Fila ok={false}>Roles de administrador: {cuenta.roles.join(", ")}</Fila>}
+          </ul>
+        )}
+      {!!cuenta.avisos?.length && <p className="text-xs text-ink/40 mt-2">{cuenta.avisos.join(" ")}</p>}
     </div>
   );
 }
