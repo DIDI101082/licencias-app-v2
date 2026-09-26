@@ -49,6 +49,22 @@ export default function UsuariosClient({
     setError(null);
   }
 
+  async function eliminar(p: Perfil) {
+    const ok = confirm(
+      `¿Eliminar a ${p.email}?\n\n` +
+        "Se borra su cuenta de la app. Lo que haya cargado (asignaciones, etc.) se conserva.\n" +
+        "Si sigue habilitado en Entra ID, podría volver a entrar con Microsoft, pero sin acceso a ninguna solapa hasta que le asignes un grupo."
+    );
+    if (!ok) return;
+    setError(null);
+    const { error } = await createClient().rpc("eliminar_usuario", { p_id: p.id });
+    if (error) {
+      setError(error.message.includes("eliminar_usuario") && error.message.includes("function") ? "Falta ejecutar eliminar-usuario.sql en Supabase." : error.message);
+      return;
+    }
+    router.refresh();
+  }
+
   async function guardar(id: string) {
     setError(null);
     setGuardando(true);
@@ -168,13 +184,21 @@ export default function UsuariosClient({
                       {p.rol === "administrador" ? "Todo" : nombreGrupo(p.grupo_id) ?? <span className="text-amber-700">Sin grupo (sin acceso)</span>}
                     </td>
                     <td className="text-ink/60">{p.area || "—"}</td>
-                    <td className="text-right">
+                    <td className="text-right whitespace-nowrap">
                       <button
                         className="text-brand-600 hover:underline text-sm"
                         onClick={() => abrirEdicion(p)}
                       >
                         Editar
                       </button>
+                      {p.id !== miPropioId && (
+                        <button
+                          className="text-ink/40 hover:text-red-600 hover:underline text-sm ml-3"
+                          onClick={() => eliminar(p)}
+                        >
+                          Eliminar
+                        </button>
+                      )}
                     </td>
                   </>
                 )}
