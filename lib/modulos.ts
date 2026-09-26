@@ -22,7 +22,7 @@ export const INICIO_MODULO: Record<Modulo, string> = {
   auditoria: "/auditoria",
 };
 
-const RUTAS_SEGURIDAD = ["/inventario/seguridad", "/inventario/riesgos"];
+const RUTAS_SEGURIDAD = ["/inventario/seguridad", "/inventario/riesgos", "/inventario/vulnerabilidades"];
 
 // null = ruta sin solapa (login, usuarios, etc.)
 export function moduloDeRuta(pathname: string): Modulo | null {
@@ -33,6 +33,6 @@ export function moduloDeRuta(pathname: string): Modulo | null {
   if (pathname.startsWith("/inventario/ubicacion")) return "ubicacion";
   if (RUTAS_SEGURIDAD.some((r) => pathname.startsWith(r))) return "seguridad";
   if (pathname.startsWith("/inventario")) return "inventario";
-  if (pathname === "/" || pathname.startsWith("/licencias") || pathname.startsWith("/asignaciones") || pathname.startsWith("/reportes")) return "licencias";
+  if (pathname === "/" || pathname.startsWith("/licencias") || pathname.startsWith("/asignaciones") || pathname.startsWith("/reportes") || pathname.startsWith("/vencimientos")) return "licencias";
   return null;
 }

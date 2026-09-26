@@ -8,6 +8,10 @@ export const SECCION: Record<string, string> = {
   inv_redes: "Redes de la empresa", asistencia_config: "Política de asistencia", asistencia_feriados: "Feriados",
   asistencia_excepciones: "Días justificados", red_mapas: "Mapas de PRTG", red_puente_config: "Puente de PRTG",
   red_conexiones: "Diagrama de red",
+  alertas_config: "Alertas", empleados_plantilla: "Tareas modelo de altas y bajas", empleados_movimientos: "Altas y bajas",
+  empleados_tareas: "Tareas de altas y bajas", empleados_actas: "Actas de equipos", vencimientos: "Vencimientos",
+  vuln_productos: "Aplicaciones controladas (vulnerabilidades)", revision_campanas: "Revisión de accesos",
+  revision_items: "Revisión de accesos (usuarios)", eset_config: "Integración con ESET", eset_detecciones: "Detecciones de ESET",
 };
 
 const CAMPO: Record<string, string> = {

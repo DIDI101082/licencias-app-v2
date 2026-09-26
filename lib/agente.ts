@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.7";
+export const AGENTE_VERSION = "1.8";
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -266,6 +266,17 @@ function Obtener-Antivirus {
     })
   } catch { }
   $mp = Obtener { Get-MpComputerStatus }
+  if ($productos.Count -eq 0) {
+    # Servidores con ESET Server Security: no hay Centro de seguridad, se mira el servicio de ESET
+    $ekrn = Obtener { Get-Service -Name ekrn -ErrorAction Stop }
+    if ($ekrn) {
+      $productos = @([ordered]@{
+        nombre      = 'ESET Server Security'
+        activo      = ([string]$ekrn.Status -eq 'Running')
+        actualizado = $true
+      })
+    }
+  }
   if ($productos.Count -eq 0 -and $mp) {
     # Servidores: no tienen Centro de seguridad, se usa Defender directo
     $productos = @([ordered]@{
@@ -418,6 +429,13 @@ try {
   $admins = @(Obtener { Obtener-Admins } | Where-Object { $_ })
   $fw = [ordered]@{}
   Obtener { Get-NetFirewallProfile | ForEach-Object { $fw[[string]$_.Name] = ([string]$_.Enabled -eq 'True') } } | Out-Null
+  # Si otro firewall (por ejemplo el de ESET Endpoint Security) esta activo, Windows apaga el suyo: manda ese
+  $fwTerceros = @(Obtener { Get-CimInstance -Namespace 'root\SecurityCenter2' -ClassName FirewallProduct -ErrorAction Stop } |
+    Where-Object { $_ -and (((([int]$_.productState) -shr 12) -band 0xF) -eq 1) })
+  if ($fwTerceros.Count -gt 0) {
+    $fw = [ordered]@{}
+    $fwTerceros | ForEach-Object { $fw[[string]$_.displayName] = $true }
+  }
   $av = Obtener-Antivirus
   $mpEstado = Obtener { Get-MpComputerStatus }
   $amenazas = Obtener { Obtener-Amenazas }

@@ -13,7 +13,10 @@ const modulos = [
     id: "empleados",
     label: "Empleados",
     inicio: "/empleados",
-    links: [{ href: "/empleados", label: "Empleados" }],
+    links: [
+      { href: "/empleados", label: "Empleados" },
+      { href: "/empleados/movimientos", label: "Altas y bajas" },
+    ],
     admin: [] as { href: string; label: string }[],
   },
   {
@@ -25,6 +28,7 @@ const modulos = [
       { href: "/licencias", label: "Licencias" },
       { href: "/asignaciones", label: "Asignaciones" },
       { href: "/reportes", label: "Reportes" },
+      { href: "/vencimientos", label: "Vencimientos" },
     ],
     admin: [] as { href: string; label: string }[],
   },
@@ -49,6 +53,7 @@ const modulos = [
     links: [
       { href: "/inventario/seguridad", label: "Estado de los equipos" },
       { href: "/inventario/riesgos", label: "Riesgos" },
+      { href: "/inventario/vulnerabilidades", label: "Vulnerabilidades" },
     ],
     admin: [] as { href: string; label: string }[],
   },
@@ -74,11 +79,13 @@ const modulos = [
   {
     id: "auditoria",
     label: "Logs",
-    titulo: "Registro de cambios y accesos",
+    titulo: "Registro de cambios, accesos y alertas",
     inicio: "/auditoria",
     links: [
       { href: "/auditoria", label: "Cambios" },
       { href: "/auditoria/sesiones", label: "Inicios de sesión" },
+      { href: "/auditoria/alertas", label: "Alertas" },
+      { href: "/auditoria/revision", label: "Revisión de accesos" },
     ],
     admin: [] as { href: string; label: string }[],
   },
@@ -103,6 +110,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
 
   function esActual(href: string) {
     if (href === "/" || href === "/inventario" || href === "/inventario/ubicacion" || href === "/auditoria") return pathname === href;
+    if (href === "/empleados") return pathname === href || (/^\/empleados\/[^/]+$/.test(pathname) && !pathname.startsWith("/empleados/movimientos"));
     return pathname.startsWith(href);
   }
 

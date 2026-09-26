@@ -83,7 +83,9 @@ export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado
   const apagados = perfiles.filter(([, v]) => !v).map(([k]) => PERFILES[k] ?? k);
   const firewall: Resultado = perfiles.length === 0 ? sin
     : apagados.length ? { nivel: "problema", texto: apagados.length === 1 && apagados[0] === "Firewall" ? "Apagado" : `Apagado: ${apagados.join(", ")}` }
-    : { nivel: "ok", texto: "Activo" };
+    : perfiles.some(([k]) => !PERFILES[k] && k !== "Firewall")
+      ? { nivel: "ok", texto: perfiles.map(([k]) => k).join(", ") }   // firewall de terceros (ej. ESET)
+      : { nivel: "ok", texto: "Activo" };
 
   // Antivirus
   const activos = (d.av_productos ?? []).filter((p: any) => p.activo);

@@ -8,9 +8,10 @@ import { usePerfil } from "@/components/PerfilContext";
 import { fecha, claseCodigo } from "@/lib/inventario";
 import { hace } from "@/lib/monitoreo";
 import ConexionesInusuales from "@/components/ConexionesInusuales";
+import DeteccionesEset from "@/components/DeteccionesEset";
 import { soporteWindows, estadoAmenaza, archivoAmenaza, SEVERIDAD, SUGERIDOS, DIAS_AVISO_SOPORTE } from "@/lib/riesgos";
 
-type Vista = "amenazas" | "sistemas" | "prohibido" | "conexiones";
+type Vista = "eset" | "amenazas" | "sistemas" | "prohibido" | "conexiones";
 
 function Tarjeta({ titulo, n, activa, onClick, peligro = true }: { titulo: string; n: number; activa?: boolean; onClick?: () => void; peligro?: boolean }) {
   return (
@@ -357,13 +358,22 @@ function Prohibido() {
 function Contenido() {
   const params = useSearchParams();
   const router = useRouter();
-  const vista = (params.get("vista") as Vista) || "amenazas";
-  const pestañas: [Vista, string][] = [["amenazas", "Amenazas de Defender"], ["sistemas", "Sistemas sin soporte"], ["prohibido", "Software prohibido"], ["conexiones", "Conexiones inusuales"]];
+  const vista = (params.get("vista") as Vista) || "eset";
+  // ESET es el antivirus de la empresa; la pestaña de Defender aparece solo si algún equipo informó detecciones de Defender
+  const [hayDefender, setHayDefender] = useState(false);
+  useEffect(() => {
+    createClient().from("inv_amenazas").select("id", { count: "exact", head: true }).then(({ count }) => setHayDefender((count ?? 0) > 0));
+  }, []);
+  const pestañas: [Vista, string][] = [
+    ["eset", "Detecciones de ESET"],
+    ...(hayDefender || vista === "amenazas" ? [["amenazas", "Microsoft Defender"] as [Vista, string]] : []),
+    ["sistemas", "Sistemas sin soporte"], ["prohibido", "Software prohibido"], ["conexiones", "Conexiones inusuales"],
+  ];
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl text-ink">Riesgos</h1>
-        <p className="text-ink/60 text-sm mt-1">Amenazas detectadas, sistemas operativos sin parches de Microsoft y software no permitido.</p>
+        <p className="text-ink/60 text-sm mt-1">Detecciones de ESET, sistemas operativos sin soporte, software no permitido y conexiones inusuales.</p>
       </div>
       <div role="tablist" className="flex gap-1 border-b border-black/[0.08]">
         {pestañas.map(([k, t]) => (
@@ -373,6 +383,7 @@ function Contenido() {
           </button>
         ))}
       </div>
+      {vista === "eset" && <DeteccionesEset />}
       {vista === "amenazas" && <Amenazas />}
       {vista === "sistemas" && <Sistemas />}
       {vista === "prohibido" && <Prohibido />}

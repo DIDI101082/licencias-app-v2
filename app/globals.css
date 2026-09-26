@@ -69,3 +69,9 @@ table.data td {
 .tag-per {
   @apply bg-[#7DD3FC] text-[#082f49] border-[#082f49];
 }
+
+/* ---------- Impresión (actas, informes) ---------- */
+@media print {
+  @page { size: A4; margin: 16mm; }
+  body { background: white !important; }
+}

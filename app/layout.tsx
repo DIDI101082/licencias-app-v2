@@ -32,7 +32,7 @@ export default async function RootLayout({
         <PerfilProvider perfil={perfil}>
           {perfil && <RegistrarIngreso />}
           {perfil && <Nav nombre={perfil.nombre} rol={perfil.rol} modulos={perfil.modulos ?? []} />}
-          <main className="mx-auto max-w-6xl px-6 py-8">
+          <main className="mx-auto max-w-6xl px-6 py-8 print:p-0 print:max-w-none">
             {perfil ? <GuardiaModulo modulos={perfil.modulos ?? []}>{children}</GuardiaModulo> : children}
           </main>
         </PerfilProvider>

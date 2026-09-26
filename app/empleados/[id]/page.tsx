@@ -5,6 +5,9 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { claseCodigo, fecha, dinero } from "@/lib/inventario";
 import { conectado, hace } from "@/lib/monitoreo";
+import { useRouter } from "next/navigation";
+import { usePerfil } from "@/components/PerfilContext";
+import NuevaActa from "@/components/NuevaActa";
 
 const UBICACION: Record<string, { texto: string; clase: string }> = {
   oficina: { texto: "En la oficina", clase: "bg-brand-50 text-brand-700" },
@@ -28,6 +31,19 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
   const [histEquipos, setHistEquipos] = useState<any[]>([]);
   const [licencias, setLicencias] = useState<any[]>([]);
   const [vivos, setVivos] = useState<Record<string, any>>({});
+  const [movs, setMovs] = useState<any[]>([]);
+  const [actas, setActas] = useState<any[]>([]);
+  const [acta, setActa] = useState<"entrega" | "devolucion" | null>(null);
+  const [errorAccion, setErrorAccion] = useState<string | null>(null);
+  const { puedeEditar } = usePerfil();
+  const router = useRouter();
+
+  async function iniciar(tipo: "alta" | "baja") {
+    setErrorAccion(null);
+    const { data, error } = await createClient().rpc("empleados_iniciar", { p_empleado: params.id, p_tipo: tipo });
+    if (error) return setErrorAccion(error.message);
+    router.push(`/empleados/movimientos/${data}`);
+  }
 
   useEffect(() => {
     const sb = createClient();
@@ -50,6 +66,13 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
       setEquipos(lista.sort((a: any, b: any) => Number(a.grupo === "Periféricos") - Number(b.grupo === "Periféricos")));
       setHistEquipos(he.data ?? []);
       setLicencias(li.data ?? []);
+      // Altas/bajas y actas (si todavía no se ejecutó altas-bajas.sql, quedan vacías)
+      const [mv, ac] = await Promise.all([
+        sb.from("empleados_movimientos").select("id, tipo, estado, fecha").eq("empleado_id", params.id).order("creado", { ascending: false }),
+        sb.from("empleados_actas").select("id, numero, tipo, fecha").eq("empleado_id", params.id).order("fecha", { ascending: false }),
+      ]);
+      setMovs(mv.data ?? []);
+      setActas(ac.data ?? []);
       if (lista.length) {
         const { data: d } = await sb.from("inv_dispositivos")
           .select("equipo_id, hostname, ultimo_reporte, ubicacion_tipo, ubicacion_sede, ubicacion_red")
@@ -116,9 +139,27 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
             <span className={`pill ${emp.activo ? "bg-emerald-50 text-emerald-700" : "bg-black/[0.05] text-ink/50"}`}>{emp.activo ? "Activo" : "Inactivo"}</span>
             {emp.entra_id && <span className="pill bg-brand-50 text-brand-700">Sincronizado con Entra ID</span>}
             {!emp.activo && equipos.length > 0 && <span className="pill bg-red-50 text-red-600">Tiene equipos para recuperar</span>}
+            {movs.filter((m) => m.estado === "abierto").map((m) => (
+              <Link key={m.id} href={`/empleados/movimientos/${m.id}`} className={`pill ${m.tipo === "alta" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"} hover:underline`}>
+                {m.tipo === "alta" ? "Alta en curso" : "Baja en curso"} →
+              </Link>
+            ))}
           </div>
         </div>
+        {puedeEditar && (
+          <div className="flex gap-2 flex-wrap print:hidden">
+            <button className="btn-secondary" onClick={() => setActa("entrega")}>Acta de entrega</button>
+            <button className="btn-secondary" onClick={() => setActa("devolucion")}>Acta de devolución</button>
+            {!movs.some((m) => m.estado === "abierto") && (
+              <button className="btn-secondary" onClick={() => iniciar(emp.activo ? "baja" : "alta")}>
+                {emp.activo ? "Iniciar baja" : "Iniciar alta"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
+      {errorAccion && <div className="card p-3 text-sm text-red-600 bg-red-50">{errorAccion}</div>}
+      {acta && <NuevaActa empleadoId={params.id} tipo={acta} onCerrar={() => setActa(null)} />}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card p-5">
@@ -218,6 +259,37 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
           )}
         </div>
       </div>
+
+      {(movs.length > 0 || actas.length > 0) && (
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="card p-5">
+            <h2 className="font-medium text-ink mb-1">Altas y bajas</h2>
+            {movs.length === 0 ? <p className="text-sm text-ink/50">Sin registros.</p> : (
+              <ul className="space-y-1 text-sm">
+                {movs.map((m) => (
+                  <li key={m.id}>
+                    <Link href={`/empleados/movimientos/${m.id}`} className="text-brand-600 hover:underline">{m.tipo === "alta" ? "Alta" : "Baja"} del {fecha(m.fecha)}</Link>
+                    <span className="text-xs text-ink/50"> · {m.estado === "abierto" ? "en curso" : m.estado}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="card p-5">
+            <h2 className="font-medium text-ink mb-1">Actas</h2>
+            {actas.length === 0 ? <p className="text-sm text-ink/50">Sin actas.</p> : (
+              <ul className="space-y-1 text-sm">
+                {actas.map((a) => (
+                  <li key={a.id}>
+                    <Link href={`/empleados/actas/${a.id}`} className="text-brand-600 hover:underline">N° {String(a.numero).padStart(5, "0")} · {a.tipo === "entrega" ? "Entrega" : "Devolución"}</Link>
+                    <span className="text-xs text-ink/50"> · {fecha(a.fecha)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
