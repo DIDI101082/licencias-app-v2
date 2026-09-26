@@ -55,7 +55,8 @@ export default function LoginPage() {
     "focus:outline-none focus:ring-2 focus:ring-white/40 focus:border-white/40";
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-10 text-white bg-[#0A2A6E] bg-[radial-gradient(ellipse_at_top_left,#123C96_0%,transparent_55%),linear-gradient(135deg,#0A2466_0%,#0B3A9E_55%,#1449C8_100%)]">
+    // fixed + inset-0: ocupa toda la ventana, por encima del contenedor general de la app
+    <div className="fixed inset-0 z-50 overflow-y-auto flex flex-col items-center justify-center px-6 py-10 text-white bg-[#0A2A6E] bg-[radial-gradient(ellipse_at_top_left,#123C96_0%,transparent_55%),linear-gradient(135deg,#0A2466_0%,#0B3A9E_55%,#1449C8_100%)]">
       <main className="w-full max-w-md rounded-2xl border border-white/20 bg-white/[0.08] backdrop-blur-md shadow-[0_20px_60px_-15px_rgba(0,0,0,0.45)] px-8 py-9">
         <div className="flex items-center justify-center gap-4">
           {/* Logo de Accusys en blanco */}
