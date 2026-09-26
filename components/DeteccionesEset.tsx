@@ -18,8 +18,8 @@ const SEV: Record<string, { texto: string; clase: string }> = {
   HIGH: { texto: "Alta", clase: "bg-red-600 text-white" },
   MEDIUM: { texto: "Media", clase: "bg-orange-500/15 text-orange-700" },
   LOW: { texto: "Baja", clase: "bg-amber-500/15 text-amber-700" },
-  INFORMATIONAL: { texto: "Informativa", clase: "bg-black/[0.05] text-ink/60" },
-  DIAGNOSTIC: { texto: "Diagnóstico", clase: "bg-black/[0.05] text-ink/50" },
+  INFORMATIONAL: { texto: "Informativa", clase: "bg-line/[0.05] text-ink/60" },
+  DIAGNOSTIC: { texto: "Diagnóstico", clase: "bg-line/[0.05] text-ink/50" },
 };
 const CATEGORIA: Record<string, string> = {
   ANTIVIRUS: "Antivirus", HIPS: "HIPS", HIPS_RULE: "Regla HIPS", FIREWALL_RULE: "Firewall", NETWORK_INTRUSION: "Ataque de red",
@@ -105,7 +105,7 @@ export default function DeteccionesEset() {
         <div className="flex gap-1">
           {([["pendientes", "Sin resolver"], ["30dias", "Últimos 30 días"], ["todas", "Todas (90 días)"]] as const).map(([k, t]) => (
             <button key={k} onClick={() => setFiltro(k)} aria-pressed={filtro === k}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium ${filtro === k ? "bg-white text-brand-700 shadow-sm" : "text-ink/60 hover:text-ink"}`}>{t}</button>
+              className={`px-3 py-1.5 rounded-md text-sm font-medium ${filtro === k ? "bg-surface text-brand-700 shadow-sm" : "text-ink/60 hover:text-ink"}`}>{t}</button>
           ))}
         </div>
         <div className="flex gap-3 items-center">
@@ -124,7 +124,7 @@ export default function DeteccionesEset() {
           <thead><tr><th>Fecha</th><th>Equipo</th><th>Detección</th><th>Estado</th><th>Objeto</th>{puedeEditar && <th></th>}</tr></thead>
           <tbody>
             {filas.map((d) => {
-              const sev = SEV[d.severidad ?? ""] ?? { texto: d.severidad ?? "—", clase: "bg-black/[0.05] text-ink/60" };
+              const sev = SEV[d.severidad ?? ""] ?? { texto: d.severidad ?? "—", clase: "bg-line/[0.05] text-ink/60" };
               return (
                 <tr key={d.uuid} className={d.revisada || d.resuelta ? "opacity-60" : ""}>
                   <td className="whitespace-nowrap text-ink/70">{fh(d.fecha)}</td>
@@ -142,7 +142,7 @@ export default function DeteccionesEset() {
                   </td>
                   <td>
                     {d.resuelta ? <span className="pill bg-emerald-50 text-emerald-700">Resuelta por ESET</span>
-                      : d.revisada ? <span className="pill bg-black/[0.05] text-ink/60">Revisada{d.revisada_por ? ` · ${d.revisada_por}` : ""}</span>
+                      : d.revisada ? <span className="pill bg-line/[0.05] text-ink/60">Revisada{d.revisada_por ? ` · ${d.revisada_por}` : ""}</span>
                       : <span className="pill bg-red-50 text-red-600">Sin resolver</span>}
                   </td>
                   <td className="text-xs text-ink/60 max-w-[280px] break-all">

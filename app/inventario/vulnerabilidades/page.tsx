@@ -13,7 +13,7 @@ type Estado = { activo: boolean; con_clave: boolean; dias_cache: number; ultima_
 type Producto = { id: number; patron: string; excluir: string | null; cpe: string; version_regex: string; activo: boolean };
 
 const SEV: Record<string, string> = {
-  CRITICAL: "bg-red-600 text-white", HIGH: "bg-orange-500/15 text-orange-700", MEDIUM: "bg-amber-500/15 text-amber-700", LOW: "bg-black/[0.05] text-ink/60",
+  CRITICAL: "bg-red-600 text-white", HIGH: "bg-orange-500/15 text-orange-700", MEDIUM: "bg-amber-500/15 text-amber-700", LOW: "bg-line/[0.05] text-ink/60",
 };
 const SEV_ES: Record<string, string> = { CRITICAL: "Crítica", HIGH: "Alta", MEDIUM: "Media", LOW: "Baja" };
 const fh = (f: string | null) => (f ? new Date(f).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", dateStyle: "short", timeStyle: "short" }) : "—");
@@ -98,7 +98,7 @@ export default function Vulnerabilidades() {
           <tbody>
             {lista.map((f) => (
               <Fragment key={clave(f)}>
-                <tr className="cursor-pointer hover:bg-black/[0.02]" onClick={() => abrir(f)}>
+                <tr className="cursor-pointer hover:bg-line/[0.02]" onClick={() => abrir(f)}>
                   <td className="text-ink font-medium">{abierta === clave(f) ? "▾ " : "▸ "}{f.aplicacion}</td>
                   <td className="font-mono text-xs">{f.version}</td>
                   <td>{f.equipos}</td>
@@ -110,7 +110,7 @@ export default function Vulnerabilidades() {
                 </tr>
                 {abierta === clave(f) && (
                   <tr>
-                    <td colSpan={8} className="bg-[#F9FAFC]">
+                    <td colSpan={8} className="bg-canvas">
                       {!detalle ? <p className="text-sm text-ink/50">Cargando…</p> : (
                         <div className="grid lg:grid-cols-3 gap-4 py-2">
                           <div className="lg:col-span-2">
@@ -121,7 +121,7 @@ export default function Vulnerabilidades() {
                                   <li key={c.id} className="text-sm">
                                     <a href={`https://nvd.nist.gov/vuln/detail/${c.id}`} target="_blank" rel="noopener noreferrer" className="font-mono text-brand-700 hover:underline">{c.id}</a>{" "}
                                     {c.kev && <span className="pill bg-red-600 text-white">Explotada</span>}{" "}
-                                    <span className={`pill ${SEV[c.severidad] ?? "bg-black/[0.05] text-ink/60"}`}>{SEV_ES[c.severidad] ?? "Sin puntaje"}{c.cvss != null ? ` ${c.cvss}` : ""}</span>
+                                    <span className={`pill ${SEV[c.severidad] ?? "bg-line/[0.05] text-ink/60"}`}>{SEV_ES[c.severidad] ?? "Sin puntaje"}{c.cvss != null ? ` ${c.cvss}` : ""}</span>
                                     <div className="text-xs text-ink/60 mt-0.5">{c.descripcion}</div>
                                     {c.kev && c.accion && <div className="text-xs text-red-700 mt-0.5">CISA: {c.accion}</div>}
                                   </li>

@@ -14,7 +14,7 @@ function navegador(ua: string | null) {
 }
 const ACCION: Record<string, { texto: string; clase: string }> = {
   login: { texto: "Inicio de sesión", clase: "bg-emerald-50 text-emerald-700" },
-  logout: { texto: "Cierre de sesión", clase: "bg-black/[0.05] text-ink/60" },
+  logout: { texto: "Cierre de sesión", clase: "bg-line/[0.05] text-ink/60" },
   user_signedup: { texto: "Primer ingreso", clase: "bg-brand-50 text-brand-700" },
   user_deleted: { texto: "Usuario eliminado", clase: "bg-red-50 text-red-600" },
   user_invited: { texto: "Invitación", clase: "bg-brand-50 text-brand-700" },
@@ -58,7 +58,7 @@ export default function Sesiones() {
               <tr key={i}>
                 <td className="whitespace-nowrap text-sm text-ink/70">{new Date(f.fecha).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", dateStyle: "short", timeStyle: "medium" })}</td>
                 <td className="text-ink">{f.email ?? "—"}</td>
-                <td><span className={`pill ${ACCION[f.accion]?.clase ?? "bg-black/[0.05] text-ink/60"}`}>{ACCION[f.accion]?.texto ?? f.accion}</span></td>
+                <td><span className={`pill ${ACCION[f.accion]?.clase ?? "bg-line/[0.05] text-ink/60"}`}>{ACCION[f.accion]?.texto ?? f.accion}</span></td>
                 <td className="text-ink/70">{f.proveedor ? METODO[f.proveedor] ?? f.proveedor : "—"}</td>
                 <td className="text-ink/70 whitespace-nowrap" title={f.navegador ?? undefined}>{navegador(f.navegador)}</td>
                 <td className="text-xs text-ink/60 font-mono">{f.ip ?? "—"}</td>

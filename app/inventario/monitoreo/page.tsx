@@ -136,7 +136,7 @@ export default function Monitoreo() {
               es de la empresa, bloquealo y revisá desde qué IP se registró.
             </p>
           </div>
-          <ul className="divide-y divide-black/[0.06]">
+          <ul className="divide-y divide-line/[0.06]">
             {pendientes.map((d) => (
               <li key={d.id} className="py-3 flex items-start justify-between gap-4 flex-wrap">
                 <div className="text-sm min-w-0">
@@ -165,7 +165,7 @@ export default function Monitoreo() {
       {esAdmin && bloqueados.length > 0 && (
         <details className="card p-4">
           <summary className="cursor-pointer text-sm font-medium text-ink">Equipos bloqueados ({bloqueados.length})</summary>
-          <ul className="mt-3 divide-y divide-black/[0.06]">
+          <ul className="mt-3 divide-y divide-line/[0.06]">
             {bloqueados.map((d) => (
               <li key={d.id} className="py-2 flex items-center justify-between gap-3 text-sm">
                 <span>
@@ -197,10 +197,10 @@ export default function Monitoreo() {
               const ramUso = d.ram_total_gb ? Math.round(((d.ram_total_gb - d.ram_libre_gb) / d.ram_total_gb) * 100) : null;
               return (
                 <Fragment key={d.id}>
-                  <tr className="hover:bg-black/[0.015] cursor-pointer" onClick={() => setAbierto(abierto === d.id ? null : d.id)}>
+                  <tr className="hover:bg-line/[0.015] cursor-pointer" onClick={() => setAbierto(abierto === d.id ? null : d.id)}>
                     <td>
                       <div className="flex items-center gap-2">
-                        <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${on ? "bg-emerald-500" : "bg-black/20"}`}
+                        <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${on ? "bg-emerald-500" : "bg-line/20"}`}
                           aria-label={on ? "Conectado" : "Desconectado"} title={on ? "Conectado" : "Desconectado"} />
                         <button className="font-medium text-ink hover:underline text-left" aria-expanded={abierto === d.id}>
                           {d.hostname}
@@ -230,7 +230,7 @@ export default function Monitoreo() {
                   </tr>
                   {abierto === d.id && (
                     <tr>
-                      <td colSpan={6} className="bg-[#F5F7FB]">
+                      <td colSpan={6} className="bg-canvas">
                         <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 text-sm py-1">
                           <div><dt className="text-ink/50 text-xs">Fabricante y modelo</dt><dd>{d.fabricante} {d.modelo}</dd></div>
                           <div><dt className="text-ink/50 text-xs">N° de serie</dt><dd>{d.numero_serie ?? "—"}</dd></div>

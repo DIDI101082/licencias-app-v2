@@ -84,7 +84,7 @@ function MapasPrtg() {
             <div className="md:col-span-6"><button className="btn-primary">Agregar mapa</button></div>
           </form>
           {mapas.length > 0 && (
-            <ul className="text-sm divide-y divide-black/[0.05]">
+            <ul className="text-sm divide-y divide-line/[0.05]">
               {mapas.map((m) => (
                 <li key={m.id} className="flex items-center justify-between gap-3 py-2">
                   <span className="min-w-0"><b>{m.nombre}</b> <span className="text-ink/50 text-xs break-all">{m.url.replace(/([?&](mapid|key)=)[^&]+/i, "$1•••")}</span></span>
@@ -101,7 +101,7 @@ function MapasPrtg() {
       )}
 
       {mapas.length > 1 && (
-        <div role="tablist" className="flex gap-1 border-b border-black/[0.08]">
+        <div role="tablist" className="flex gap-1 border-b border-line/[0.08]">
           {mapas.map((m) => (
             <button key={m.id} role="tab" aria-selected={m.id === activo} onClick={() => setActivo(m.id)}
               className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${m.id === activo ? "border-brand-600 text-brand-700" : "border-transparent text-ink/60 hover:text-ink"}`}>
@@ -152,7 +152,7 @@ export default function MonitoreoRed() {
         <h1 className="font-display text-2xl text-ink">Monitoreo de red</h1>
         <p className="text-ink/60 text-sm mt-1">Estado de los equipos monitoreados por PRTG, agrupados por sede.</p>
       </div>
-      <div role="tablist" className="flex gap-1 border-b border-black/[0.08]">
+      <div role="tablist" className="flex gap-1 border-b border-line/[0.08]">
         {([["auto", "Mapa automático"], ["prtg", "Mapas de PRTG"]] as const).map(([k, t]) => (
           <button key={k} role="tab" aria-selected={vista === k} onClick={() => setVista(k)}
             className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${vista === k ? "border-brand-600 text-brand-700" : "border-transparent text-ink/60 hover:text-ink"}`}>

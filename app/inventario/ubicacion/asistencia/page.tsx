@@ -28,14 +28,14 @@ const CELDA: Record<Dia["estado"], { texto: string; clase: string }> = {
   oficina: { texto: "Oficina", clase: "bg-brand-50 text-brand-700" },
   home: { texto: "Home", clase: "bg-emerald-50 text-emerald-700" },
   sin_datos: { texto: "—", clase: "text-ink/30" },
-  feriado: { texto: "Feriado", clase: "bg-black/[0.05] text-ink/50" },
+  feriado: { texto: "Feriado", clase: "bg-line/[0.05] text-ink/50" },
   justificado: { texto: "Justif.", clase: "bg-violet-50 text-violet-700" },
 };
 const RESULTADO: Record<Resultado, { texto: string; clase: string }> = {
   cumple: { texto: "Cumple", clase: "bg-emerald-50 text-emerald-700" },
   no_cumple: { texto: "No cumple", clase: "bg-red-50 text-red-600" },
   en_curso: { texto: "En curso", clase: "bg-amber-500/10 text-amber-700" },
-  sin_datos: { texto: "Sin datos", clase: "bg-black/[0.05] text-ink/50" },
+  sin_datos: { texto: "Sin datos", clase: "bg-line/[0.05] text-ink/50" },
 };
 
 function evaluarSemana(dias: Dia[], requeridosPolitica: number, hoy: string) {
@@ -176,7 +176,7 @@ export default function Asistencia() {
               <input required className="input flex-1 min-w-[200px]" placeholder="Día de la Soberanía Nacional" value={nuevoFeriado.nombre} onChange={(e) => setNuevoFeriado({ ...nuevoFeriado, nombre: e.target.value })} />
               <button className="btn-secondary">Agregar feriado</button>
             </form>
-            <ul className="text-sm divide-y divide-black/[0.05]">
+            <ul className="text-sm divide-y divide-line/[0.05]">
               {feriados.map((f) => (
                 <li key={f.fecha} className="flex justify-between py-1.5">
                   <span>{f.fecha.split("-").reverse().join("/")} · {f.nombre}</span>

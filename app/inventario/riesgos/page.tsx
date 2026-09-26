@@ -109,7 +109,7 @@ function Amenazas() {
         <div className="flex gap-1">
           {([["pendientes", "Sin resolver"], ["30dias", "Últimos 30 días"], ["todas", "Todas (90 días)"]] as const).map(([k, t]) => (
             <button key={k} onClick={() => setFiltro(k)} aria-pressed={filtro === k}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium ${filtro === k ? "bg-white text-brand-700 shadow-sm" : "text-ink/60 hover:text-ink"}`}>{t}</button>
+              className={`px-3 py-1.5 rounded-md text-sm font-medium ${filtro === k ? "bg-surface text-brand-700 shadow-sm" : "text-ink/60 hover:text-ink"}`}>{t}</button>
           ))}
         </div>
         <div className="flex gap-3 items-center">
@@ -199,7 +199,7 @@ function Sistemas() {
   const visibles = filas.filter((d) => !filtro || d.sp.nivel === filtro).sort((a, b) => orden[a.sp.nivel as keyof typeof orden] - orden[b.sp.nivel as keyof typeof orden]);
   const n = (k: string) => filas.filter((d) => d.sp.nivel === k).length;
   const clase: Record<string, string> = {
-    problema: "bg-red-50 text-red-600", aviso: "bg-amber-500/10 text-amber-700", ok: "bg-emerald-50 text-emerald-700", sin_datos: "bg-black/[0.05] text-ink/50",
+    problema: "bg-red-50 text-red-600", aviso: "bg-amber-500/10 text-amber-700", ok: "bg-emerald-50 text-emerald-700", sin_datos: "bg-line/[0.05] text-ink/50",
   };
 
   return (
@@ -295,7 +295,7 @@ function Prohibido() {
           {error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
           {reglas.length === 0 && !esAdmin && <p className="text-sm text-ink/50">Todavía no hay reglas cargadas.</p>}
           {reglas.length > 0 && (
-            <ul className="divide-y divide-black/[0.05]">
+            <ul className="divide-y divide-line/[0.05]">
               {reglas.map((r) => (
                 <li key={r.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                   <span><b>{r.patron}</b>{r.motivo && <span className="text-ink/60"> · {r.motivo}</span>}</span>
@@ -375,7 +375,7 @@ function Contenido() {
         <h1 className="font-display text-2xl text-ink">Riesgos</h1>
         <p className="text-ink/60 text-sm mt-1">Detecciones de ESET, sistemas operativos sin soporte, software no permitido y conexiones inusuales.</p>
       </div>
-      <div role="tablist" className="flex gap-1 border-b border-black/[0.08]">
+      <div role="tablist" className="flex gap-1 border-b border-line/[0.08]">
         {pestañas.map(([k, t]) => (
           <button key={k} role="tab" aria-selected={vista === k} onClick={() => router.replace(`/inventario/riesgos?vista=${k}`)}
             className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${vista === k ? "border-brand-600 text-brand-700" : "border-transparent text-ink/60 hover:text-ink"}`}>

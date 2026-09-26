@@ -199,7 +199,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
               {otros.length === 0 ? (
                 <p className="text-sm text-ink/50">No tiene periféricos ni otros equipos asignados.</p>
               ) : (
-                <ul className="divide-y divide-black/[0.05]">
+                <ul className="divide-y divide-line/[0.05]">
                   {otros.map((o) => (
                     <li key={o.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                       <span className="flex items-center gap-2 min-w-0">
@@ -248,7 +248,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
             {mant.length > 0 && (
               <ul className="space-y-2">
                 {mant.map((m) => (
-                  <li key={m.id} className="text-sm flex justify-between gap-3 border-b border-black/[0.04] pb-2 last:border-0">
+                  <li key={m.id} className="text-sm flex justify-between gap-3 border-b border-line/[0.04] pb-2 last:border-0">
                     <span>
                       {m.descripcion}
                       <span className="block text-xs text-ink/50">
@@ -301,7 +301,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
             <div className="card p-5 print:hidden">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-medium text-ink flex items-center gap-2">
-                  <span className={`h-2.5 w-2.5 rounded-full ${conectado(vivo.ultimo_reporte) ? "bg-emerald-500" : "bg-black/20"}`} />
+                  <span className={`h-2.5 w-2.5 rounded-full ${conectado(vivo.ultimo_reporte) ? "bg-emerald-500" : "bg-line/20"}`} />
                   {conectado(vivo.ultimo_reporte) ? "Conectado" : "Desconectado"}
                 </h2>
                 <span className="text-xs text-ink/50">Último reporte {hace(vivo.ultimo_reporte)}</span>
@@ -326,7 +326,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
               {vivo.seguridad_actualizado && (() => {
                 const ev = evaluar(vivo, permitidos);
                 return (
-                  <div className="mt-4 pt-3 border-t border-black/[0.06]">
+                  <div className="mt-4 pt-3 border-t border-line/[0.06]">
                     <div className="text-xs text-ink/50 mb-2">Seguridad</div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                       {CONTROLES.map((c) => (

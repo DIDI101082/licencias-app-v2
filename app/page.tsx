@@ -93,7 +93,7 @@ export default async function DashboardPage() {
                 return (
                   <li
                     key={l.id}
-                    className="flex items-center justify-between text-sm border-b border-black/[0.04] pb-2 last:border-0 last:pb-0"
+                    className="flex items-center justify-between text-sm border-b border-line/[0.04] pb-2 last:border-0 last:pb-0"
                   >
                     <span className="text-ink">{l.nombre}</span>
                     <span
@@ -102,7 +102,7 @@ export default async function DashboardPage() {
                           ? "bg-red-50 text-red-600"
                           : dias <= 7
                           ? "bg-amber-500/10 text-amber-600"
-                          : "bg-black/[0.04] text-ink/60"
+                          : "bg-line/[0.04] text-ink/60"
                       }`}
                     >
                       {dias < 0 ? `Venció hace ${-dias} días` : `Vence en ${dias} días`}
@@ -128,7 +128,7 @@ export default async function DashboardPage() {
               {asignaciones.map((a: any) => (
                 <li
                   key={a.id}
-                  className="flex items-center justify-between text-sm border-b border-black/[0.04] pb-2 last:border-0 last:pb-0"
+                  className="flex items-center justify-between text-sm border-b border-line/[0.04] pb-2 last:border-0 last:pb-0"
                 >
                   <span className="text-ink">
                     {a.empleados?.nombre} {a.empleados?.apellido}

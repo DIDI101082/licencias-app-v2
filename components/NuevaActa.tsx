@@ -60,7 +60,7 @@ export default function NuevaActa({ empleadoId, tipo, onCerrar }: { empleadoId: 
             Asignalos primero en Inventario IT.
           </p>
         ) : (
-          <ul className="divide-y divide-black/[0.05] max-h-72 overflow-y-auto">
+          <ul className="divide-y divide-line/[0.05] max-h-72 overflow-y-auto">
             {equipos.map((e) => (
               <li key={e.id}>
                 <label className="flex items-start gap-3 py-2 text-sm cursor-pointer">

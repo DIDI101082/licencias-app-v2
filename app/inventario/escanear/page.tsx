@@ -240,7 +240,7 @@ export default function Escanear() {
               const sel = String(cfg.categoria_id) === String(c.id);
               return (
                 <button key={c.id} type="button" onClick={() => setCfg((p) => ({ ...p, categoria_id: c.id }))} aria-pressed={sel}
-                  className={`rounded-lg border px-3 py-3 text-sm font-medium text-left ${sel ? "border-brand-500 bg-brand-50 text-brand-700" : "border-black/10 text-ink hover:border-brand-300"}`}>
+                  className={`rounded-lg border px-3 py-3 text-sm font-medium text-left ${sel ? "border-brand-500 bg-brand-50 text-brand-700" : "border-line/10 text-ink hover:border-brand-300"}`}>
                   {n}
                 </button>
               );
@@ -367,8 +367,8 @@ export default function Escanear() {
 
       {cargados.length > 0 && (
         <div className="card overflow-hidden">
-          <div className="px-4 py-2 text-xs text-ink/50 border-b border-black/[0.06]">Cargados en esta tanda</div>
-          <ul className="divide-y divide-black/[0.05]">
+          <div className="px-4 py-2 text-xs text-ink/50 border-b border-line/[0.06]">Cargados en esta tanda</div>
+          <ul className="divide-y divide-line/[0.05]">
             {cargados.map((c) => (
               <li key={c.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
                 <span className="flex items-center gap-2 min-w-0">

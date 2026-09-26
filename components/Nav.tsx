@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Mark from "./Mark";
 import { moduloDeRuta } from "@/lib/modulos";
+import { type Tema, temaGuardado, guardarTema, aplicarTema } from "@/lib/tema";
 
 // Cada solapa es un módulo con sus propias secciones
 const modulos = [
@@ -123,7 +124,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
   }
 
   return (
-    <header className="border-b border-black/[0.06] bg-white print:hidden">
+    <header className="border-b border-line/[0.06] bg-surface print:hidden">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-4 flex items-center gap-3 sm:gap-5">
         <Link href="/" className="flex items-end gap-1.5 shrink-0" aria-label="Accusys Cyber, inicio">
           <Mark className="h-6" />
@@ -133,7 +134,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
         <div
           role="tablist"
           aria-label="Módulos"
-          className="flex gap-1 border-l border-black/10 pl-3 sm:pl-5 min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex gap-1 border-l border-line/10 pl-3 sm:pl-5 min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {visibles.map((m) => {
             const sel = m.id === activo.id;
@@ -145,7 +146,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
                 aria-selected={sel}
                 title={(m as { titulo?: string }).titulo ?? m.label}
                 className={`font-display font-bold tracking-tight px-3 py-2 whitespace-nowrap text-sm lg:text-base rounded-t-lg border-x border-t -mb-px transition-colors shrink-0 ${
-                  sel ? "bg-[#F5F7FB] border-black/[0.06] text-ink" : "border-transparent text-ink/45 hover:text-ink"
+                  sel ? "bg-canvas border-line/[0.06] text-ink" : "border-transparent text-ink/45 hover:text-ink"
                 }`}
               >
                 {m.label}
@@ -157,7 +158,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
         <MenuUsuario nombre={nombre} rol={rol} esAdmin={esAdmin} enUsuarios={pathname.startsWith("/usuarios")} onSalir={salir} />
       </div>
       {/* Secciones de la solapa activa */}
-      <nav className="bg-[#F5F7FB] border-t border-black/[0.06]">
+      <nav className="bg-canvas border-t border-line/[0.06]">
         <div className="mx-auto max-w-6xl px-6 py-2 flex gap-1 overflow-x-auto">
           {subLinks.map((l) => (
             <Link
@@ -166,7 +167,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
               aria-current={esActual(l.href) ? "page" : undefined}
               className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
                 esActual(l.href)
-                  ? "bg-white text-brand-700 shadow-sm"
+                  ? "bg-surface text-brand-700 shadow-sm"
                   : "text-ink/60 hover:text-ink hover:bg-white/60"
               }`}
             >
@@ -216,16 +217,17 @@ function MenuUsuario({ nombre, rol, esAdmin, enUsuarios, onSalir }: {
       </button>
       {abierto && (
         <div role="menu" className="absolute right-0 top-11 z-50 w-64 card p-2 shadow-lg">
-          <div className="px-3 py-2 border-b border-black/[0.06] mb-1">
+          <div className="px-3 py-2 border-b border-line/[0.06] mb-1">
             <div className="text-sm font-medium text-ink break-all">{nombre}</div>
             <div className="text-xs text-ink/50">{rolLabel[rol] ?? rol}</div>
           </div>
           {esAdmin && (
             <Link href="/usuarios" role="menuitem" onClick={() => setAbierto(false)}
-              className="block px-3 py-2 rounded-md text-sm text-ink hover:bg-black/[0.04]">
+              className="block px-3 py-2 rounded-md text-sm text-ink hover:bg-line/[0.04]">
               Usuarios y accesos
             </Link>
           )}
+          <SelectorTema />
           <button role="menuitem" onClick={onSalir} className="w-full text-left px-3 py-2 rounded-md text-sm text-red-600 hover:bg-red-50">
             Cerrar sesión
           </button>
@@ -265,5 +267,35 @@ function Reloj() {
       <span className="font-display font-bold text-ink text-base tabular-nums">{hora}</span>
       <span className="text-xs text-ink/50 capitalize">{dia} {fecha}</span>
     </time>
+  );
+}
+
+// Claro / Oscuro / Automático (sigue a Windows, macOS o el celular)
+function SelectorTema() {
+  const [tema, setTema] = useState<Tema>("auto");
+
+  useEffect(() => {
+    setTema(temaGuardado());
+    // en automático, acompaña los cambios del sistema (por ejemplo, el modo nocturno)
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const cambio = () => { if (temaGuardado() === "auto") aplicarTema("auto"); };
+    mq.addEventListener("change", cambio);
+    return () => mq.removeEventListener("change", cambio);
+  }, []);
+
+  const opciones: [Tema, string, string][] = [["claro", "☀", "Claro"], ["oscuro", "☾", "Oscuro"], ["auto", "◐", "Auto"]];
+  return (
+    <div className="px-3 py-2 border-b border-line/[0.06] mb-1">
+      <div className="text-xs text-ink/50 mb-1.5">Apariencia</div>
+      <div role="radiogroup" aria-label="Apariencia" className="grid grid-cols-3 gap-1 rounded-lg bg-line/[0.05] p-0.5">
+        {opciones.map(([k, icono, texto]) => (
+          <button key={k} role="radio" aria-checked={tema === k}
+            onClick={() => { setTema(k); guardarTema(k); }}
+            className={`rounded-md py-1 text-xs font-medium transition-colors ${tema === k ? "bg-surface text-ink shadow-sm" : "text-ink/55 hover:text-ink"}`}>
+            <span aria-hidden className="mr-1">{icono}</span>{texto}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

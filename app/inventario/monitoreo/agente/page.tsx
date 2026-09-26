@@ -81,7 +81,7 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
           Mandale el archivo por Teams o por correo interno junto con este mensaje. Necesita ser administrador de su PC; si no lo es,
           alguien de IT tiene que poner la contraseña de administrador cuando Windows la pida.
         </p>
-        <pre className="bg-black/[0.03] text-ink/80 text-xs rounded-lg p-3 whitespace-pre-wrap">{mensaje}</pre>
+        <pre className="bg-line/[0.03] text-ink/80 text-xs rounded-lg p-3 whitespace-pre-wrap">{mensaje}</pre>
         <button className="btn-secondary" onClick={async () => { await navigator.clipboard.writeText(mensaje); setCopiado(true); setTimeout(() => setCopiado(false), 2000); }}>
           {copiado ? "¡Copiado!" : "Copiar mensaje"}
         </button>
@@ -137,7 +137,7 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
         <div className="flex gap-2 flex-wrap">
           {(config?.dominios_autoaprobados ?? []).length === 0 && <span className="text-sm text-ink/50">Ninguno: todos los equipos se aprueban a mano.</span>}
           {(config?.dominios_autoaprobados ?? []).map((d) => (
-            <span key={d} className="pill bg-black/[0.05] text-ink/80 flex items-center gap-1.5">
+            <span key={d} className="pill bg-line/[0.05] text-ink/80 flex items-center gap-1.5">
               {d}
               <button aria-label={`Quitar ${d}`} className="text-ink/40 hover:text-red-600"
                 onClick={() => guardarDominios((config?.dominios_autoaprobados ?? []).filter((x) => x !== d))}>×</button>

@@ -169,7 +169,7 @@ export default function AsignacionesClient({
             className={`px-3 py-1.5 rounded-md text-sm font-medium ${
               filtro === f
                 ? "bg-brand-50 text-brand-700"
-                : "text-ink/50 hover:bg-black/[0.03]"
+                : "text-ink/50 hover:bg-line/[0.03]"
             }`}
           >
             {f === "activas" ? "Activas" : "Historial completo"}

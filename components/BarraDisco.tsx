@@ -9,7 +9,7 @@ export default function BarraDisco({ d }: { d: Disco }) {
         <span>{d.unidad}</span>
         <span>{d.libre_gb} GB libres de {d.total_gb}</span>
       </div>
-      <div className="h-1.5 bg-black/[0.06] rounded-full mt-0.5 overflow-hidden" role="meter" aria-valuenow={uso} aria-valuemin={0} aria-valuemax={100} aria-label={`Disco ${d.unidad} ${uso}% usado`}>
+      <div className="h-1.5 bg-line/[0.06] rounded-full mt-0.5 overflow-hidden" role="meter" aria-valuenow={uso} aria-valuemin={0} aria-valuemax={100} aria-label={`Disco ${d.unidad} ${uso}% usado`}>
         <div className={`h-full rounded-full ${color}`} style={{ width: `${uso}%` }} />
       </div>
     </div>

@@ -14,8 +14,8 @@ const hex = (b: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(b)).map((
 
 function estado(c: Codigo) {
   if (c.revocado) return { texto: "Revocado", clase: "bg-red-50 text-red-600" };
-  if (new Date(c.vence).getTime() < Date.now()) return { texto: "Vencido", clase: "bg-black/[0.05] text-ink/50" };
-  if (c.usos >= c.usos_max) return { texto: "Agotado", clase: "bg-black/[0.05] text-ink/50" };
+  if (new Date(c.vence).getTime() < Date.now()) return { texto: "Vencido", clase: "bg-line/[0.05] text-ink/50" };
+  if (c.usos >= c.usos_max) return { texto: "Agotado", clase: "bg-line/[0.05] text-ink/50" };
   return { texto: "Vigente", clase: "bg-emerald-50 text-emerald-700" };
 }
 
@@ -112,7 +112,7 @@ export default function CodigosInstalacion({ intervalo }: { intervalo: number })
 
       {formato === "linux" && (
         <p className="text-xs text-ink/60">
-          En el equipo Linux se ejecuta con <code className="bg-black/[0.04] px-1 rounded">sudo bash instalar-agente-accusys.sh</code>.
+          En el equipo Linux se ejecuta con <code className="bg-line/[0.04] px-1 rounded">sudo bash instalar-agente-accusys.sh</code>.
           Funciona en Ubuntu, Debian, Red Hat, Rocky, Alma y derivadas (con systemd o cron). Solo necesita <code>curl</code>.
         </p>
       )}

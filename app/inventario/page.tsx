@@ -110,13 +110,13 @@ export default async function InventarioPanel() {
             <tbody>
               {grupos.map((g) => (
                 <Fragment key={g.grupo}>
-                  <tr className="bg-[#F5F7FB]">
+                  <tr className="bg-canvas">
                     <td className="text-xs font-semibold uppercase tracking-wide text-ink/50">{g.grupo}</td>
                     <td className="text-right text-xs font-semibold text-ink/50">{g.total}</td>
                     <td colSpan={hayOtros ? 4 : 3}></td>
                   </tr>
                   {g.filas.map((c) => (
-                    <tr key={c.categoria} className="hover:bg-black/[0.015]">
+                    <tr key={c.categoria} className="hover:bg-line/[0.015]">
                       <td>
                         <Link href={`/inventario/equipos?categoria=${encodeURIComponent(c.categoria)}`} className="text-ink hover:text-brand-700 hover:underline">
                           {c.categoria}
@@ -143,7 +143,7 @@ export default async function InventarioPanel() {
                   ))}
                 </Fragment>
               ))}
-              <tr className="border-t-2 border-black/[0.08]">
+              <tr className="border-t-2 border-line/[0.08]">
                 <td className="font-medium text-ink">Total</td>
                 <td className="text-right font-display text-lg text-ink">{totalActivos}</td>
                 <td className="text-right text-ink/70">{porCategoria.reduce((s, c) => s + c.stock, 0)}</td>
@@ -165,7 +165,7 @@ export default async function InventarioPanel() {
             ) : (
               <ul className="space-y-2">
                 {garantias.map((e) => (
-                  <li key={e.id} className="flex items-center justify-between gap-3 text-sm border-b border-black/[0.04] pb-2 last:border-0">
+                  <li key={e.id} className="flex items-center justify-between gap-3 text-sm border-b border-line/[0.04] pb-2 last:border-0">
                     <span className="flex items-center gap-2">
                       <Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link>
                       {e.categoria} {e.marca} {e.modelo}
@@ -186,7 +186,7 @@ export default async function InventarioPanel() {
             ) : (
               <ul className="space-y-2">
                 {recambio.slice(0, 12).map((e) => (
-                  <li key={e.id} className="flex items-center justify-between gap-3 text-sm border-b border-black/[0.04] pb-2 last:border-0">
+                  <li key={e.id} className="flex items-center justify-between gap-3 text-sm border-b border-line/[0.04] pb-2 last:border-0">
                     <span className="flex items-center gap-2">
                       <Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link>
                       {e.categoria} {e.marca} {e.modelo}

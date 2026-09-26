@@ -117,7 +117,7 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
         </span>
         {v && (
           <span className="flex items-center gap-1.5 text-xs whitespace-nowrap shrink-0">
-            <span className={`h-2 w-2 rounded-full ${conectado(v.ultimo_reporte) ? "bg-emerald-500" : "bg-black/20"}`} />
+            <span className={`h-2 w-2 rounded-full ${conectado(v.ultimo_reporte) ? "bg-emerald-500" : "bg-line/20"}`} />
             {conectado(v.ultimo_reporte) ? "Conectado" : `Visto ${hace(v.ultimo_reporte)}`}
           </span>
         )}
@@ -136,7 +136,7 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
             {emp.email}{emp.area ? ` · ${emp.area}` : ""}{emp.puesto ? ` · ${emp.puesto}` : ""}
           </p>
           <div className="flex gap-2 mt-2">
-            <span className={`pill ${emp.activo ? "bg-emerald-50 text-emerald-700" : "bg-black/[0.05] text-ink/50"}`}>{emp.activo ? "Activo" : "Inactivo"}</span>
+            <span className={`pill ${emp.activo ? "bg-emerald-50 text-emerald-700" : "bg-line/[0.05] text-ink/50"}`}>{emp.activo ? "Activo" : "Inactivo"}</span>
             {emp.entra_id && <span className="pill bg-brand-50 text-brand-700">Sincronizado con Entra ID</span>}
             {!emp.activo && equipos.length > 0 && <span className="pill bg-red-50 text-red-600">Tiene equipos para recuperar</span>}
             {movs.filter((m) => m.estado === "abierto").map((m) => (
@@ -180,7 +180,7 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
           <div className="text-xs text-ink/50 font-medium">Dónde está ahora</div>
           {vivoPrincipal && conectado(vivoPrincipal.ultimo_reporte) && vivoPrincipal.ubicacion_tipo ? (
             <>
-              <span className={`pill mt-2 ${UBICACION[vivoPrincipal.ubicacion_tipo]?.clase ?? "bg-black/[0.05] text-ink/60"}`}>
+              <span className={`pill mt-2 ${UBICACION[vivoPrincipal.ubicacion_tipo]?.clase ?? "bg-line/[0.05] text-ink/60"}`}>
                 {UBICACION[vivoPrincipal.ubicacion_tipo]?.texto ?? "Sin datos"}
               </span>
               {vivoPrincipal.ubicacion_red && <div className="text-xs text-ink/50 mt-1">{vivoPrincipal.ubicacion_red}</div>}
@@ -196,11 +196,11 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
           <h2 className="font-medium text-ink mb-1">Equipos IT</h2>
           {equipos.length === 0 ? <p className="text-sm text-ink/50">No tiene equipos asignados.</p> : (
             <>
-              {computadoras.length > 0 && <ul className="divide-y divide-black/[0.05]">{computadoras.map((e) => <FilaEquipo key={e.id} e={e} />)}</ul>}
+              {computadoras.length > 0 && <ul className="divide-y divide-line/[0.05]">{computadoras.map((e) => <FilaEquipo key={e.id} e={e} />)}</ul>}
               {perifericos.length > 0 && (
                 <>
                   <div className="text-xs text-ink/50 mt-3 uppercase tracking-wide">Periféricos</div>
-                  <ul className="divide-y divide-black/[0.05]">{perifericos.map((e) => <FilaEquipo key={e.id} e={e} />)}</ul>
+                  <ul className="divide-y divide-line/[0.05]">{perifericos.map((e) => <FilaEquipo key={e.id} e={e} />)}</ul>
                 </>
               )}
             </>
@@ -229,7 +229,7 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
             <Link href="/asignaciones" className="text-xs text-brand-600 hover:underline">Asignar o liberar</Link>
           </div>
           {licActivas.length === 0 ? <p className="text-sm text-ink/50">No tiene licencias asignadas.</p> : (
-            <ul className="divide-y divide-black/[0.05]">
+            <ul className="divide-y divide-line/[0.05]">
               {licActivas.map((a) => (
                 <li key={a.id} className="flex items-start justify-between gap-3 py-2.5 text-sm">
                   <span>

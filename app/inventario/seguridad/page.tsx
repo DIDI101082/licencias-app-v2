@@ -36,14 +36,14 @@ function AdminsPermitidos({ lista, onCambio }: { lista: string[]; onCambio: (l: 
         <h2 className="font-medium text-ink">Administradores permitidos</h2>
         <p className="text-sm text-ink/60 mt-1">
           Cuentas o grupos que pueden ser administradores locales sin que se marque como problema. Escribilos como aparecen en
-          el detalle de cada equipo (por ejemplo <code className="text-xs bg-black/[0.04] px-1 rounded">ACCUSYS\soporte</code>) o solo el
+          el detalle de cada equipo (por ejemplo <code className="text-xs bg-line/[0.04] px-1 rounded">ACCUSYS\soporte</code>) o solo el
           nombre. La cuenta Administrador integrada de Windows nunca se marca.
         </p>
       </div>
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
       <div className="flex gap-2 flex-wrap">
         {lista.map((a) => (
-          <span key={a} className="pill bg-black/[0.05] text-ink/80 flex items-center gap-1.5">
+          <span key={a} className="pill bg-line/[0.05] text-ink/80 flex items-center gap-1.5">
             {a}
             <button onClick={() => guardar(lista.filter((x) => x !== a))} aria-label={`Quitar ${a}`} className="text-ink/40 hover:text-red-600">×</button>
           </span>
@@ -153,10 +153,10 @@ export default function Seguridad() {
               const extra = adminsExtra(d.admins_locales, permitidos);
               return (
                 <Fragment key={d.id}>
-                  <tr className="hover:bg-black/[0.015] cursor-pointer" onClick={() => setAbierto(abierto === d.id ? null : d.id)}>
+                  <tr className="hover:bg-line/[0.015] cursor-pointer" onClick={() => setAbierto(abierto === d.id ? null : d.id)}>
                     <td>
                       <div className="flex items-center gap-2">
-                        <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${conectado(d.ultimo_reporte) ? "bg-emerald-500" : "bg-black/20"}`}
+                        <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${conectado(d.ultimo_reporte) ? "bg-emerald-500" : "bg-line/20"}`}
                           title={conectado(d.ultimo_reporte) ? "Conectado" : "Desconectado"} />
                         <button className="font-medium text-ink hover:underline text-left" aria-expanded={abierto === d.id}>{d.hostname}</button>
                       </div>
@@ -166,7 +166,7 @@ export default function Seguridad() {
                   </tr>
                   {abierto === d.id && (
                     <tr>
-                      <td colSpan={CONTROLES.length + 1} className="bg-[#F5F7FB]">
+                      <td colSpan={CONTROLES.length + 1} className="bg-canvas">
                         <div className="grid md:grid-cols-3 gap-5 text-sm py-1">
                           <div>
                             {d.cifrado_producto && (

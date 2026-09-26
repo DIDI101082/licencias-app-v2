@@ -2,10 +2,15 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
-        ink: "#0F1115",
+        // Colores de la interfaz: cambian con el modo claro/oscuro (ver globals.css)
+        ink: "rgb(var(--c-ink) / <alpha-value>)",
+        line: "rgb(var(--c-line) / <alpha-value>)",
+        surface: "rgb(var(--c-surface) / <alpha-value>)",
+        canvas: "rgb(var(--c-canvas) / <alpha-value>)",
         brand: {
           50: "#EBF1FE",
           100: "#D2E0FD",

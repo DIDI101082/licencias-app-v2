@@ -5,6 +5,9 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { COLOR, INTERNET, NODO, calcularConexiones, descendientes, diagramar, peorEstado, type EquipoRed } from "@/lib/topologia";
 
+// Líneas neutras: se adaptan al modo claro u oscuro
+const LINEA = "rgb(var(--c-line) / 0.22)";
+
 type Sensor = { objid: number; nombre: string; dispositivo: number; estado: string; mensaje: string; valor: string; desde: string };
 type Equipo = EquipoRed & { ok: number; advertencia: number; caido: number; inusual: number; pausado: number; ubicacion: string; sub?: string };
 
@@ -31,7 +34,7 @@ export default function DiagramaRed({ equipos, sensores, guardadas, base, texto,
   const q = texto.trim().toLowerCase();
   const coincide = (e?: Equipo) => !q || !!e && [e.nombre, e.host, e.zona].some((v) => v?.toLowerCase().includes(q));
   const pos = new Map(dibujo.nodos.map((n) => [n.id, n]));
-  const colorLinea = (estado: string) => (estado === "caido" || estado === "caido_reconocido" ? COLOR.caido : estado === "advertencia" ? COLOR.advertencia : "#C9D3E6");
+  const colorLinea = (estado: string) => (estado === "caido" || estado === "caido_reconocido" ? COLOR.caido : estado === "advertencia" ? COLOR.advertencia : LINEA);
 
   async function conectar(objid: number, destino: number | null) {
     setError(null);
@@ -49,7 +52,7 @@ export default function DiagramaRed({ equipos, sensores, guardadas, base, texto,
   return (
     <div className="space-y-4">
       <div className="card overflow-hidden">
-        <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-black/[0.06] text-xs text-ink/60 flex-wrap">
+        <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-line/[0.06] text-xs text-ink/60 flex-wrap">
           <span className="flex items-center gap-3 flex-wrap">
             {(["ok", "advertencia", "inusual", "caido", "pausado"] as const).map((k) => (
               <span key={k} className="flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full inline-block" style={{ background: COLOR[k] }} aria-hidden />{TEXTO[k]}</span>
@@ -62,7 +65,7 @@ export default function DiagramaRed({ equipos, sensores, guardadas, base, texto,
             <button className="btn-secondary px-2 py-1" onClick={() => setEscala((e) => Math.min(1.5, +(e + 0.1).toFixed(1)))} aria-label="Acercar">+</button>
           </span>
         </div>
-        <div className="overflow-auto bg-[#F7F9FC]" style={{ maxHeight: "70vh" }}>
+        <div className="overflow-auto bg-canvas" style={{ maxHeight: "70vh" }}>
           <svg width={(dibujo.ancho + 40) * escala} height={(dibujo.alto + 40) * escala} viewBox={`-20 -20 ${dibujo.ancho + 40} ${dibujo.alto + 40}`}
             role="img" aria-label="Diagrama de la red con el estado de cada equipo" className="block mx-auto">
             {/* Recuadros de equipos agrupados */}
@@ -70,8 +73,8 @@ export default function DiagramaRed({ equipos, sensores, guardadas, base, texto,
               const peor = peorEstado(c.ids.map((i) => porId.get(i)?.estado ?? "desconocido"));
               return (
                 <g key={`caja-${c.padre}`}>
-                  <rect x={c.x} y={c.y} width={c.w} height={c.h} rx={14} fill="#FFFFFF" stroke={peor === "ok" ? "#D6DCE6" : COLOR[peor]} strokeDasharray="5 4" />
-                  <text x={c.x + 12} y={c.y + 18} fontSize={11} fill="#5B6576">{c.ids.length} equipos</text>
+                  <rect x={c.x} y={c.y} width={c.w} height={c.h} rx={14} fill="rgb(var(--c-surface))" stroke={peor === "ok" ? "rgb(var(--c-line) / 0.16)" : COLOR[peor]} strokeDasharray="5 4" />
+                  <text x={c.x + 12} y={c.y + 18} fontSize={11} fill="rgb(var(--c-ink) / 0.6)">{c.ids.length} equipos</text>
                 </g>
               );
             })}
@@ -82,7 +85,7 @@ export default function DiagramaRed({ equipos, sensores, guardadas, base, texto,
               const color = colorLinea(estado);
               return (
                 <path key={i} d={`M ${l.x1} ${l.y1} C ${l.x1} ${m}, ${l.x2} ${m}, ${l.x2} ${l.y2}`} fill="none"
-                  stroke={color} strokeWidth={color === "#C9D3E6" ? 1.5 : 2.5} strokeDasharray={estado === "caido" ? "6 4" : undefined} />
+                  stroke={color} strokeWidth={color === LINEA ? 1.5 : 2.5} strokeDasharray={estado === "caido" ? "6 4" : undefined} />
               );
             })}
             {/* Nodos */}
@@ -90,8 +93,8 @@ export default function DiagramaRed({ equipos, sensores, guardadas, base, texto,
               if (n.id === INTERNET) {
                 return (
                   <g key="internet" transform={`translate(${n.x},${n.y})`}>
-                    <rect width={NODO.w} height={NODO.h} rx={NODO.h / 2} fill="#FFFFFF" stroke="#C9D3E6" />
-                    <text x={NODO.w / 2} y={NODO.h / 2 + 5} textAnchor="middle" fontSize={15} fontWeight={700} fill="#1E48DC">Internet</text>
+                    <rect width={NODO.w} height={NODO.h} rx={NODO.h / 2} fill="rgb(var(--c-surface))" stroke="rgb(var(--c-line) / 0.2)" />
+                    <text x={NODO.w / 2} y={NODO.h / 2 + 5} textAnchor="middle" fontSize={15} fontWeight={700} fill="rgb(var(--c-brand))">Internet</text>
                   </g>
                 );
               }
@@ -103,11 +106,11 @@ export default function DiagramaRed({ equipos, sensores, guardadas, base, texto,
                 <g key={n.id} transform={`translate(${n.x},${n.y})`} opacity={coincide(e) ? 1 : 0.25}
                   role="button" tabIndex={0} aria-label={`${e.nombre}: ${TEXTO[e.estado] ?? e.estado}`} style={{ cursor: "pointer" }}
                   onClick={() => setSel(activo ? null : n.id)} onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setSel(activo ? null : n.id); } }}>
-                  <rect width={NODO.w} height={NODO.h} rx={10} fill="#FFFFFF" stroke={activo ? "#1E48DC" : "#D6DCE6"} strokeWidth={activo ? 2 : 1} />
+                  <rect width={NODO.w} height={NODO.h} rx={10} fill="rgb(var(--c-surface))" stroke={activo ? "rgb(var(--c-brand))" : "rgb(var(--c-line) / 0.16)"} strokeWidth={activo ? 2 : 1} />
                   <rect width={6} height={NODO.h} rx={3} fill={COLOR[e.estado] ?? COLOR.desconocido} />
-                  <text x={16} y={23} fontSize={13} fontWeight={600} fill="#0F1115">{corto(e.nombre, 21)}</text>
-                  <text x={16} y={42} fontSize={10.5} fill="#5B6576" fontFamily="ui-monospace, monospace">{corto(e.host || e.zona || "", 14)}</text>
-                  <text x={NODO.w - 10} y={42} fontSize={10.5} textAnchor="end" fill={e.caido ? COLOR.caido : e.advertencia ? "#B45309" : "#067647"}>{cont}</text>
+                  <text x={16} y={23} fontSize={13} fontWeight={600} fill="rgb(var(--c-ink))">{corto(e.nombre, 21)}</text>
+                  <text x={16} y={42} fontSize={10.5} fill="rgb(var(--c-ink) / 0.6)" fontFamily="ui-monospace, monospace">{corto(e.host || e.zona || "", 14)}</text>
+                  <text x={NODO.w - 10} y={42} fontSize={10.5} textAnchor="end" fill={e.caido ? COLOR.caido : e.advertencia ? "rgb(var(--c-aviso))" : "rgb(var(--c-ok))"}>{cont}</text>
                   {manual.has(n.id) && <circle cx={NODO.w - 9} cy={10} r={3} fill="#F2C230"><title>Conexión ajustada a mano</title></circle>}
                 </g>
               );

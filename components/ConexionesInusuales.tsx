@@ -85,7 +85,7 @@ export default function ConexionesInusuales() {
             <p className="text-xs text-ink/50 mb-2">Si alguien viaja por trabajo, agregá el país para que no genere alerta. Código de 2 letras (UY, BR, US, ES…).</p>
             <div className="flex gap-2 flex-wrap items-center">
               {permitidos.map((p) => (
-                <span key={p} className="pill bg-black/[0.05] text-ink/80 flex items-center gap-1">
+                <span key={p} className="pill bg-line/[0.05] text-ink/80 flex items-center gap-1">
                   {bandera(p)} {p}
                   {permitidos.length > 1 && (
                     <button aria-label={`Quitar ${p}`} className="text-ink/40 hover:text-red-600"
@@ -113,7 +113,7 @@ export default function ConexionesInusuales() {
         </div>
       )}
 
-      {aviso && <p role="status" className="text-sm text-ink/70 bg-black/[0.03] rounded-md px-3 py-2">{aviso}</p>}
+      {aviso && <p role="status" className="text-sm text-ink/70 bg-line/[0.03] rounded-md px-3 py-2">{aviso}</p>}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card p-4"><div className="text-xs text-ink/50">Fuera de países permitidos</div><div className={`font-display text-3xl mt-1 ${alertas.some((a) => a.tipo === "pais") ? "text-red-600" : "text-emerald-600"}`}>{alertas.filter((a) => a.tipo === "pais").length}</div></div>
@@ -151,7 +151,7 @@ export default function ConexionesInusuales() {
                 <tr key={d.id} className="align-top">
                   <td>
                     <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${conectado(d.ultimo_reporte) ? "bg-emerald-500" : "bg-black/20"}`} aria-hidden />
+                      <span className={`h-2 w-2 rounded-full ${conectado(d.ultimo_reporte) ? "bg-emerald-500" : "bg-line/20"}`} aria-hidden />
                       <span className="font-medium text-ink">{d.hostname}</span>
                     </div>
                     <div className="text-xs text-ink/50 pl-4">{d.usuario ?? ""}</div>

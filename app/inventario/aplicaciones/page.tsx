@@ -74,7 +74,7 @@ function PorAplicacion() {
           <tbody>
             {filas.map((f) => (
               <Fragment key={f.nombre}>
-                <tr className="hover:bg-black/[0.015] cursor-pointer" onClick={() => abrir(f.nombre)}>
+                <tr className="hover:bg-line/[0.015] cursor-pointer" onClick={() => abrir(f.nombre)}>
                   <td>
                     <button className="font-medium text-ink hover:underline text-left" aria-expanded={abierta === f.nombre}>{f.nombre}</button>
                     {f.editor && <div className="text-xs text-ink/50">{f.editor}</div>}
@@ -83,7 +83,7 @@ function PorAplicacion() {
                   <td>
                     <div className="flex gap-1 flex-wrap">
                       {(f.versiones ?? []).slice(-4).reverse().map((v: string) => (
-                        <span key={v} className="pill bg-black/[0.05] text-ink/70">{v}</span>
+                        <span key={v} className="pill bg-line/[0.05] text-ink/70">{v}</span>
                       ))}
                       {(f.versiones ?? []).length > 4 && <span className="text-xs text-ink/50">+{f.versiones.length - 4}</span>}
                     </div>
@@ -91,7 +91,7 @@ function PorAplicacion() {
                 </tr>
                 {abierta === f.nombre && (
                   <tr>
-                    <td colSpan={3} className="bg-[#F5F7FB]">
+                    <td colSpan={3} className="bg-canvas">
                       {equipos.length === 0 ? <span className="text-sm text-ink/50">Cargando…</span> : (
                         <ul className="space-y-1.5 text-sm">
                           {equipos.map((e, i) => (
@@ -103,7 +103,7 @@ function PorAplicacion() {
                                 {e.inv_dispositivos?.hostname}
                               </Link>
                               <span className="text-ink/50">{e.inv_dispositivos?.usuario ?? ""}</span>
-                              <span className="pill bg-white text-ink/70 border border-black/10">{e.version || "sin versión"}</span>
+                              <span className="pill bg-surface text-ink/70 border border-line/10">{e.version || "sin versión"}</span>
                               <span className="text-xs text-ink/50">
                                 {e.fecha_instalacion ? `Instalada el ${fecha(e.fecha_instalacion)}` : `Detectada ${hace(e.primera_vez)}`}
                               </span>
@@ -220,7 +220,7 @@ function Cambios() {
       <div className="flex gap-2">
         {["", "instalada", "desinstalada", "actualizada"].map((a) => (
           <button key={a} onClick={() => setAccion(a)} aria-pressed={accion === a}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium ${accion === a ? "bg-white text-brand-700 shadow-sm" : "text-ink/60 hover:text-ink"}`}>
+            className={`px-3 py-1.5 rounded-md text-sm font-medium ${accion === a ? "bg-surface text-brand-700 shadow-sm" : "text-ink/60 hover:text-ink"}`}>
             {a === "" ? "Todos" : a[0].toUpperCase() + a.slice(1) + "s"}
           </button>
         ))}
@@ -271,7 +271,7 @@ function Contenido() {
           Informadas por el agente de cada equipo. La lista se envía cuando hay cambios o, como mínimo, una vez por día.
         </p>
       </div>
-      <div role="tablist" className="flex gap-1 border-b border-black/[0.08]">
+      <div role="tablist" className="flex gap-1 border-b border-line/[0.08]">
         {pestañas.map(([k, t]) => (
           <button key={k} role="tab" aria-selected={vista === k} onClick={() => router.replace(`/inventario/aplicaciones?vista=${k}`)}
             className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${vista === k ? "border-brand-600 text-brand-700" : "border-transparent text-ink/60 hover:text-ink"}`}>

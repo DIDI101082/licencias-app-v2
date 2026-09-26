@@ -14,7 +14,7 @@ const TIPOS: Record<Tipo | "desconocido", { titulo: string; pill: string; barra:
   vpn: { titulo: "Home office con VPN", pill: "bg-emerald-50 text-emerald-700", barra: "bg-emerald-500" },
   remoto: { titulo: "Home office sin VPN", pill: "bg-amber-500/10 text-amber-700", barra: "bg-amber-500" },
   invitados: { titulo: "En WiFi de invitados", pill: "bg-red-50 text-red-600", barra: "bg-red-500" },
-  desconocido: { titulo: "Sin datos", pill: "bg-black/[0.05] text-ink/50", barra: "bg-black/20" },
+  desconocido: { titulo: "Sin datos", pill: "bg-line/[0.05] text-ink/50", barra: "bg-line/20" },
 };
 
 function Redes() {

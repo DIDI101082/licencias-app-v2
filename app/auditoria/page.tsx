@@ -135,7 +135,7 @@ export default function Auditoria() {
           <tbody>
             {visibles.map((r) => (
               <Fragment key={r.id}>
-                <tr className="cursor-pointer hover:bg-black/[0.02]" onClick={() => setAbierto(abierto === r.id ? null : r.id)} aria-expanded={abierto === r.id}>
+                <tr className="cursor-pointer hover:bg-line/[0.02]" onClick={() => setAbierto(abierto === r.id ? null : r.id)} aria-expanded={abierto === r.id}>
                   <td className="whitespace-nowrap text-ink/70 text-sm">{fechaHora(r.fecha)}</td>
                   <td>
                     <span className="text-ink">{r.usuario_nombre && !r.usuario_nombre.includes("@") ? r.usuario_nombre : r.usuario_email}</span>
@@ -153,7 +153,7 @@ export default function Auditoria() {
                   </td>
                 </tr>
                 {abierto === r.id && (
-                  <tr><td colSpan={5} className="bg-[#F7F9FC] text-sm"><Detalle r={r} /></td></tr>
+                  <tr><td colSpan={5} className="bg-canvas text-sm"><Detalle r={r} /></td></tr>
                 )}
               </Fragment>
             ))}

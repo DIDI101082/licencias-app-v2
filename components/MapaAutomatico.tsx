@@ -17,7 +17,7 @@ const ESTADO: Record<string, { texto: string; barra: string; pill: string; orden
   caido_reconocido: { texto: "Caído (reconocido)", barra: "bg-red-300", pill: "bg-red-50 text-red-500", orden: 1 },
   advertencia: { texto: "Advertencia", barra: "bg-amber-500", pill: "bg-amber-500/10 text-amber-700", orden: 2 },
   inusual: { texto: "Inusual", barra: "bg-orange-500", pill: "bg-orange-50 text-orange-700", orden: 3 },
-  desconocido: { texto: "Sin datos", barra: "bg-black/20", pill: "bg-black/[0.05] text-ink/50", orden: 4 },
+  desconocido: { texto: "Sin datos", barra: "bg-line/20", pill: "bg-line/[0.05] text-ink/50", orden: 4 },
   ok: { texto: "OK", barra: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700", orden: 5 },
   pausado: { texto: "Pausado", barra: "bg-sky-300", pill: "bg-sky-50 text-sky-700", orden: 6 },
 };
@@ -140,10 +140,10 @@ export default function MapaAutomatico() {
       </div>
 
       <div className="flex gap-3 items-center flex-wrap">
-        <div role="tablist" className="flex rounded-lg border border-black/[0.08] overflow-hidden text-sm">
+        <div role="tablist" className="flex rounded-lg border border-line/[0.08] overflow-hidden text-sm">
           {([["diagrama", "Diagrama"], ["sedes", "Por sede"]] as const).map(([k, t]) => (
             <button key={k} role="tab" aria-selected={vista === k} onClick={() => setVista(k)}
-              className={`px-3 py-1.5 font-medium ${vista === k ? "bg-brand-600 text-white" : "bg-white text-ink/70 hover:text-ink"}`}>{t}</button>
+              className={`px-3 py-1.5 font-medium ${vista === k ? "bg-brand-600 text-white" : "bg-surface text-ink/70 hover:text-ink"}`}>{t}</button>
           ))}
         </div>
         <input type="search" className="input flex-1 min-w-[220px]" placeholder="Buscar equipo, IP o sede" value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Buscar" />
@@ -176,7 +176,7 @@ export default function MapaAutomatico() {
                       <li key={e.objid}>
                         {nuevoSub && <div className="text-[11px] uppercase tracking-wide text-ink/40 font-semibold mt-3 mb-1">{e.sub}</div>}
                         <button type="button" onClick={() => setAbierto(abierto === e.objid ? null : e.objid)} aria-expanded={abierto === e.objid}
-                          className="w-full text-left flex items-stretch gap-3 rounded-lg border border-black/[0.06] hover:border-brand-300 bg-white overflow-hidden">
+                          className="w-full text-left flex items-stretch gap-3 rounded-lg border border-line/[0.06] hover:border-brand-300 bg-surface overflow-hidden">
                           <span className={`w-1.5 shrink-0 ${s.barra}`} aria-hidden />
                           <span className="flex-1 min-w-0 py-2 pr-3">
                             <span className="flex items-center justify-between gap-2">
@@ -190,7 +190,7 @@ export default function MapaAutomatico() {
                           </span>
                         </button>
                         {abierto === e.objid && (
-                          <div className="mx-2 mt-1 mb-2 rounded-b-lg bg-[#F5F7FB] px-3 py-2 text-sm space-y-1.5">
+                          <div className="mx-2 mt-1 mb-2 rounded-b-lg bg-canvas px-3 py-2 text-sm space-y-1.5">
                             {propios.length === 0 ? <p className="text-ink/50 text-xs">Ningún sensor con problemas.</p> : propios.map((x) => (
                               <div key={x.objid}>
                                 <span className={`pill ${est(x.estado).pill} mr-1.5`}>{est(x.estado).texto}</span>

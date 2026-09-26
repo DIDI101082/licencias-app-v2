@@ -77,7 +77,7 @@ export default function Movimiento({ params }: { params: { id: string } }) {
         <div>
           <div className="flex items-center gap-2">
             <span className={`pill ${esBaja ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700"}`}>{esBaja ? "Baja" : "Alta"}</span>
-            <span className="pill bg-black/[0.05] text-ink/60">{abierto ? "En curso" : mov.estado === "completo" ? "Completo" : "Descartado"}</span>
+            <span className="pill bg-line/[0.05] text-ink/60">{abierto ? "En curso" : mov.estado === "completo" ? "Completo" : "Descartado"}</span>
           </div>
           <h1 className="font-display text-2xl text-ink mt-2">
             <Link href={`/empleados/${mov.empleado_id}`} className="hover:text-brand-700">{mov.nombre} {mov.apellido}</Link>
@@ -103,7 +103,7 @@ export default function Movimiento({ params }: { params: { id: string } }) {
 
       <div className="card p-4">
         <div className="flex items-center gap-3">
-          <div className="h-2.5 flex-1 rounded-full bg-black/[0.06] overflow-hidden">
+          <div className="h-2.5 flex-1 rounded-full bg-line/[0.06] overflow-hidden">
             <div className="h-full bg-brand-600 transition-all" style={{ width: `${tareas.length ? (hechas / tareas.length) * 100 : 0}%` }} />
           </div>
           <span className="text-sm text-ink/70 tabular-nums">{hechas} de {tareas.length} tareas</span>
@@ -115,10 +115,10 @@ export default function Movimiento({ params }: { params: { id: string } }) {
           {grupos.map((g) => (
             <div key={g} className="card p-5">
               <div className="flex items-center gap-2 mb-2">
-                <span className={`pill ${RESP_CLASE[g] ?? "bg-black/[0.05] text-ink/60"}`}>{g}</span>
+                <span className={`pill ${RESP_CLASE[g] ?? "bg-line/[0.05] text-ink/60"}`}>{g}</span>
                 <span className="text-xs text-ink/50">{tareas.filter((t) => t.responsable === g && t.hecha).length}/{tareas.filter((t) => t.responsable === g).length}</span>
               </div>
-              <ul className="divide-y divide-black/[0.05]">
+              <ul className="divide-y divide-line/[0.05]">
                 {tareas.filter((t) => t.responsable === g).map((t) => (
                   <li key={t.id} className="py-2.5">
                     <label className={`flex items-start gap-3 text-sm ${editable ? "cursor-pointer" : ""}`}>

@@ -40,7 +40,7 @@ export default function ActaPage({ params }: { params: { id: string } }) {
       <p className="text-xs text-ink/50 print:hidden">Para el PDF, en la ventana de impresión elegí “Guardar como PDF”.</p>
 
       {/* Hoja A4 */}
-      <article className="acta bg-white mx-auto max-w-[800px] p-10 border border-black/10 shadow-sm print:shadow-none print:border-0 print:p-0 text-[13px] leading-relaxed text-black">
+      <article className="acta claro bg-surface mx-auto max-w-[800px] p-10 border border-line/10 shadow-sm print:shadow-none print:border-0 print:p-0 text-[13px] leading-relaxed text-black">
         <header className="flex items-start justify-between border-b-2 border-black pb-3">
           <Mark className="h-9" />
           <div className="text-right">
@@ -57,20 +57,20 @@ export default function ActaPage({ params }: { params: { id: string } }) {
 
         <table className="w-full mt-4 border-collapse">
           <thead>
-            <tr className="bg-black/[0.06]">
+            <tr className="bg-line/[0.06]">
               {["Código", "Equipo", "Marca y modelo", "N° de serie", "Estado"].map((h) => (
-                <th key={h} className="border border-black/40 px-2 py-1.5 text-left font-semibold">{h}</th>
+                <th key={h} className="border border-line/40 px-2 py-1.5 text-left font-semibold">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {acta.equipos.map((e) => (
               <tr key={e.codigo}>
-                <td className="border border-black/40 px-2 py-1.5 font-mono">{e.codigo}</td>
-                <td className="border border-black/40 px-2 py-1.5">{e.categoria ?? "—"}</td>
-                <td className="border border-black/40 px-2 py-1.5">{[e.marca, e.modelo].filter(Boolean).join(" ") || "—"}</td>
-                <td className="border border-black/40 px-2 py-1.5 font-mono">{e.numero_serie ?? "—"}</td>
-                <td className="border border-black/40 px-2 py-1.5">{CONDICION[e.condicion ?? ""] ?? e.condicion ?? "—"}</td>
+                <td className="border border-line/40 px-2 py-1.5 font-mono">{e.codigo}</td>
+                <td className="border border-line/40 px-2 py-1.5">{e.categoria ?? "—"}</td>
+                <td className="border border-line/40 px-2 py-1.5">{[e.marca, e.modelo].filter(Boolean).join(" ") || "—"}</td>
+                <td className="border border-line/40 px-2 py-1.5 font-mono">{e.numero_serie ?? "—"}</td>
+                <td className="border border-line/40 px-2 py-1.5">{CONDICION[e.condicion ?? ""] ?? e.condicion ?? "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -110,7 +110,7 @@ export default function ActaPage({ params }: { params: { id: string } }) {
           ))}
         </div>
 
-        <footer className="mt-12 pt-2 border-t border-black/20 text-[10px] text-black/50 flex justify-between">
+        <footer className="mt-12 pt-2 border-t border-line/20 text-[10px] text-black/50 flex justify-between">
           <span>Generada en Accusys Cyber por {acta.generado_por_nombre ?? "—"}</span>
           <span>{f.toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}</span>
         </footer>

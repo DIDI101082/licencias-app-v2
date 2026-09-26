@@ -126,7 +126,7 @@ function Listado() {
           </thead>
           <tbody>
             {filtrados.map((e) => (
-              <tr key={e.id} className="hover:bg-black/[0.015]">
+              <tr key={e.id} className="hover:bg-line/[0.015]">
                 <td><Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link></td>
                 <td>
                   <span className="font-medium text-ink">{e.marca} {e.modelo}</span>

@@ -142,7 +142,7 @@ export default function UsuariosClient({
                     </td>
                     <td>
                       <select
-                        className="input disabled:bg-black/[0.03]"
+                        className="input disabled:bg-line/[0.03]"
                         value={rol === "administrador" ? "" : grupo}
                         disabled={rol === "administrador"}
                         onChange={(e) => setGrupo(e.target.value)}
@@ -154,7 +154,7 @@ export default function UsuariosClient({
                     </td>
                     <td>
                       <input
-                        className="input disabled:bg-black/[0.03]"
+                        className="input disabled:bg-line/[0.03]"
                         disabled={rol !== "lectura_escritura"}
                         placeholder={rol === "lectura_escritura" ? "Nombre del área" : "—"}
                         value={area}

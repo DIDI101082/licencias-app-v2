@@ -17,7 +17,7 @@ type Item = {
 
 const ROL: Record<string, string> = { administrador: "Administrador", lectura_escritura: "Lectura y escritura", solo_lectura: "Solo lectura" };
 const DEC = {
-  pendiente: { texto: "Pendiente", clase: "bg-black/[0.05] text-ink/60" },
+  pendiente: { texto: "Pendiente", clase: "bg-line/[0.05] text-ink/60" },
   mantener: { texto: "Mantener", clase: "bg-emerald-50 text-emerald-700" },
   cambiar: { texto: "Cambiar", clase: "bg-amber-500/10 text-amber-700" },
   quitar: { texto: "Quitar", clase: "bg-red-50 text-red-600" },
@@ -157,7 +157,7 @@ export default function RevisionAccesos() {
                           <div className="flex gap-1 flex-wrap">
                             {(["mantener", "cambiar", "quitar"] as const).map((d) => (
                               <button key={d} onClick={() => decidir(i, d)}
-                                className={`px-2 py-1 rounded text-xs border ${i.decision === d ? "border-transparent " + DEC[d].clase : "border-black/10 text-ink/70 hover:bg-black/[0.03]"}`}>
+                                className={`px-2 py-1 rounded text-xs border ${i.decision === d ? "border-transparent " + DEC[d].clase : "border-line/10 text-ink/70 hover:bg-line/[0.03]"}`}>
                                 {DEC[d].texto}
                               </button>
                             ))}

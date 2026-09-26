@@ -257,7 +257,7 @@ export default function EmpleadosClient({
             <input
               required
               disabled={!!soloArea}
-              className="input disabled:bg-black/[0.03]"
+              className="input disabled:bg-line/[0.03]"
               value={form.area}
               onChange={(e) => setForm({ ...form, area: e.target.value })}
             />
@@ -378,7 +378,7 @@ export default function EmpleadosClient({
                     className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                       emp.activo
                         ? "bg-brand-50 text-brand-700"
-                        : "bg-black/[0.05] text-ink/50"
+                        : "bg-line/[0.05] text-ink/50"
                     }`}
                   >
                     {emp.activo ? "Activo" : "Inactivo"}

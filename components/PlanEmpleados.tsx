@@ -11,7 +11,7 @@ export default function PlanEmpleados({ plan }: { plan: Plan }) {
         <div className="rounded-lg bg-emerald-50 px-4 py-3"><div className="text-xs text-emerald-700">Nuevos</div><div className="font-display text-2xl text-emerald-700">{plan.nuevos.length}</div></div>
         <div className="rounded-lg bg-brand-50 px-4 py-3"><div className="text-xs text-brand-700">Con cambios</div><div className="font-display text-2xl text-brand-700">{plan.actualizar.length}</div></div>
         <div className="rounded-lg bg-red-50 px-4 py-3"><div className="text-xs text-red-600">A desactivar</div><div className="font-display text-2xl text-red-600">{plan.desactivar.length}</div></div>
-        <div className="rounded-lg bg-black/[0.04] px-4 py-3"><div className="text-xs text-ink/60">Sin cambios</div><div className="font-display text-2xl text-ink/70">{plan.sinCambios}</div></div>
+        <div className="rounded-lg bg-line/[0.04] px-4 py-3"><div className="text-xs text-ink/60">Sin cambios</div><div className="font-display text-2xl text-ink/70">{plan.sinCambios}</div></div>
       </div>
 
       {plan.nuevos.length > 0 && (

@@ -77,7 +77,7 @@ export default function Movimientos() {
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        <div className="inline-flex rounded-lg border border-black/10 bg-white p-0.5">
+        <div className="inline-flex rounded-lg border border-line/10 bg-surface p-0.5">
           {(["abierto", "cerrados"] as const).map((v) => (
             <button key={v} onClick={() => setEstado(v)}
               className={`px-3 py-1.5 text-sm rounded-md ${estado === v ? "bg-brand-600 text-white" : "text-ink/60 hover:text-ink"}`}>
@@ -106,7 +106,7 @@ export default function Movimientos() {
                   <td className="text-ink/70 whitespace-nowrap">{fecha(m.fecha)}</td>
                   <td className="min-w-[140px]">
                     <div className="flex items-center gap-2">
-                      <div className="h-2 flex-1 rounded-full bg-black/[0.06] overflow-hidden"><div className="h-full bg-brand-600" style={{ width: `${pct}%` }} /></div>
+                      <div className="h-2 flex-1 rounded-full bg-line/[0.06] overflow-hidden"><div className="h-full bg-brand-600" style={{ width: `${pct}%` }} /></div>
                       <span className="text-xs text-ink/60 tabular-nums">{m.hechas}/{m.tareas}</span>
                     </div>
                   </td>
@@ -174,7 +174,7 @@ function EditorPlantilla() {
       {(["alta", "baja"] as const).map((t) => (
         <div key={t}>
           <div className="text-xs uppercase tracking-wide text-ink/50 mb-1">{t === "alta" ? "Alta" : "Baja"}</div>
-          <ul className="divide-y divide-black/[0.05]">
+          <ul className="divide-y divide-line/[0.05]">
             {items.filter((i) => i.tipo === t).map((i) => (
               <li key={i.id} className={`flex items-center gap-3 py-2 text-sm ${i.activo ? "" : "opacity-50"}`}>
                 <span className="flex-1">{i.descripcion}</span>

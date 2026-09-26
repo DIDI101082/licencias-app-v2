@@ -133,7 +133,7 @@ export default function EquipoForm({ equipoId }: { equipoId?: string }) {
 
       <Bloque titulo="Dónde está">
         <Campo label="Área">
-          <input className="input disabled:bg-black/[0.03]" value={v.area} onChange={set("area")} disabled={!!areaFija}
+          <input className="input disabled:bg-line/[0.03]" value={v.area} onChange={set("area")} disabled={!!areaFija}
             placeholder="Sistemas, Ventas, Administración…" />
         </Campo>
         <Campo label="Ubicación">

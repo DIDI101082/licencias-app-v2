@@ -20,7 +20,7 @@ const VACIO = { id: 0, tipo: "certificado", descripcion: "", host: "", fecha_ven
 
 function estado(v: Venc) {
   const d = diasHasta(v.fecha_vencimiento);
-  if (d == null) return { texto: "Sin fecha", clase: "bg-black/[0.05] text-ink/50", orden: 3 };
+  if (d == null) return { texto: "Sin fecha", clase: "bg-line/[0.05] text-ink/50", orden: 3 };
   if (d < 0) return { texto: `Venció hace ${-d} día${d === -1 ? "" : "s"}`, clase: "bg-red-600 text-white", orden: 0 };
   if (d <= Math.min(7, v.aviso_dias)) return { texto: d === 0 ? "Vence hoy" : `En ${d} día${d === 1 ? "" : "s"}`, clase: "bg-red-50 text-red-600", orden: 1 };
   if (d <= v.aviso_dias) return { texto: `En ${d} días`, clase: "bg-amber-500/10 text-amber-700", orden: 1 };

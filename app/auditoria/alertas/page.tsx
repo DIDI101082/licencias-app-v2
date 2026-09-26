@@ -129,7 +129,7 @@ export default function Alertas() {
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        <div className="inline-flex rounded-lg border border-black/10 bg-white p-0.5">
+        <div className="inline-flex rounded-lg border border-line/10 bg-surface p-0.5">
           {(["abiertas", "historial"] as const).map((v) => (
             <button key={v} onClick={() => setVista(v)}
               className={`px-3 py-1.5 text-sm rounded-md ${vista === v ? "bg-brand-600 text-white" : "text-ink/60 hover:text-ink"}`}>
@@ -241,7 +241,7 @@ function Configuracion({ config, onGuardado }: { config: Config; onGuardado: () 
         <h2 className="font-display text-lg text-ink">2. Qué avisar</h2>
         <div className="grid sm:grid-cols-2 gap-2 mt-3">
           {REGLAS.map((r) => (
-            <label key={r.k} className="flex gap-3 items-start p-3 rounded-lg border border-black/[0.06] hover:bg-black/[0.02] cursor-pointer">
+            <label key={r.k} className="flex gap-3 items-start p-3 rounded-lg border border-line/[0.06] hover:bg-line/[0.02] cursor-pointer">
               <input type="checkbox" className="mt-1" checked={f.reglas.includes(r.k)} onChange={() => toggle(r.k)} />
               <span>
                 <span className="text-sm font-medium text-ink">{r.titulo}</span>

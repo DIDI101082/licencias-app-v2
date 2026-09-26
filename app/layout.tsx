@@ -6,6 +6,7 @@ import Nav from "@/components/Nav";
 import { PerfilProvider } from "@/components/PerfilContext";
 import GuardiaModulo from "@/components/GuardiaModulo";
 import RegistrarIngreso from "@/components/RegistrarIngreso";
+import { SCRIPT_TEMA } from "@/lib/tema";
 
 const display = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -27,7 +28,10 @@ export default async function RootLayout({
   const { perfil } = await getPerfil();
 
   return (
-    <html lang="es">
+    <html lang="es" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA }} />
+      </head>
       <body className={`${display.variable} ${body.variable} font-sans`}>
         <PerfilProvider perfil={perfil}>
           {perfil && <RegistrarIngreso />}
