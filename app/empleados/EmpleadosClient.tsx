@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import EmpleadosExcel, { exportarEmpleados } from "@/components/EmpleadosExcel";
@@ -25,8 +25,35 @@ type EquipoAsignado = {
   categoria: string;
   marca: string | null;
   modelo: string | null;
+  numero_serie?: string | null;
+  grupo?: string | null;
   empleado_id: string;
 };
+
+type Orden = "nombre" | "area" | "puesto" | "equipos" | "perifericos" | "estado";
+
+// Periféricos: grupo "Periféricos" en el inventario (o código P-00001)
+const esPeriferico = (e: EquipoAsignado) => e.grupo === "Periféricos" || /^P-/i.test(e.codigo ?? "");
+
+function ListaEquipos({ items }: { items: EquipoAsignado[] }) {
+  if (!items.length) return <span className="text-ink/40">—</span>;
+  return (
+    <ul className="space-y-1">
+      {items.map((e) => (
+        <li key={e.id} className="flex items-center gap-2 whitespace-nowrap">
+          <Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link>
+          <span className="text-ink/70 text-xs">
+            {e.categoria}
+            {e.marca || e.modelo ? ` · ${[e.marca, e.modelo].filter(Boolean).join(" ")}` : ""}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// Busca sin distinguir mayúsculas ni acentos ("damian" encuentra "Damián")
+const normal = (t: string | null | undefined) => (t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 export default function EmpleadosClient({
   empleados,
@@ -45,10 +72,12 @@ export default function EmpleadosClient({
 }) {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [panel, setPanel] = useState<"excel" | "entra" | null>(null);
-  const equiposPorEmpleado = equipos.reduce<Record<string, string[]>>((acc, e) => {
+  const porEmpleado = (lista: EquipoAsignado[]) => lista.reduce<Record<string, string[]>>((acc, e) => {
     (acc[e.empleado_id] ??= []).push(e.codigo);
     return acc;
   }, {});
+  const equiposPorEmpleado = porEmpleado(equipos.filter((e) => !esPeriferico(e)));
+  const perifericosPorEmpleado = porEmpleado(equipos.filter(esPeriferico));
   const [editando, setEditando] = useState<Empleado | null>(null);
   const [form, setForm] = useState({
     nombre: "",
@@ -58,6 +87,53 @@ export default function EmpleadosClient({
     puesto: "",
   });
   const [error, setError] = useState<string | null>(null);
+
+  // Búsqueda, filtros y orden de la tabla
+  const [busqueda, setBusqueda] = useState("");
+  const [fArea, setFArea] = useState("");
+  const [fPuesto, setFPuesto] = useState("");
+  const [fEstado, setFEstado] = useState("");
+  const [fEquipos, setFEquipos] = useState("");
+  const [orden, setOrden] = useState<Orden>("nombre");
+  const [asc, setAsc] = useState(true);
+  const distintos = (v: (string | null)[]) => Array.from(new Set(v.filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+  const areas = useMemo(() => distintos(empleados.map((e) => e.area)), [empleados]);
+  const puestos = useMemo(() => distintos(empleados.map((e) => e.puesto)), [empleados]);
+  const categorias = useMemo(() => distintos(equipos.map((e) => e.categoria)), [equipos]);
+  const hayFiltros = !!(busqueda.trim() || fArea || fPuesto || fEstado || fEquipos);
+  const limpiar = () => { setBusqueda(""); setFArea(""); setFPuesto(""); setFEstado(""); setFEquipos(""); };
+  const ordenarPor = (k: Orden) => { if (orden === k) setAsc(!asc); else { setOrden(k); setAsc(true); } };
+
+  const visibles = useMemo(() => {
+    const q = normal(busqueda.trim());
+    const equiposDe = (id: string) => equipos.filter((e) => e.empleado_id === id);
+    const lista = empleados.filter((emp) => {
+      const suyos = equiposDe(emp.id);
+      if (fArea && emp.area !== fArea) return false;
+      if (fPuesto && emp.puesto !== fPuesto) return false;
+      if (fEstado === "activo" && !emp.activo) return false;
+      if (fEstado === "inactivo" && emp.activo) return false;
+      const principales = suyos.filter((e) => !esPeriferico(e));
+      const perifs = suyos.filter(esPeriferico);
+      if (fEquipos === "con" && !principales.length) return false;
+      if (fEquipos === "sin" && principales.length) return false;
+      if (fEquipos === "con_p" && !perifs.length) return false;
+      if (fEquipos === "sin_p" && perifs.length) return false;
+      if (fEquipos.startsWith("cat:") && !suyos.some((e) => e.categoria === fEquipos.slice(4))) return false;
+      if (!q) return true;
+      const texto = [emp.nombre, emp.apellido, `${emp.nombre} ${emp.apellido}`, emp.email, emp.area, emp.puesto,
+        ...suyos.flatMap((e) => [e.codigo, e.categoria, e.marca, e.modelo, e.numero_serie])].map(normal).join(" | ");
+      return q.split(/\s+/).every((palabra) => texto.includes(palabra));
+    });
+    const clave = (e: Empleado) =>
+      orden === "nombre" ? normal(`${e.nombre} ${e.apellido}`)
+      : orden === "area" ? normal(e.area)
+      : orden === "puesto" ? normal(e.puesto)
+      : orden === "estado" ? (e.activo ? "0" : "1")
+      : orden === "perifericos" ? String(1000 - equiposDe(e.id).filter(esPeriferico).length).padStart(4, "0")
+      : String(1000 - equiposDe(e.id).filter((x) => !esPeriferico(x)).length).padStart(4, "0");
+    return lista.sort((a, b) => (asc ? 1 : -1) * clave(a).localeCompare(clave(b)) || normal(a.apellido).localeCompare(normal(b.apellido)));
+  }, [empleados, equipos, busqueda, fArea, fPuesto, fEstado, fEquipos, orden, asc]);
   const router = useRouter();
   const supabase = createClient();
 
@@ -120,7 +196,7 @@ export default function EmpleadosClient({
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="font-display text-2xl text-ink">Empleados</h1>
         <div className="flex gap-2 flex-wrap">
-          <button className="btn-secondary" onClick={() => exportarEmpleados(empleados, equiposPorEmpleado)} disabled={!empleados.length}>
+          <button className="btn-secondary" onClick={() => exportarEmpleados(visibles, equiposPorEmpleado, perifericosPorEmpleado)} disabled={!visibles.length}>
             Exportar a Excel
           </button>
           {esAdmin && (
@@ -216,20 +292,64 @@ export default function EmpleadosClient({
         </form>
       )}
 
+      <div className="space-y-3">
+        <div className="relative">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink/40 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+          </svg>
+          <input
+            type="search"
+            className="input pl-9"
+            placeholder="Buscar persona, email o equipo (código, modelo, número de serie)…"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            aria-label="Buscar empleados o equipos"
+          />
+        </div>
+        <div className="flex gap-2 flex-wrap items-center">
+          <select className="input w-auto" value={fArea} onChange={(e) => setFArea(e.target.value)} aria-label="Filtrar por área">
+            <option value="">Todas las áreas</option>
+            {areas.map((a) => <option key={a}>{a}</option>)}
+          </select>
+          <select className="input w-auto" value={fPuesto} onChange={(e) => setFPuesto(e.target.value)} aria-label="Filtrar por puesto">
+            <option value="">Todos los puestos</option>
+            {puestos.map((p) => <option key={p}>{p}</option>)}
+          </select>
+          <select className="input w-auto" value={fEstado} onChange={(e) => setFEstado(e.target.value)} aria-label="Filtrar por estado">
+            <option value="">Activos e inactivos</option><option value="activo">Solo activos</option><option value="inactivo">Solo inactivos</option>
+          </select>
+          <select className="input w-auto" value={fEquipos} onChange={(e) => setFEquipos(e.target.value)} aria-label="Filtrar por equipos">
+            <option value="">Todos (equipos y periféricos)</option>
+            <option value="con">Con equipo asignado</option><option value="sin">Sin equipo asignado</option>
+            <option value="con_p">Con periféricos</option><option value="sin_p">Sin periféricos</option>
+            {categorias.map((c) => <option key={c} value={`cat:${c}`}>Con {c.toLowerCase()}</option>)}
+          </select>
+          <span className="text-sm text-ink/50 ml-auto">
+            {hayFiltros ? `Mostrando ${visibles.length} de ${empleados.length}` : `${empleados.length} ${empleados.length === 1 ? "persona" : "personas"}`}
+          </span>
+          {hayFiltros && (
+            <button className="text-sm text-brand-600 hover:underline" onClick={limpiar}>Limpiar filtros</button>
+          )}
+        </div>
+      </div>
+
       <div className="card overflow-x-auto">
         <table className="data w-full">
           <thead>
             <tr>
-              <th>Nombre</th>
-              <th>Área</th>
-              <th>Puesto</th>
-              <th>Equipos IT</th>
-              <th>Estado</th>
+              {([["nombre", "Nombre"], ["area", "Área"], ["puesto", "Puesto"], ["equipos", "Equipos"], ["perifericos", "Periféricos"], ["estado", "Estado"]] as [Orden, string][]).map(([k, t]) => (
+                <th key={k} aria-sort={orden === k ? (asc ? "ascending" : "descending") : "none"}>
+                  <button type="button" onClick={() => ordenarPor(k)} className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-ink">
+                    {t}
+                    <span className={orden === k ? "text-brand-600" : "text-ink/20"} aria-hidden>{orden === k && !asc ? "▼" : "▲"}</span>
+                  </button>
+                </th>
+              ))}
               {puedeEditar && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {empleados.map((emp) => {
+            {visibles.map((emp) => {
               const suyos = equipos.filter((e) => e.empleado_id === emp.id);
               return (
               <tr key={emp.id} className="align-top">
@@ -245,26 +365,13 @@ export default function EmpleadosClient({
                 <td className="text-ink/60">{emp.area}</td>
                 <td className="text-ink/60">{emp.puesto || "—"}</td>
                 <td>
-                  {suyos.length === 0 ? (
-                    <span className="text-ink/40">—</span>
-                  ) : (
-                    <ul className="space-y-1">
-                      {suyos.map((e) => (
-                        <li key={e.id} className="flex items-center gap-2 whitespace-nowrap">
-                          <Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>
-                            {e.codigo}
-                          </Link>
-                          <span className="text-ink/70 text-xs">
-                            {e.categoria}
-                            {e.marca || e.modelo ? ` · ${[e.marca, e.modelo].filter(Boolean).join(" ")}` : ""}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  <ListaEquipos items={suyos.filter((e) => !esPeriferico(e))} />
                   {!emp.activo && suyos.length > 0 && (
                     <span className="pill bg-red-50 text-red-600 mt-1">Recuperar equipos</span>
                   )}
+                </td>
+                <td>
+                  <ListaEquipos items={suyos.filter(esPeriferico)} />
                 </td>
                 <td>
                   <span
@@ -296,10 +403,10 @@ export default function EmpleadosClient({
               </tr>
               );
             })}
-            {empleados.length === 0 && (
+            {visibles.length === 0 && (
               <tr>
-                <td colSpan={puedeEditar ? 6 : 5} className="text-center text-ink/40 py-8">
-                  Todavía no hay empleados cargados.
+                <td colSpan={puedeEditar ? 7 : 6} className="text-center text-ink/40 py-8">
+                  {empleados.length === 0 ? "Todavía no hay empleados cargados." : "Nadie coincide con la búsqueda o los filtros."}
                 </td>
               </tr>
             )}

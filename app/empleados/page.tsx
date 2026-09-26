@@ -10,7 +10,7 @@ export default async function EmpleadosPage() {
     // Equipos del inventario IT asignados a cada empleado
     supabase
       .from("inv_v_equipos")
-      .select("id, codigo, categoria, marca, modelo, empleado_id")
+      .select("id, codigo, categoria, grupo, marca, modelo, numero_serie, empleado_id")
       .eq("estado", "asignado")
       .order("codigo"),
     supabase.from("empleados_sync").select("fecha").eq("fuente", "entra").order("fecha", { ascending: false }).limit(1),

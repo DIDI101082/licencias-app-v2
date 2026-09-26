@@ -138,15 +138,16 @@ export default function EmpleadosExcel({ empleados }: { empleados: EmpleadoActua
   );
 }
 
-export async function exportarEmpleados(empleados: any[], equiposPorEmpleado: Record<string, string[]>) {
+export async function exportarEmpleados(empleados: any[], equiposPorEmpleado: Record<string, string[]>, perifericosPorEmpleado: Record<string, string[]> = {}) {
   const writeExcelFile = (await import("write-excel-file/browser")).default;
-  const titulos = ["Nombre", "Apellido", "Email", "Área", "Puesto", "Estado", "Equipos IT", "Origen"];
+  const titulos = ["Nombre", "Apellido", "Email", "Área", "Puesto", "Estado", "Equipos", "Periféricos", "Origen"];
   const filas = empleados.map((e) => [
     { value: e.nombre }, { value: e.apellido }, { value: e.email }, { value: e.area }, { value: e.puesto ?? "" },
     { value: e.activo ? "Activo" : "Inactivo" }, { value: (equiposPorEmpleado[e.id] ?? []).join(", ") },
+    { value: (perifericosPorEmpleado[e.id] ?? []).join(", ") },
     { value: e.entra_id ? "Entra ID" : "Manual" },
   ]);
   await writeExcelFile([titulos.map((t) => ({ value: t, fontWeight: "bold" as const })), ...filas], {
-    columns: titulos.map((t) => ({ width: t === "Email" ? 34 : t === "Equipos IT" ? 24 : 20 })),
+    columns: titulos.map((t) => ({ width: t === "Email" ? 34 : t === "Equipos" || t === "Periféricos" ? 30 : 20 })),
   }).toFile(`empleados-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
