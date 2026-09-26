@@ -42,7 +42,7 @@ export async function getPerfil() {
   // Si todavía no se ejecutó accesos.sql, se muestran todas como antes.
   if (perfil) {
     perfil.modulos = errorModulos
-      ? ["empleados", "licencias", "inventario", "seguridad", "ubicacion", "red"]
+      ? ["empleados", "licencias", "inventario", "seguridad", "ubicacion", "red", "auditoria"]
       : ((modulos as string[] | null) ?? []);
   }
   return { user, perfil };

@@ -71,6 +71,17 @@ const modulos = [
     links: [{ href: "/red", label: "Mapas de PRTG" }],
     admin: [] as { href: string; label: string }[],
   },
+  {
+    id: "auditoria",
+    label: "Logs",
+    titulo: "Registro de cambios y accesos",
+    inicio: "/auditoria",
+    links: [
+      { href: "/auditoria", label: "Cambios" },
+      { href: "/auditoria/sesiones", label: "Inicios de sesión" },
+    ],
+    admin: [] as { href: string; label: string }[],
+  },
 ];
 
 const rolLabel: Record<string, string> = {
@@ -91,7 +102,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
   const subLinks = [...activo.links, ...(esAdmin ? activo.admin : [])];
 
   function esActual(href: string) {
-    if (href === "/" || href === "/inventario" || href === "/inventario/ubicacion") return pathname === href;
+    if (href === "/" || href === "/inventario" || href === "/inventario/ubicacion" || href === "/auditoria") return pathname === href;
     return pathname.startsWith(href);
   }
 
@@ -123,7 +134,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
                 role="tab"
                 aria-selected={sel}
                 title={(m as { titulo?: string }).titulo ?? m.label}
-                className={`font-display font-bold tracking-tight px-3 lg:px-4 py-2 whitespace-nowrap text-sm lg:text-base rounded-t-lg border-x border-t -mb-px transition-colors shrink-0 ${
+                className={`font-display font-bold tracking-tight px-3 py-2 whitespace-nowrap text-sm lg:text-base rounded-t-lg border-x border-t -mb-px transition-colors shrink-0 ${
                   sel ? "bg-[#F5F7FB] border-black/[0.06] text-ink" : "border-transparent text-ink/45 hover:text-ink"
                 }`}
               >
