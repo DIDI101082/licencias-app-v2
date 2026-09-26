@@ -5,6 +5,7 @@ import { getPerfil } from "@/lib/supabase/server";
 import Nav from "@/components/Nav";
 import { PerfilProvider } from "@/components/PerfilContext";
 import GuardiaModulo from "@/components/GuardiaModulo";
+import RegistrarIngreso from "@/components/RegistrarIngreso";
 
 const display = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -29,6 +30,7 @@ export default async function RootLayout({
     <html lang="es">
       <body className={`${display.variable} ${body.variable} font-sans`}>
         <PerfilProvider perfil={perfil}>
+          {perfil && <RegistrarIngreso />}
           {perfil && <Nav nombre={perfil.nombre} rol={perfil.rol} modulos={perfil.modulos ?? []} />}
           <main className="mx-auto max-w-6xl px-6 py-8">
             {perfil ? <GuardiaModulo modulos={perfil.modulos ?? []}>{children}</GuardiaModulo> : children}

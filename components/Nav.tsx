@@ -107,6 +107,8 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
   }
 
   async function salir() {
+    // queda registrada la salida en Logs (si falla, se cierra la sesión igual)
+    try { await supabase.rpc("registrar_ingreso", { p_accion: "logout" }); } catch {}
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();

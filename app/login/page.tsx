@@ -46,7 +46,7 @@ export default function LoginPage() {
       setErrorEmail(error.message === "Invalid login credentials" ? "Email o contraseña incorrectos." : error.message);
       return;
     }
-    router.push("/");
+    router.push("/?ingreso=email");
     router.refresh();
   }
 

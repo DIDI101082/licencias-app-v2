@@ -3,7 +3,15 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-type Sesion = { fecha: string; email: string | null; accion: string; ip: string | null; proveedor: string | null };
+type Sesion = { fecha: string; email: string | null; accion: string; ip: string | null; proveedor: string | null; navegador: string | null };
+
+// "Edge · Windows", "Chrome · Android", etc.
+function navegador(ua: string | null) {
+  if (!ua) return "—";
+  const nav = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Otro";
+  const so = /Windows/.test(ua) ? "Windows" : /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS" : /Mac OS X/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "";
+  return so ? `${nav} · ${so}` : nav;
+}
 const ACCION: Record<string, { texto: string; clase: string }> = {
   login: { texto: "Inicio de sesión", clase: "bg-emerald-50 text-emerald-700" },
   logout: { texto: "Cierre de sesión", clase: "bg-black/[0.05] text-ink/60" },
@@ -44,7 +52,7 @@ export default function Sesiones() {
       </div>
       <div className="card overflow-x-auto">
         <table className="data w-full">
-          <thead><tr><th>Fecha</th><th>Persona</th><th>Evento</th><th>Método</th><th>IP</th></tr></thead>
+          <thead><tr><th>Fecha</th><th>Persona</th><th>Evento</th><th>Método</th><th>Navegador</th><th>IP</th></tr></thead>
           <tbody>
             {visibles.map((f, i) => (
               <tr key={i}>
@@ -52,14 +60,15 @@ export default function Sesiones() {
                 <td className="text-ink">{f.email ?? "—"}</td>
                 <td><span className={`pill ${ACCION[f.accion]?.clase ?? "bg-black/[0.05] text-ink/60"}`}>{ACCION[f.accion]?.texto ?? f.accion}</span></td>
                 <td className="text-ink/70">{f.proveedor ? METODO[f.proveedor] ?? f.proveedor : "—"}</td>
+                <td className="text-ink/70 whitespace-nowrap" title={f.navegador ?? undefined}>{navegador(f.navegador)}</td>
                 <td className="text-xs text-ink/60 font-mono">{f.ip ?? "—"}</td>
               </tr>
             ))}
-            {!cargando && visibles.length === 0 && <tr><td colSpan={5} className="text-center text-ink/40 py-10">Sin inicios de sesión en este período.</td></tr>}
+            {!cargando && visibles.length === 0 && <tr><td colSpan={6} className="text-center text-ink/40 py-10">Sin inicios de sesión en este período.</td></tr>}
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-ink/50">Datos del registro de autenticación de Supabase.</p>
+      <p className="text-xs text-ink/50">Se registra cada ingreso a la app y cada cierre de sesión, con la IP desde la que se conectó la persona.</p>
     </div>
   );
 }
