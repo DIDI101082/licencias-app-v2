@@ -83,6 +83,18 @@ const modulos = [
     admin: [] as { href: string; label: string }[],
   },
   {
+    id: "servidores",
+    label: "Servidores",
+    titulo: "Servidores: estado, parches y backups",
+    inicio: "/servidores",
+    links: [
+      { href: "/servidores", label: "Estado" },
+      { href: "/servidores/parches", label: "Parches y fin de soporte" },
+      { href: "/servidores/backups", label: "Backups" },
+    ],
+    admin: [{ href: "/servidores/configuracion", label: "Configuración" }],
+  },
+  {
     id: "auditoria",
     label: "Logs",
     titulo: "Registro de cambios, accesos y alertas",
@@ -115,7 +127,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
   const subLinks = [...activo.links, ...(esAdmin ? activo.admin : [])];
 
   function esActual(href: string) {
-    if (href === "/" || href === "/inventario" || href === "/inventario/ubicacion" || href === "/auditoria") return pathname === href;
+    if (href === "/" || href === "/inventario" || href === "/inventario/ubicacion" || href === "/auditoria" || href === "/servidores") return pathname === href;
     if (href === "/empleados") return pathname === href || (/^\/empleados\/[^/]+$/.test(pathname) && !pathname.startsWith("/empleados/movimientos"));
     return pathname.startsWith(href);
   }

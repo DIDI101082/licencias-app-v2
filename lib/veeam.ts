@@ -2,7 +2,7 @@
 // con el módulo de PowerShell de Veeam y lo envía a Accusys Cyber. Corre como tarea programada cada hora.
 // Solo ASCII en el PowerShell (sin tildes) para evitar problemas de codificación en Windows PowerShell 5.1.
 
-export const VEEAM_VERSION = "1.0";
+export const VEEAM_VERSION = "1.1";
 
 const SCRIPT = String.raw`# Accusys Cyber - reporte de backups de Veeam (version __VERSION__)
 # Se ejecuta en el servidor de Veeam Backup & Replication como tarea programada.
@@ -55,8 +55,11 @@ try {
     $exito = $propias | Where-Object { [string]$_.Result -in @('Success', 'Warning') } | Select-Object -First 1
     $hab = $true
     try { $hab = [bool]$j.IsScheduleEnabled } catch {}
+    # VMs / equipos que incluye el trabajo (sirve para vincular cada servidor con sus backups)
+    $obj = @()
+    try { $obj = @(Get-VBRJobObject -Job $j -WarningAction SilentlyContinue | ForEach-Object { [string]$_.Name }) } catch {}
     [void]$trabajos.Add(@{
-      nombre = $j.Name; tipo = [string]$j.JobType; habilitado = $hab
+      nombre = $j.Name; tipo = [string]$j.JobType; habilitado = $hab; objetos = $obj
       resultado = $(if ($ultima) { [string]$ultima.Result } else { $null })
       inicio = $(if ($ultima) { Utc $ultima.CreationTime } else { $null })
       fin = $(if ($ultima) { Utc $ultima.EndTime } else { $null })
@@ -75,8 +78,10 @@ try {
       $exito = $propias | Where-Object { [string]$_.Result -in @('Success', 'Warning') } | Select-Object -First 1
       $hab = $true
       try { $hab = [bool]$j.JobEnabled } catch {}
+      $obj = @()
+      try { $obj = @($j.BackupObject | ForEach-Object { [string]$_.Name }) } catch {}
       [void]$trabajos.Add(@{
-        nombre = $j.Name; tipo = 'Agente'; habilitado = $hab
+        nombre = $j.Name; tipo = 'Agente'; habilitado = $hab; objetos = $obj
         resultado = $(if ($ultima) { [string]$ultima.Result } else { $null })
         inicio = $(if ($ultima) { Utc $ultima.CreationTime } else { $null })
         fin = $(if ($ultima) { Utc $ultima.EndTime } else { $null })
