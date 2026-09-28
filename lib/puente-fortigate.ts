@@ -7,7 +7,7 @@
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_FORTIGATE_VERSION = "1.2";
+export const PUENTE_FORTIGATE_VERSION = "1.4";
 
 export type EquipoFortiGate = {
   nombre: string;       // cómo se va a ver en la app (ej. "Reconquista")
@@ -167,14 +167,23 @@ function Revisar-Config($eq, $serial) {
 }
 
 # ---------- Logs (desde FortiAnalyzer a traves del FortiGate; si no, del disco o la memoria) ----------
-function Logs($eq, $tipo, $filas, $desdeMs) {
+function Logs($eq, $tipos, $filas, $desdeMs) {
+  # $tipos: una o varias rutas posibles (ej. 'ips'); se prueba FortiAnalyzer, disco y memoria
+  $ultimo = ''
   foreach ($origen in @('fortianalyzer', 'disk', 'memory')) {
-    try {
-      $r = Api $eq ('/api/v2/log/' + $origen + '/' + $tipo + '?rows=' + $filas + '&filter=' + [Uri]::EscapeDataString('_metadata.timestamp>=' + $desdeMs))
-      if ($null -ne $r -and $r.PSObject.Properties['results']) { return @{ origen = $origen; filas = @($r.results) } }
-    } catch {}
+    foreach ($tipo in @($tipos)) {
+      try {
+        $r = Api $eq ('/api/v2/log/' + $origen + '/' + $tipo + '?rows=' + $filas + '&filter=' + [Uri]::EscapeDataString('_metadata.timestamp>=' + $desdeMs))
+        if ($null -ne $r -and $r.PSObject.Properties['results']) { return @{ origen = $origen; filas = @($r.results) } }
+      } catch {
+        $st = $null; try { $st = [int]$_.Exception.Response.StatusCode } catch {}
+        if ($st) { $ultimo = $origen + ' ' + $st } else { $ultimo = $origen + ' ' + $_.Exception.Message }
+      }
+    }
   }
-  [void]$script:avisos.Add('logs ' + $tipo + ': no se pudieron leer (revisar que el perfil tenga lectura de Log & Report)')
+  $txt = 'no se pudieron leer'
+  if ($ultimo -match ' (401|403)$') { $txt = 'sin permiso (revisar que el perfil tenga lectura de Log & Report)' } elseif ($ultimo) { $txt = $txt + ' (' + $ultimo + ')' }
+  [void]$script:avisos.Add('logs ' + (@($tipos)[0]) + ': ' + $txt)
   return @{ origen = $null; filas = @() }
 }
 
@@ -290,8 +299,8 @@ function Consultar-FortiGate($eq) {
 
   # Amenazas (IPS y antivirus) de las ultimas 2 horas
   $am = New-Object System.Collections.ArrayList
-  foreach ($x in (Logs $eq 'utm/ips' 300 $desde).filas) { [void]$am.Add([ordered]@{ tipo = 'IPS'; fecha = (Prop $x 'eventtime'); fecha_txt = ([string](Prop $x 'date') + ' ' + [string](Prop $x 'time')); severidad = [string](Prop $x 'severity'); nombre = [string](Prop $x 'attack'); accion = [string](Prop $x 'action'); origen = [string](Prop $x 'srcip'); destino = [string](Prop $x 'dstip'); usuario = [string](Prop $x 'user') }) }
-  foreach ($x in (Logs $eq 'utm/virus' 200 $desde).filas) { [void]$am.Add([ordered]@{ tipo = 'Antivirus'; fecha = (Prop $x 'eventtime'); fecha_txt = ([string](Prop $x 'date') + ' ' + [string](Prop $x 'time')); severidad = [string](Prop $x 'crlevel'); nombre = [string](Prop $x 'virus'); accion = [string](Prop $x 'action'); origen = [string](Prop $x 'srcip'); destino = [string](Prop $x 'dstip'); usuario = [string](Prop $x 'user') }) }
+  foreach ($x in (Logs $eq @('ips', 'utm/ips') 300 $desde).filas) { [void]$am.Add([ordered]@{ tipo = 'IPS'; fecha = (Prop $x 'eventtime'); fecha_txt = ([string](Prop $x 'date') + ' ' + [string](Prop $x 'time')); severidad = [string](Prop $x 'severity'); nombre = [string](Prop $x 'attack'); accion = [string](Prop $x 'action'); origen = [string](Prop $x 'srcip'); destino = [string](Prop $x 'dstip'); usuario = [string](Prop $x 'user') }) }
+  foreach ($x in (Logs $eq @('virus', 'utm/virus') 200 $desde).filas) { [void]$am.Add([ordered]@{ tipo = 'Antivirus'; fecha = (Prop $x 'eventtime'); fecha_txt = ([string](Prop $x 'date') + ' ' + [string](Prop $x 'time')); severidad = [string](Prop $x 'crlevel'); nombre = [string](Prop $x 'virus'); accion = [string](Prop $x 'action'); origen = [string](Prop $x 'srcip'); destino = [string](Prop $x 'dstip'); usuario = [string](Prop $x 'user') }) }
   $r.amenazas = $am
 
   # SD-WAN: estado de cada enlace en cada chequeo de salud
@@ -318,12 +327,15 @@ function Consultar-FortiGate($eq) {
   foreach ($k in $miembros.Keys) { if ($wan -notcontains $k) { [void]$wan.Add($k) } }
   if ($r.sdwan) { foreach ($x in $r.sdwan) { if ($x.enlace -and $wan -notcontains $x.enlace) { [void]$wan.Add($x.enlace) } } }
   if ($wan.Count -eq 0 -and $r.interfaces) { foreach ($i in $r.interfaces) { if ($i.nombre -match '^wan') { [void]$wan.Add($i.nombre) } } }
-  if ($wan.Count -gt 0) {
+  # Redes internas (VLAN y puertos con rol LAN) para ver cuanto consume cada una
+  $lan = New-Object System.Collections.ArrayList
+  if ($r.interfaces) { foreach ($i in $r.interfaces) { if ($i.rol -eq 'lan' -and $i.estado -ne 'down' -and $wan -notcontains $i.nombre) { [void]$lan.Add($i.nombre) } } }
+  if ($wan.Count -gt 0 -or $lan.Count -gt 0) {
     $est = Intentar $eq '/api/v2/monitor/system/interface?include_vlan=true&include_aggregate=true' 'trafico de interfaces'
     Muestra $eq 'interfaces' $est
     $stats = Mapa (Prop $est 'results') @('name', 'id')
     $tr = New-Object System.Collections.ArrayList
-    foreach ($n in $wan) {
+    foreach ($n in (@($wan) + @($lan))) {
       $s = $stats[$n]; $m = $miembros[$n]
       if ($null -eq $s -and $null -eq $m) { continue }
       [void]$tr.Add([ordered]@{

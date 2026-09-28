@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
@@ -97,6 +97,8 @@ function Contenido() {
   const [top, setTop] = useState<Top[]>([]);
   const [interfaces, setInterfaces] = useState<{ equipo: string; nombre: string; alias: string | null; rol: string | null }[]>([]);
   const [verOtros, setVerOtros] = useState(false);
+  const [redAbierta, setRedAbierta] = useState<string | null>(null);
+  const [serieRed, setSerieRed] = useState<PuntoTrafico[] | null>(null);
   const [horas, setHoras] = useState(24);
   const [series, setSeries] = useState<Record<string, PuntoTrafico[]>>({});
   const [editando, setEditando] = useState<{ equipo: string; interfaz: string; nombre: string; bajada: string; subida: string; respaldo: boolean } | null>(null);
@@ -215,6 +217,8 @@ function Contenido() {
   const nombreEnlace = (l: Enlace) => l.nombre ?? itf(l)?.alias ?? l.interfaz;
   const internet = enlaces.filter(esInternet);
   const otros = enlaces.filter((l) => !esInternet(l) && itf(l)?.rol !== "lan");
+  // Redes internas: en una VLAN, lo que sale de la interfaz (tx) es lo que descargan los usuarios
+  const redes = enlaces.filter((l) => !esInternet(l) && itf(l)?.rol === "lan" && l.actualizado && Date.now() - Date.parse(l.actualizado) < 3 * 3600000);
 
   // Series del gráfico de consumo (se piden al abrir la solapa de enlaces y con cada actualización)
   useEffect(() => {
@@ -231,6 +235,20 @@ function Contenido() {
     return () => { vivo = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vista, enlaces, interfaces, horas]);
+
+  // Gráfico de una red interna (al abrirla): se invierte bajada/subida para verlo desde el lado de los usuarios
+  useEffect(() => {
+    if (!redAbierta) return;
+    const [eq, ...resto] = redAbierta.split(":");
+    let vivo = true;
+    setSerieRed(null);
+    createClient().rpc("fg_trafico_serie", { p_equipo: eq, p_interfaz: resto.join(":"), p_horas: horas }).then(({ data }) => {
+      if (!vivo) return;
+      const n = (v: any) => (v == null ? null : Number(v));
+      setSerieRed(((data ?? []) as PuntoTrafico[]).map((p) => ({ fecha: p.fecha, rx_bps: n(p.tx_bps), tx_bps: n(p.rx_bps), rx_max: n(p.tx_max), tx_max: n(p.rx_max) })));
+    });
+    return () => { vivo = false; };
+  }, [redAbierta, horas]);
 
   async function guardarEnlace() {
     if (!editando) return;
@@ -814,6 +832,57 @@ function Contenido() {
               )}
             </div>
           )}
+
+          {/* Redes internas (VLAN) */}
+          {(() => {
+            const lista = redes.filter((l) => deEquipo(l.equipo) && coincide(l.interfaz, nombreEnlace(l))).sort((a, b) => ((b.tx_bps ?? 0) + (b.rx_bps ?? 0)) - ((a.tx_bps ?? 0) + (a.rx_bps ?? 0)));
+            const maximo = Math.max(1, ...lista.map((l) => (l.tx_bps ?? 0) + (l.rx_bps ?? 0)));
+            return (
+              <div className="card overflow-x-auto">
+                <div className="px-4 pt-4">
+                  <div className="font-medium text-ink">Redes internas</div>
+                  <p className="text-xs text-ink/50 mt-0.5">Consumo de cada VLAN y puerto LAN, ordenado de mayor a menor. Tocá una red para ver su gráfico.</p>
+                </div>
+                <table className="data w-full">
+                  <thead><tr><th>Red</th><th>Descarga de los usuarios</th><th>Subida de los usuarios</th><th className="w-1/4">Uso relativo</th>{equipos.length > 1 && !filtroEquipo && <th>Firewall</th>}</tr></thead>
+                  <tbody>
+                    {!lista.length && vacio(5, enlaces.length ? "Sin datos de redes internas todavía (hace falta el puente 1.4: generá el instalador de nuevo)." : "Sin datos todavía.")}
+                    {lista.map((l) => {
+                      const clave = `${l.equipo}:${l.interfaz}`;
+                      const abierta = redAbierta === clave;
+                      const total = (l.tx_bps ?? 0) + (l.rx_bps ?? 0);
+                      return (
+                        <Fragment key={clave}>
+                          <tr className="cursor-pointer hover:bg-line/[0.03]" onClick={() => setRedAbierta(abierta ? null : clave)} aria-expanded={abierta}>
+                            <td className="text-sm font-medium">
+                              {nombreEnlace(l)}{nombreEnlace(l) !== l.interfaz && <span className="text-ink/45 font-normal"> · {l.interfaz}</span>}
+                            </td>
+                            <td className="text-sm tabular-nums">{velocidadBps(l.tx_bps)}</td>
+                            <td className="text-sm tabular-nums">{velocidadBps(l.rx_bps)}</td>
+                            <td>
+                              <div className="h-1.5 rounded-full bg-line/[0.08] overflow-hidden" title={velocidadBps(total)}>
+                                <div className="h-full bg-[#2a78d6] dark:bg-[#3987e5]" style={{ width: `${Math.max(1, (total / maximo) * 100)}%` }} />
+                              </div>
+                            </td>
+                            {equipos.length > 1 && !filtroEquipo && <td className="text-sm">{l.equipo}</td>}
+                          </tr>
+                          {abierta && (
+                            <tr>
+                              <td colSpan={5} className="bg-canvas">
+                                {serieRed == null ? <p className="text-sm text-ink/50 py-4">Cargando…</p> : (
+                                  <GraficoTrafico puntos={serieRed} horas={horas} contratadoBajada={null} etiqueta={`${l.equipo} ${nombreEnlace(l)}`} />
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
 
           {/* Chequeos de SD-WAN de enlaces que no informan tráfico */}
           {sdwan.filter((s) => deEquipo(s.equipo) && !enlaces.some((l) => l.equipo === s.equipo && l.interfaz === s.enlace)).length > 0 && (
