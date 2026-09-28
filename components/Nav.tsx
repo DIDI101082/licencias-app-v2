@@ -84,6 +84,7 @@ const modulos = [
     links: [
       { href: "/red", label: "Mapas de PRTG" },
       { href: "/red/switches", label: "Switches" },
+      { href: "/red/fortigate", label: "FortiGate" },
     ],
     admin: [] as { href: string; label: string }[],
   },
