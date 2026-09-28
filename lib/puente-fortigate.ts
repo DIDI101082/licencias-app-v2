@@ -7,7 +7,7 @@
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_FORTIGATE_VERSION = "1.0";
+export const PUENTE_FORTIGATE_VERSION = "1.1";
 
 export type EquipoFortiGate = {
   nombre: string;       // cómo se va a ver en la app (ej. "Reconquista")
@@ -306,7 +306,9 @@ try {
   Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value $linea
 }
 catch {
-  Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+  $detalle = $_.Exception.Message
+  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $detalle = $detalle + ' | ' + $_.ErrorDetails.Message }
+  Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $detalle)
   exit 1
 }
 `;

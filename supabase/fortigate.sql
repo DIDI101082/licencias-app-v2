@@ -133,9 +133,8 @@ create or replace function public.fg_reportar(p_token text, p_datos jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_hash text; v_ahora timestamptz := now();
-  e jsonb; vx jsonb; v_nom text; v_sync boolean; v_geo record; n int := 0;
-  v_geo_ok boolean := to_regprocedure('public.inv_geo_consultar(text)') is not null;
-  v_geo_nuevas int := 0;
+  e jsonb; vx jsonb; v_nom text; v_sync boolean; g_cod text; g_pais text; g_ciudad text; g_isp text; n int := 0;
+  v_geo_ok boolean := to_regclass('public.inv_geo_cache') is not null;
 begin
   select token_hash into v_hash from fg_config where id = 1;
   if v_hash is null or coalesce(p_token, '') = '' or v_hash <> inv_hash(p_token) then
@@ -226,17 +225,16 @@ begin
       delete from fg_vpn where equipo = v_nom;
       for vx in select * from jsonb_array_elements(e -> 'vpn') loop
         continue when coalesce(vx ->> 'usuario', '') = '';
-        v_geo := null;
-        if v_geo_ok and coalesce(vx ->> 'ip_publica', '') ~ '^[0-9a-fA-F:.]{3,45}$' and v_geo_nuevas < 15 then
-          if not exists (select 1 from inv_geo_cache where ip = vx ->> 'ip_publica' and actualizado > now() - interval '30 days') then
-            v_geo_nuevas := v_geo_nuevas + 1;
-          end if;
-          select * into v_geo from inv_geo_consultar(vx ->> 'ip_publica');
+        -- Solo lo que ya está en la caché: las IP nuevas las ubica fg_geo_procesar() en segundo plano
+        -- (consultar el servicio acá hace que Supabase corte el reporte por tiempo)
+        g_cod := null; g_pais := null; g_ciudad := null; g_isp := null;
+        if v_geo_ok then
+          select pais_codigo, pais, ciudad, isp into g_cod, g_pais, g_ciudad, g_isp from inv_geo_cache where ip = vx ->> 'ip_publica';
         end if;
         insert into fg_vpn (equipo, tipo, usuario, ip_publica, ip_tunel, desde, pais_codigo, pais, ciudad, isp)
         values (v_nom, left(vx ->> 'tipo', 10), left(vx ->> 'usuario', 100), coalesce(left(vx ->> 'ip_publica', 60), ''),
                 nullif(left(vx ->> 'ip_tunel', 60), ''), fg_ts(vx -> 'desde'),
-                v_geo.pais_codigo, v_geo.pais, v_geo.ciudad, v_geo.isp)
+                g_cod, g_pais, g_ciudad, g_isp)
         on conflict do nothing;
       end loop;
     end if;
@@ -276,6 +274,38 @@ begin
 end $$;
 revoke all on function public.fg_reportar(text, jsonb) from public;
 grant execute on function public.fg_reportar(text, jsonb) to anon, authenticated;
+
+-- ----------------------------------------------------------
+-- Ubicación de las IP de VPN nuevas (cada 5 minutos, hasta 10 IP por vez)
+-- ----------------------------------------------------------
+create or replace function public.fg_geo_procesar()
+returns void language plpgsql security definer set search_path = public as $$
+declare r record; g record;
+begin
+  if to_regprocedure('public.inv_geo_consultar(text)') is null then return; end if;
+  for r in
+    select distinct ip_publica from fg_vpn
+     where pais_codigo is null and ip_publica ~ '^[0-9a-fA-F:.]{3,45}$'
+       and ip_publica !~ '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|169\.254\.)'
+     limit 10
+  loop
+    begin
+      select * into g from inv_geo_consultar(r.ip_publica);
+      if g.pais_codigo is not null then
+        update fg_vpn set pais_codigo = g.pais_codigo, pais = g.pais, ciudad = g.ciudad, isp = g.isp where ip_publica = r.ip_publica;
+      end if;
+    exception when others then null;
+    end;
+  end loop;
+end $$;
+revoke all on function public.fg_geo_procesar() from public, anon, authenticated;
+
+do $$ begin
+  begin perform cron.unschedule('accusys-fortigate-geo'); exception when others then null; end;
+  perform cron.schedule('accusys-fortigate-geo', '*/5 * * * *', 'select public.fg_geo_procesar()');
+exception when others then
+  raise notice 'La ubicación de las IP de VPN no quedó programada (falta pg_cron): %', sqlerrm;
+end $$;
 
 -- ----------------------------------------------------------
 -- Vulnerabilidades de FortiOS (base oficial NVD; misma tabla que el módulo Vulnerabilidades)
