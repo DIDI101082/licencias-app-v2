@@ -95,6 +95,8 @@ function Contenido() {
   const [sdwan, setSdwan] = useState<Sdwan[]>([]);
   const [enlaces, setEnlaces] = useState<Enlace[]>([]);
   const [top, setTop] = useState<Top[]>([]);
+  const [interfaces, setInterfaces] = useState<{ equipo: string; nombre: string; alias: string | null; rol: string | null }[]>([]);
+  const [verOtros, setVerOtros] = useState(false);
   const [horas, setHoras] = useState(24);
   const [series, setSeries] = useState<Record<string, PuntoTrafico[]>>({});
   const [editando, setEditando] = useState<{ equipo: string; interfaz: string; nombre: string; bajada: string; subida: string; respaldo: boolean } | null>(null);
@@ -111,7 +113,7 @@ function Contenido() {
   const cargar = useCallback(async () => {
     const sb = createClient();
     const desde = new Date(Date.now() - 7 * 86400000).toISOString();
-    const [e, q, h, p, c, v, f, a, l, ce, s, en, tp] = await Promise.all([
+    const [e, q, h, p, c, v, f, a, l, ce, s, en, tp, it] = await Promise.all([
       sb.rpc("fg_estado"),
       sb.from("fg_equipos_vista").select("*").order("nombre"),
       sb.from("fg_hallazgos").select("*"),
@@ -125,6 +127,7 @@ function Contenido() {
       sb.from("fg_sdwan").select("*").order("chequeo"),
       sb.from("fg_enlaces").select("equipo,interfaz,nombre,bajada_mbps,subida_mbps,respaldo,velocidad_puerto,conectado,rx_bps,tx_bps,actualizado").order("interfaz"),
       sb.from("fg_top").select("*").order("bytes", { ascending: false }),
+      sb.from("fg_interfaces").select("equipo,nombre,alias,rol"),
     ]);
     const err = e.error ?? q.error;
     setError(err ? (/fg_/.test(err.message) ? "Falta ejecutar supabase/fortigate.sql en Supabase." : err.message) : null);
@@ -141,6 +144,7 @@ function Contenido() {
     setSdwan((s.data ?? []) as Sdwan[]);
     setEnlaces((en.data ?? []) as Enlace[]);
     setTop((tp.data ?? []) as Top[]);
+    setInterfaces((it.data ?? []) as any[]);
     setAhora(Date.now());
     setCargando(false);
   }, []);
@@ -204,20 +208,29 @@ function Contenido() {
     (!fv.soloFuera || (!!v.pais_codigo && !paisOk(v.pais_codigo)))
   );
 
+  // Enlaces a Internet: interfaces con rol WAN, o las que el administrador ya configuró.
+  // El resto de los miembros de SD-WAN (túneles IPsec, etc.) va a una tabla aparte.
+  const itf = (l: { equipo: string; interfaz: string }) => interfaces.find((i) => i.equipo === l.equipo && i.nombre === l.interfaz);
+  const esInternet = (l: Enlace) => itf(l)?.rol === "wan" || l.bajada_mbps != null || l.respaldo;
+  const nombreEnlace = (l: Enlace) => l.nombre ?? itf(l)?.alias ?? l.interfaz;
+  const internet = enlaces.filter(esInternet);
+  const otros = enlaces.filter((l) => !esInternet(l) && itf(l)?.rol !== "lan");
+
   // Series del gráfico de consumo (se piden al abrir la solapa de enlaces y con cada actualización)
   useEffect(() => {
-    if (vista !== "sdwan" || !enlaces.length) return;
+    if (vista !== "sdwan" || !internet.length) return;
     let vivo = true;
     (async () => {
       const sb = createClient();
-      const res = await Promise.all(enlaces.map((l) => sb.rpc("fg_trafico_serie", { p_equipo: l.equipo, p_interfaz: l.interfaz, p_horas: horas })));
+      const res = await Promise.all(internet.map((l) => sb.rpc("fg_trafico_serie", { p_equipo: l.equipo, p_interfaz: l.interfaz, p_horas: horas })));
       if (!vivo) return;
       const m: Record<string, PuntoTrafico[]> = {};
-      enlaces.forEach((l, i) => { m[`${l.equipo}:${l.interfaz}`] = ((res[i].data ?? []) as PuntoTrafico[]).map((p) => ({ ...p, rx_bps: p.rx_bps == null ? null : Number(p.rx_bps), tx_bps: p.tx_bps == null ? null : Number(p.tx_bps), rx_max: p.rx_max == null ? null : Number(p.rx_max), tx_max: p.tx_max == null ? null : Number(p.tx_max) })); });
+      internet.forEach((l, i) => { m[`${l.equipo}:${l.interfaz}`] = ((res[i].data ?? []) as PuntoTrafico[]).map((p) => ({ ...p, rx_bps: p.rx_bps == null ? null : Number(p.rx_bps), tx_bps: p.tx_bps == null ? null : Number(p.tx_bps), rx_max: p.rx_max == null ? null : Number(p.rx_max), tx_max: p.tx_max == null ? null : Number(p.tx_max) })); });
       setSeries(m);
     })();
     return () => { vivo = false; };
-  }, [vista, enlaces, horas]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vista, enlaces, interfaces, horas]);
 
   async function guardarEnlace() {
     if (!editando) return;
@@ -664,14 +677,16 @@ function Contenido() {
             </div>
           </div>
 
-          {!enlaces.length && (
+          {!internet.filter((l) => deEquipo(l.equipo)).length && (
             <div className="card p-8 text-center text-ink/40">
-              {cargando ? "Cargando…" : "Todavía no hay datos de consumo. Hace falta el puente 1.2 o posterior: generá el instalador de nuevo desde Configurar."}
+              {cargando ? "Cargando…" : !enlaces.length
+                ? "Todavía no hay datos de consumo. Hace falta el puente 1.2 o posterior: generá el instalador de nuevo desde Configurar."
+                : "No se encontraron interfaces con rol WAN. Marcá cuáles son los enlaces a Internet desde la lista de abajo."}
             </div>
           )}
 
           <div className="grid xl:grid-cols-2 gap-4">
-            {enlaces.filter((l) => deEquipo(l.equipo) && coincide(l.interfaz, l.nombre, l.equipo)).map((l) => {
+            {internet.filter((l) => deEquipo(l.equipo) && coincide(l.interfaz, nombreEnlace(l), l.equipo)).map((l) => {
               const clave = `${l.equipo}:${l.interfaz}`;
               const salud = sdwan.filter((s) => s.equipo === l.equipo && s.enlace === l.interfaz);
               const caido = l.conectado === false || salud.some((s) => s.estado !== "up");
@@ -685,11 +700,11 @@ function Contenido() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h2 className="font-display text-lg text-ink">
-                        {l.nombre ?? l.interfaz}
+                        {nombreEnlace(l)}
                         {l.respaldo && <span className="pill bg-line/[0.05] text-ink/60 ml-2 align-middle">Respaldo</span>}
                       </h2>
                       <p className="text-sm text-ink/55">
-                        {[l.equipo, l.nombre ? l.interfaz : null, l.velocidad_puerto ? `puerto a ${l.velocidad_puerto >= 1000 ? `${l.velocidad_puerto / 1000} Gbps` : `${l.velocidad_puerto} Mbps`}` : null,
+                        {[l.equipo, nombreEnlace(l) !== l.interfaz ? l.interfaz : null, l.velocidad_puerto ? `puerto a ${l.velocidad_puerto >= 1000 ? `${l.velocidad_puerto / 1000} Gbps` : `${l.velocidad_puerto} Mbps`}` : null,
                           l.bajada_mbps || l.subida_mbps ? `contratado ${l.bajada_mbps ?? "—"}/${l.subida_mbps ?? "—"} Mbps` : "sin velocidad contratada cargada"].filter(Boolean).join(" · ")}
                       </p>
                     </div>
@@ -713,7 +728,7 @@ function Contenido() {
                     ))}
                   </div>
 
-                  <GraficoTrafico puntos={series[clave] ?? []} horas={horas} contratadoBajada={l.bajada_mbps} etiqueta={`${l.equipo} ${l.nombre ?? l.interfaz}`} />
+                  <GraficoTrafico puntos={series[clave] ?? []} horas={horas} contratadoBajada={l.bajada_mbps} etiqueta={`${l.equipo} ${nombreEnlace(l)}`} />
 
                   {salud.length > 0 && (
                     <div className="text-xs text-ink/60 space-y-0.5">
@@ -726,7 +741,7 @@ function Contenido() {
                   )}
 
                   {esAdmin && !ed && (
-                    <button className="text-sm text-brand-600 hover:underline" onClick={() => setEditando({ equipo: l.equipo, interfaz: l.interfaz, nombre: l.nombre ?? "", bajada: l.bajada_mbps?.toString() ?? "", subida: l.subida_mbps?.toString() ?? "", respaldo: l.respaldo })}>
+                    <button className="text-sm text-brand-600 hover:underline" onClick={() => setEditando({ equipo: l.equipo, interfaz: l.interfaz, nombre: l.nombre ?? itf(l)?.alias ?? "", bajada: l.bajada_mbps?.toString() ?? "", subida: l.subida_mbps?.toString() ?? "", respaldo: l.respaldo })}>
                       {l.bajada_mbps ? "Editar enlace" : "Cargar velocidad contratada"}
                     </button>
                   )}
@@ -752,6 +767,53 @@ function Contenido() {
               );
             })}
           </div>
+
+          {/* Túneles y otros miembros de SD-WAN */}
+          {otros.filter((l) => deEquipo(l.equipo)).length > 0 && (
+            <div className="card overflow-x-auto">
+              <button className="w-full flex items-center justify-between px-4 py-3 text-left" onClick={() => setVerOtros(!verOtros)} aria-expanded={verOtros}>
+                <span className="font-medium text-ink">Túneles VPN y otros miembros de SD-WAN ({otros.filter((l) => deEquipo(l.equipo)).length})</span>
+                <span className="text-sm text-brand-600">{verOtros ? "Ocultar" : "Ver"}</span>
+              </button>
+              {verOtros && (
+                <table className="data w-full">
+                  <thead><tr><th>Equipo</th><th>Interfaz</th><th>Bajada ahora</th><th>Subida ahora</th><th></th></tr></thead>
+                  <tbody>
+                    {otros.filter((l) => deEquipo(l.equipo) && coincide(l.interfaz, nombreEnlace(l))).sort((a, b) => (b.rx_bps ?? 0) - (a.rx_bps ?? 0)).map((l) => (
+                      <tr key={`${l.equipo}:${l.interfaz}`}>
+                        <td className="text-sm">{l.equipo}</td>
+                        <td className="text-sm font-medium">{nombreEnlace(l)}{nombreEnlace(l) !== l.interfaz && <span className="text-ink/45 font-normal"> · {l.interfaz}</span>}</td>
+                        <td className="text-sm tabular-nums">{velocidadBps(l.rx_bps)}</td>
+                        <td className="text-sm tabular-nums">{velocidadBps(l.tx_bps)}</td>
+                        <td className="text-right">
+                          {esAdmin && (
+                            <button className="text-sm text-brand-600 hover:underline" onClick={() => setEditando({ equipo: l.equipo, interfaz: l.interfaz, nombre: l.nombre ?? itf(l)?.alias ?? "", bajada: "", subida: "", respaldo: false })}>
+                              Es un enlace a Internet
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {editando && otros.some((l) => l.equipo === editando.equipo && l.interfaz === editando.interfaz) && (
+                <div className="grid sm:grid-cols-4 gap-3 items-end border-t border-line/[0.06] p-4">
+                  <div className="sm:col-span-4 text-sm text-ink/70">Cargá lo contratado de <b>{editando.interfaz}</b> para que pase a la lista de enlaces a Internet.</div>
+                  <label className="block text-sm sm:col-span-2">Proveedor o descripción
+                    <input className="input mt-1" value={editando.nombre} onChange={(e) => setEditando({ ...editando, nombre: e.target.value })} /></label>
+                  <label className="block text-sm">Bajada (Mbps)
+                    <input className="input mt-1" inputMode="decimal" value={editando.bajada} onChange={(e) => setEditando({ ...editando, bajada: e.target.value })} /></label>
+                  <label className="block text-sm">Subida (Mbps)
+                    <input className="input mt-1" inputMode="decimal" value={editando.subida} onChange={(e) => setEditando({ ...editando, subida: e.target.value })} /></label>
+                  <div className="flex gap-2 sm:col-span-4">
+                    <button className="btn-primary" onClick={guardarEnlace}>Guardar</button>
+                    <button className="btn-secondary" onClick={() => setEditando(null)}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Chequeos de SD-WAN de enlaces que no informan tráfico */}
           {sdwan.filter((s) => deEquipo(s.equipo) && !enlaces.some((l) => l.equipo === s.equipo && l.interfaz === s.enlace)).length > 0 && (
