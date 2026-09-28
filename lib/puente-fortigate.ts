@@ -7,7 +7,7 @@
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_FORTIGATE_VERSION = "1.1";
+export const PUENTE_FORTIGATE_VERSION = "1.2";
 
 export type EquipoFortiGate = {
   nombre: string;       // cómo se va a ver en la app (ej. "Reconquista")
@@ -66,6 +66,28 @@ function Intentar($eq, $ruta, $parte) {
 }
 function Nombres($lista) { return @($lista | ForEach-Object { [string]$_.name }) -join ', ' }
 function Prop($o, $n) { if ($null -ne $o -and $o.PSObject.Properties[$n]) { return $o.$n } return $null }
+# Resultados que FortiOS devuelve como lista o como objeto con una propiedad por nombre -> tabla nombre = objeto
+function Mapa($res, $campos) {
+  $m = @{}
+  if ($null -eq $res) { return $m }
+  if ($res -is [array]) {
+    foreach ($x in $res) { foreach ($c in $campos) { $n = [string](Prop $x $c); if ($n) { $m[$n] = $x; break } } }
+  } else {
+    foreach ($p in $res.PSObject.Properties) { if ($p.Value -is [psobject]) { $m[[string]$p.Name] = $p.Value } }
+  }
+  return $m
+}
+# Primer campo con valor entre varios nombres posibles
+function Primero($o, $campos) { foreach ($c in $campos) { $v = Prop $o $c; if ($null -ne $v -and [string]$v -ne '') { return $v } } return $null }
+# Guarda una muestra de la respuesta en el servidor (una sola vez) para poder ajustar el puente a la version de FortiOS
+function Muestra($eq, $nombre, $obj) {
+  try {
+    $dir = Join-Path $Carpeta 'muestras'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $arch = Join-Path $dir (($eq.nombre -replace '[^A-Za-z0-9]', '_') + '-' + $nombre + '.json')
+    if (-not (Test-Path $arch) -and $null -ne $obj) { Set-Content -Path $arch -Value (ConvertTo-Json -InputObject $obj -Depth 6) -Encoding UTF8 }
+  } catch {}
+}
 
 # ---------- Configuracion: backup local y cambios (con secretos tapados) ----------
 # Campos cuyo valor nunca sale del servidor (se reemplaza por ****)
@@ -286,6 +308,52 @@ function Consultar-FortiGate($eq) {
     }
     $r.sdwan = $lista
   }
+
+  # Trafico de los enlaces: contadores de bytes de las interfaces WAN y de los miembros de SD-WAN (la app calcula el consumo)
+  $wan = New-Object System.Collections.ArrayList
+  if ($r.interfaces) { foreach ($i in $r.interfaces) { if ($i.rol -eq 'wan' -and $wan -notcontains $i.nombre) { [void]$wan.Add($i.nombre) } } }
+  $mie = Intentar $eq '/api/v2/monitor/virtual-wan/members' 'miembros de SD-WAN'
+  Muestra $eq 'sdwan-miembros' $mie
+  $miembros = Mapa (Prop $mie 'results') @('interface', 'name')
+  foreach ($k in $miembros.Keys) { if ($wan -notcontains $k) { [void]$wan.Add($k) } }
+  if ($r.sdwan) { foreach ($x in $r.sdwan) { if ($x.enlace -and $wan -notcontains $x.enlace) { [void]$wan.Add($x.enlace) } } }
+  if ($wan.Count -eq 0 -and $r.interfaces) { foreach ($i in $r.interfaces) { if ($i.nombre -match '^wan') { [void]$wan.Add($i.nombre) } } }
+  if ($wan.Count -gt 0) {
+    $est = Intentar $eq '/api/v2/monitor/system/interface?include_vlan=true&include_aggregate=true' 'trafico de interfaces'
+    Muestra $eq 'interfaces' $est
+    $stats = Mapa (Prop $est 'results') @('name', 'id')
+    $tr = New-Object System.Collections.ArrayList
+    foreach ($n in $wan) {
+      $s = $stats[$n]; $m = $miembros[$n]
+      if ($null -eq $s -and $null -eq $m) { continue }
+      [void]$tr.Add([ordered]@{
+        interfaz = $n
+        rx_bytes = (Primero $s @('rx_bytes')); tx_bytes = (Primero $s @('tx_bytes'))
+        rx_bps = (Primero $m @('rx_bandwidth')); tx_bps = (Primero $m @('tx_bandwidth'))
+        velocidad = (Primero $s @('speed')); enlace = (Primero $s @('link'))
+      })
+    }
+    $r.trafico = $tr
+  }
+
+  # Lo que mas consume ahora (FortiView en tiempo real: aplicaciones y origenes)
+  $top = New-Object System.Collections.ArrayList
+  foreach ($por in @('application', 'source')) {
+    $fv = Intentar $eq ('/api/v2/monitor/fortiview/statistics?realtime=true&report_by=' + $por + '&sort_by=bytes&count=10') 'consumo por aplicacion'
+    Muestra $eq ('fortiview-' + $por) $fv
+    $res = Prop $fv 'results'
+    $filas = Prop $res 'details'; if ($null -eq $filas) { $filas = $res }
+    if ($filas -isnot [array]) { $filas = @($filas) }
+    foreach ($x in ($filas | Select-Object -First 10)) {
+      if ($null -eq $x -or $x -isnot [psobject]) { continue }
+      if ($por -eq 'application') { $nom = Primero $x @('app_name', 'appname', 'application', 'app', 'name') }
+      else { $nom = Primero $x @('user', 'username', 'unauthuser', 'srcaddr', 'source', 'saddr', 'hostname') ; $ip = Primero $x @('srcaddr', 'source', 'saddr') ; if ($ip -and [string]$ip -ne [string]$nom) { $nom = [string]$nom + ' (' + [string]$ip + ')' } }
+      if (-not $nom) { continue }
+      $bytes = Primero $x @('bytes'); if ($null -eq $bytes) { $bytes = [double](Primero $x @('sent_bytes', 'tx_bytes')) + [double](Primero $x @('received_bytes', 'rx_bytes')) }
+      [void]$top.Add([ordered]@{ tipo = $(if ($por -eq 'application') { 'app' } else { 'origen' }); nombre = [string]$nom; bytes = $bytes; sesiones = (Primero $x @('sessions', 'session_count')); bps = (Primero $x @('bandwidth')) })
+    }
+  }
+  if ($top.Count -gt 0) { $r.top = $top }
 
   # Cambios de configuracion (si el usuario de API tiene permiso de backup)
   if ($eq.backup) { $c = Revisar-Config $eq $r.serial; if ($c) { $r.cambio_config = $c } }

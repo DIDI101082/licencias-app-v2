@@ -9,7 +9,7 @@ const hex = (b: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(b)).map((
 
 export type EstadoFortiGate = {
   configurado: boolean; ultimo_reporte: string | null; version_puente: string | null; alertas: boolean; alertar_cambios: boolean;
-  umbral_fallos: number; dias_aviso: number; paises_vpn: string[]; minutos_sin_reporte: number;
+  umbral_fallos: number; dias_aviso: number; paises_vpn: string[]; minutos_sin_reporte: number; umbral_uso?: number;
 };
 
 const vacio = (nombre = ""): EquipoFortiGate => ({ nombre, url: "", clave: "", ignorarCert: true, backup: false });
@@ -24,7 +24,7 @@ export default function PuenteFortiGate({ estado, alCambiar }: { estado: EstadoF
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
   const [al, setAl] = useState({
     alertas: estado.alertas, alertar_cambios: estado.alertar_cambios, umbral_fallos: estado.umbral_fallos,
-    dias_aviso: estado.dias_aviso, paises: estado.paises_vpn.join(", "), minutos_sin_reporte: estado.minutos_sin_reporte,
+    dias_aviso: estado.dias_aviso, paises: estado.paises_vpn.join(", "), minutos_sin_reporte: estado.minutos_sin_reporte, umbral_uso: estado.umbral_uso ?? 85,
   });
   const [avisoAl, setAvisoAl] = useState<{ ok: boolean; texto: string } | null>(null);
 
@@ -57,8 +57,8 @@ export default function PuenteFortiGate({ estado, alCambiar }: { estado: EstadoF
     setAvisoAl(null);
     const paises = al.paises.split(/[\s,;]+/).map((p) => p.trim().toUpperCase()).filter(Boolean);
     if (paises.some((p) => !/^[A-Z]{2}$/.test(p))) return setAvisoAl({ ok: false, texto: "Los países van con su código de 2 letras (AR, UY, ES…)." });
-    const { minutos_sin_reporte, alertas, alertar_cambios, umbral_fallos, dias_aviso } = al;
-    const { error } = await createClient().rpc("fg_config_guardar", { p: { alertas, alertar_cambios, umbral_fallos, dias_aviso, minutos_sin_reporte, paises_vpn: paises } });
+    const { minutos_sin_reporte, alertas, alertar_cambios, umbral_fallos, dias_aviso, umbral_uso } = al;
+    const { error } = await createClient().rpc("fg_config_guardar", { p: { alertas, alertar_cambios, umbral_fallos, dias_aviso, minutos_sin_reporte, umbral_uso, paises_vpn: paises } });
     setAvisoAl(error ? { ok: false, texto: error.message } : { ok: true, texto: "Guardado. Se aplica en la próxima revisión de alertas (cada 10 minutos)." });
     if (!error) alCambiar();
   }
@@ -146,19 +146,21 @@ export default function PuenteFortiGate({ estado, alCambiar }: { estado: EstadoF
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={al.alertas} onChange={(e) => setAl({ ...al, alertas: e.target.checked })} />
           Enviar alertas de FortiGate (sin respuesta, HA, vulnerabilidades, licencias, configuración riesgosa, fuerza bruta, VPN desde otro país,
-          enlaces caídos y amenazas no bloqueadas)
+          enlaces caídos o saturados, tráfico por el respaldo y amenazas no bloqueadas)
         </label>
         <label className="flex items-center gap-2 text-sm pl-6">
           <input type="checkbox" disabled={!al.alertas} checked={al.alertar_cambios} onChange={(e) => setAl({ ...al, alertar_cambios: e.target.checked })} />
           Avisar cada cambio de configuración (solo si el backup está activado)
         </label>
-        <div className="grid sm:grid-cols-4 gap-3 max-w-4xl">
+        <div className="grid sm:grid-cols-5 gap-3 max-w-5xl">
           <label className="block text-sm">Intentos fallidos de VPN por hora
             <input type="number" min={3} max={1000} className="input mt-1" value={al.umbral_fallos} onChange={(e) => setAl({ ...al, umbral_fallos: Number(e.target.value) })} /></label>
           <label className="block text-sm">Avisar vencimientos con (días)
             <input type="number" min={1} max={180} className="input mt-1" value={al.dias_aviso} onChange={(e) => setAl({ ...al, dias_aviso: Number(e.target.value) })} /></label>
           <label className="block text-sm">Países permitidos para la VPN
             <input className="input mt-1" placeholder="AR, UY" value={al.paises} onChange={(e) => setAl({ ...al, paises: e.target.value })} /></label>
+          <label className="block text-sm">Enlace saturado desde (%)
+            <input type="number" min={30} max={100} className="input mt-1" value={al.umbral_uso} onChange={(e) => setAl({ ...al, umbral_uso: Number(e.target.value) })} /></label>
           <label className="block text-sm">Puente sin reportar (minutos)
             <input type="number" min={5} max={720} className="input mt-1" value={al.minutos_sin_reporte} onChange={(e) => setAl({ ...al, minutos_sin_reporte: Number(e.target.value) })} /></label>
         </div>

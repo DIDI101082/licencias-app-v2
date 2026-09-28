@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import PuenteFortiGate, { type EstadoFortiGate } from "@/components/PuenteFortiGate";
 import { hace } from "@/lib/monitoreo";
+import GraficoTrafico, { velocidadBps, type PuntoTrafico } from "@/components/GraficoTrafico";
 
 type Cve = { id: string; cvss: number | null; severidad: string; kev: boolean; descripcion: string | null; accion: string | null };
 type Equipo = {
@@ -27,12 +28,17 @@ type Fallo = { equipo: string; fecha: string; usuario: string; ip: string; motiv
 type Amenaza = { equipo: string; fecha: string; tipo: string; severidad: string | null; nombre: string; accion: string | null; origen: string; destino: string; usuario: string | null };
 type Licencia = { equipo: string; servicio: string; estado: string | null; vence: string | null };
 type Certificado = { equipo: string; nombre: string; tipo: string | null; vence: string | null };
+type Enlace = {
+  equipo: string; interfaz: string; nombre: string | null; bajada_mbps: number | null; subida_mbps: number | null; respaldo: boolean;
+  velocidad_puerto: number | null; conectado: boolean | null; rx_bps: number | null; tx_bps: number | null; actualizado: string | null;
+};
+type Top = { equipo: string; tipo: string; nombre: string; bytes: number | null; sesiones: number | null; bps: number | null };
 type Sdwan = { equipo: string; chequeo: string; enlace: string; estado: string | null; latencia: number | null; jitter: number | null; perdida: number | null };
 
 type Vista = "resumen" | "configuracion" | "cambios" | "vpn" | "amenazas" | "licencias" | "sdwan";
 const VISTAS: [Vista, string][] = [
   ["resumen", "Resumen"], ["configuracion", "Configuración"], ["cambios", "Cambios"], ["vpn", "VPN"],
-  ["amenazas", "Amenazas"], ["licencias", "Licencias y certificados"], ["sdwan", "Enlaces"],
+  ["amenazas", "Amenazas"], ["licencias", "Licencias y certificados"], ["sdwan", "Enlaces y consumo"],
 ];
 
 const SEV: Record<string, { t: string; c: string; o: number }> = {
@@ -87,6 +93,11 @@ function Contenido() {
   const [licencias, setLicencias] = useState<Licencia[]>([]);
   const [certificados, setCertificados] = useState<Certificado[]>([]);
   const [sdwan, setSdwan] = useState<Sdwan[]>([]);
+  const [enlaces, setEnlaces] = useState<Enlace[]>([]);
+  const [top, setTop] = useState<Top[]>([]);
+  const [horas, setHoras] = useState(24);
+  const [series, setSeries] = useState<Record<string, PuntoTrafico[]>>({});
+  const [editando, setEditando] = useState<{ equipo: string; interfaz: string; nombre: string; bajada: string; subida: string; respaldo: boolean } | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [config, setConfig] = useState(false);
@@ -100,7 +111,7 @@ function Contenido() {
   const cargar = useCallback(async () => {
     const sb = createClient();
     const desde = new Date(Date.now() - 7 * 86400000).toISOString();
-    const [e, q, h, p, c, v, f, a, l, ce, s] = await Promise.all([
+    const [e, q, h, p, c, v, f, a, l, ce, s, en, tp] = await Promise.all([
       sb.rpc("fg_estado"),
       sb.from("fg_equipos_vista").select("*").order("nombre"),
       sb.from("fg_hallazgos").select("*"),
@@ -112,6 +123,8 @@ function Contenido() {
       sb.from("fg_licencias").select("*").order("vence"),
       sb.from("fg_certificados").select("*").order("vence"),
       sb.from("fg_sdwan").select("*").order("chequeo"),
+      sb.from("fg_enlaces").select("equipo,interfaz,nombre,bajada_mbps,subida_mbps,respaldo,velocidad_puerto,conectado,rx_bps,tx_bps,actualizado").order("interfaz"),
+      sb.from("fg_top").select("*").order("bytes", { ascending: false }),
     ]);
     const err = e.error ?? q.error;
     setError(err ? (/fg_/.test(err.message) ? "Falta ejecutar supabase/fortigate.sql en Supabase." : err.message) : null);
@@ -126,6 +139,8 @@ function Contenido() {
     setLicencias((l.data ?? []) as Licencia[]);
     setCertificados((ce.data ?? []) as Certificado[]);
     setSdwan((s.data ?? []) as Sdwan[]);
+    setEnlaces((en.data ?? []) as Enlace[]);
+    setTop((tp.data ?? []) as Top[]);
     setAhora(Date.now());
     setCargando(false);
   }, []);
@@ -188,6 +203,30 @@ function Contenido() {
     (!fv.pais || (fv.pais === "?" ? !v.pais_codigo : v.pais_codigo?.toUpperCase() === fv.pais)) &&
     (!fv.soloFuera || (!!v.pais_codigo && !paisOk(v.pais_codigo)))
   );
+
+  // Series del gráfico de consumo (se piden al abrir la solapa de enlaces y con cada actualización)
+  useEffect(() => {
+    if (vista !== "sdwan" || !enlaces.length) return;
+    let vivo = true;
+    (async () => {
+      const sb = createClient();
+      const res = await Promise.all(enlaces.map((l) => sb.rpc("fg_trafico_serie", { p_equipo: l.equipo, p_interfaz: l.interfaz, p_horas: horas })));
+      if (!vivo) return;
+      const m: Record<string, PuntoTrafico[]> = {};
+      enlaces.forEach((l, i) => { m[`${l.equipo}:${l.interfaz}`] = ((res[i].data ?? []) as PuntoTrafico[]).map((p) => ({ ...p, rx_bps: p.rx_bps == null ? null : Number(p.rx_bps), tx_bps: p.tx_bps == null ? null : Number(p.tx_bps), rx_max: p.rx_max == null ? null : Number(p.rx_max), tx_max: p.tx_max == null ? null : Number(p.tx_max) })); });
+      setSeries(m);
+    })();
+    return () => { vivo = false; };
+  }, [vista, enlaces, horas]);
+
+  async function guardarEnlace() {
+    if (!editando) return;
+    const { error } = await createClient().rpc("fg_enlace_guardar", { p: {
+      equipo: editando.equipo, interfaz: editando.interfaz, nombre: editando.nombre, respaldo: editando.respaldo,
+      bajada_mbps: editando.bajada.replace(",", ".").trim(), subida_mbps: editando.subida.replace(",", ".").trim(),
+    } });
+    if (error) setError(error.message); else { setEditando(null); cargar(); }
+  }
 
   async function quitarEquipo(n: string) {
     const { error } = await createClient().rpc("fg_quitar_equipo", { p_nombre: n });
@@ -609,29 +648,159 @@ function Contenido() {
         </div>
       )}
 
-      {/* SD-WAN */}
+      {/* Enlaces: consumo y salud */}
       {vista === "sdwan" && (
-        <div className="card overflow-x-auto">
-          <table className="data w-full">
-            <thead><tr><th>Equipo</th><th>Enlace</th><th>Chequeo</th><th>Estado</th><th>Latencia</th><th>Jitter</th><th>Pérdida</th></tr></thead>
-            <tbody>
-              {!sdwan.length && vacio(7, "Sin datos de SD-WAN (el equipo no tiene chequeos de salud configurados o el usuario de API no tiene permiso).")}
-              {sdwan.filter((s) => deEquipo(s.equipo) && coincide(s.enlace, s.chequeo, s.equipo)).map((s) => {
-                const mal = enlacesMal.includes(s);
-                return (
-                  <tr key={`${s.equipo}:${s.chequeo}:${s.enlace}`}>
-                    <td className="text-sm">{s.equipo}</td>
-                    <td className="text-sm font-medium">{s.enlace}</td>
-                    <td className="text-sm text-ink/70">{s.chequeo}</td>
-                    <td><span className={`pill ${s.estado !== "up" ? "bg-red-600 text-white" : mal ? "bg-amber-500/15 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>{s.estado !== "up" ? "Caído" : mal ? "Degradado" : "OK"}</span></td>
-                    <td className="text-sm tabular-nums">{s.estado === "up" && s.latencia != null ? `${Math.round(s.latencia)} ms` : "—"}</td>
-                    <td className="text-sm tabular-nums">{s.estado === "up" && s.jitter != null ? `${Math.round(s.jitter)} ms` : "—"}</td>
-                    <td className="text-sm tabular-nums">{s.perdida != null ? `${Math.round(s.perdida)}%` : "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-ink/60 max-w-3xl">
+              Consumo de cada enlace calculado entre dos reportes del puente (promedio del intervalo). Cargá lo contratado de cada enlace para ver el
+              porcentaje de uso y recibir la alerta de saturación.
+            </p>
+            <div role="tablist" aria-label="Período" className="flex gap-1 rounded-xl bg-line/[0.05] p-1">
+              {([[24, "24 horas"], [168, "7 días"]] as [number, string][]).map(([hs, t]) => (
+                <button key={hs} role="tab" aria-selected={horas === hs} onClick={() => setHoras(hs)}
+                  className={`px-3 py-1 rounded-lg text-sm font-medium ${horas === hs ? "bg-surface text-ink shadow-sm" : "text-ink/55 hover:text-ink"}`}>{t}</button>
+              ))}
+            </div>
+          </div>
+
+          {!enlaces.length && (
+            <div className="card p-8 text-center text-ink/40">
+              {cargando ? "Cargando…" : "Todavía no hay datos de consumo. Hace falta el puente 1.2 o posterior: generá el instalador de nuevo desde Configurar."}
+            </div>
+          )}
+
+          <div className="grid xl:grid-cols-2 gap-4">
+            {enlaces.filter((l) => deEquipo(l.equipo) && coincide(l.interfaz, l.nombre, l.equipo)).map((l) => {
+              const clave = `${l.equipo}:${l.interfaz}`;
+              const salud = sdwan.filter((s) => s.equipo === l.equipo && s.enlace === l.interfaz);
+              const caido = l.conectado === false || salud.some((s) => s.estado !== "up");
+              const degradado = !caido && salud.some((s) => (s.perdida ?? 0) > 5 || (s.latencia ?? 0) > 250);
+              const pct = (v: number | null, c: number | null) => (v == null || c == null ? null : Math.round((v / (c * 1e6)) * 100));
+              const pb = pct(l.rx_bps, l.bajada_mbps), ps = pct(l.tx_bps, l.subida_mbps);
+              const umbral = estado?.umbral_uso ?? 85;
+              const ed = editando && editando.equipo === l.equipo && editando.interfaz === l.interfaz ? editando : null;
+              return (
+                <div key={clave} className="card p-5 space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-display text-lg text-ink">
+                        {l.nombre ?? l.interfaz}
+                        {l.respaldo && <span className="pill bg-line/[0.05] text-ink/60 ml-2 align-middle">Respaldo</span>}
+                      </h2>
+                      <p className="text-sm text-ink/55">
+                        {[l.equipo, l.nombre ? l.interfaz : null, l.velocidad_puerto ? `puerto a ${l.velocidad_puerto >= 1000 ? `${l.velocidad_puerto / 1000} Gbps` : `${l.velocidad_puerto} Mbps`}` : null,
+                          l.bajada_mbps || l.subida_mbps ? `contratado ${l.bajada_mbps ?? "—"}/${l.subida_mbps ?? "—"} Mbps` : "sin velocidad contratada cargada"].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                    <span className={`pill ${caido ? "bg-red-600 text-white" : degradado ? "bg-amber-500/15 text-amber-700" : l.conectado == null && !salud.length ? "bg-line/[0.05] text-ink/50" : "bg-emerald-50 text-emerald-700"}`}>
+                      {caido ? "Caído" : degradado ? "Degradado" : l.conectado == null && !salud.length ? "Sin datos" : "OK"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    {([["Bajada", l.rx_bps, pb, "bg-[#2a78d6] dark:bg-[#3987e5]"], ["Subida", l.tx_bps, ps, "bg-[#eb6834] dark:bg-[#d95926]"]] as [string, number | null, number | null, string][]).map(([t, v, p, color]) => (
+                      <div key={t}>
+                        <div className="text-xs text-ink/55">{t} ahora</div>
+                        <div className="font-display text-2xl tabular-nums text-ink">{velocidadBps(v)}</div>
+                        {p != null && (
+                          <div className="mt-1">
+                            <div className="h-1.5 rounded-full bg-line/[0.08] overflow-hidden"><div className={`h-full ${color}`} style={{ width: `${Math.min(100, p)}%` }} /></div>
+                            <div className={`text-xs mt-0.5 tabular-nums ${p >= umbral ? "text-red-600 font-medium" : "text-ink/55"}`}>{p}% de lo contratado</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <GraficoTrafico puntos={series[clave] ?? []} horas={horas} contratadoBajada={l.bajada_mbps} etiqueta={`${l.equipo} ${l.nombre ?? l.interfaz}`} />
+
+                  {salud.length > 0 && (
+                    <div className="text-xs text-ink/60 space-y-0.5">
+                      {salud.map((s) => (
+                        <div key={s.chequeo}>
+                          Chequeo {s.chequeo}: {s.estado !== "up" ? <span className="text-red-600">sin respuesta</span> : <>latencia {s.latencia != null ? Math.round(s.latencia) : "—"} ms · jitter {s.jitter != null ? Math.round(s.jitter) : "—"} ms · pérdida {s.perdida != null ? Math.round(s.perdida) : 0}%</>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {esAdmin && !ed && (
+                    <button className="text-sm text-brand-600 hover:underline" onClick={() => setEditando({ equipo: l.equipo, interfaz: l.interfaz, nombre: l.nombre ?? "", bajada: l.bajada_mbps?.toString() ?? "", subida: l.subida_mbps?.toString() ?? "", respaldo: l.respaldo })}>
+                      {l.bajada_mbps ? "Editar enlace" : "Cargar velocidad contratada"}
+                    </button>
+                  )}
+                  {ed && (
+                    <div className="grid sm:grid-cols-4 gap-3 items-end rounded-lg bg-line/[0.03] p-3">
+                      <label className="block text-sm sm:col-span-2">Proveedor o descripción
+                        <input className="input mt-1" placeholder="Telecom fibra" value={ed.nombre} onChange={(e) => setEditando({ ...ed, nombre: e.target.value })} /></label>
+                      <label className="block text-sm">Bajada (Mbps)
+                        <input className="input mt-1" inputMode="decimal" placeholder="300" value={ed.bajada} onChange={(e) => setEditando({ ...ed, bajada: e.target.value })} /></label>
+                      <label className="block text-sm">Subida (Mbps)
+                        <input className="input mt-1" inputMode="decimal" placeholder="300" value={ed.subida} onChange={(e) => setEditando({ ...ed, subida: e.target.value })} /></label>
+                      <label className="flex items-center gap-2 text-sm sm:col-span-4">
+                        <input type="checkbox" checked={ed.respaldo} onChange={(e) => setEditando({ ...ed, respaldo: e.target.checked })} />
+                        Es un enlace de respaldo (avisar si el tráfico empieza a salir por acá)
+                      </label>
+                      <div className="flex gap-2 sm:col-span-4">
+                        <button className="btn-primary" onClick={guardarEnlace}>Guardar</button>
+                        <button className="btn-secondary" onClick={() => setEditando(null)}>Cancelar</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Chequeos de SD-WAN de enlaces que no informan tráfico */}
+          {sdwan.filter((s) => deEquipo(s.equipo) && !enlaces.some((l) => l.equipo === s.equipo && l.interfaz === s.enlace)).length > 0 && (
+            <div className="card overflow-x-auto">
+              <table className="data w-full">
+                <thead><tr><th>Equipo</th><th>Enlace</th><th>Chequeo</th><th>Estado</th><th>Latencia</th><th>Jitter</th><th>Pérdida</th></tr></thead>
+                <tbody>
+                  {sdwan.filter((s) => deEquipo(s.equipo) && !enlaces.some((l) => l.equipo === s.equipo && l.interfaz === s.enlace)).map((s) => (
+                    <tr key={`${s.equipo}:${s.chequeo}:${s.enlace}`}>
+                      <td className="text-sm">{s.equipo}</td>
+                      <td className="text-sm font-medium">{s.enlace}</td>
+                      <td className="text-sm text-ink/70">{s.chequeo}</td>
+                      <td><span className={`pill ${s.estado !== "up" ? "bg-red-600 text-white" : enlacesMal.includes(s) ? "bg-amber-500/15 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>{s.estado !== "up" ? "Caído" : enlacesMal.includes(s) ? "Degradado" : "OK"}</span></td>
+                      <td className="text-sm tabular-nums">{s.estado === "up" && s.latencia != null ? `${Math.round(s.latencia)} ms` : "—"}</td>
+                      <td className="text-sm tabular-nums">{s.estado === "up" && s.jitter != null ? `${Math.round(s.jitter)} ms` : "—"}</td>
+                      <td className="text-sm tabular-nums">{s.perdida != null ? `${Math.round(s.perdida)}%` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Lo que más consume ahora */}
+          <div className="grid lg:grid-cols-2 gap-4">
+            {([["app", "Aplicaciones que más consumen ahora"], ["origen", "Equipos y usuarios que más consumen ahora"]] as [string, string][]).map(([tipo, titulo]) => {
+              const filas = top.filter((t) => t.tipo === tipo && deEquipo(t.equipo) && coincide(t.nombre));
+              return (
+                <div key={tipo} className="card overflow-x-auto">
+                  <div className="px-4 pt-4 font-medium text-ink">{titulo}</div>
+                  <table className="data w-full">
+                    <thead><tr><th>{tipo === "app" ? "Aplicación" : "Equipo / usuario"}</th><th>Datos</th><th>Sesiones</th>{equipos.length > 1 && !filtroEquipo && <th>Firewall</th>}</tr></thead>
+                    <tbody>
+                      {!filas.length && vacio(4, "Sin datos (hace falta el puente 1.2 y permiso de lectura de FortiView en el perfil).")}
+                      {filas.slice(0, 10).map((t) => (
+                        <tr key={`${t.equipo}:${t.nombre}`}>
+                          <td className="text-sm">{t.nombre}</td>
+                          <td className="text-sm tabular-nums">{t.bytes == null ? "—" : t.bytes >= 1e9 ? `${(t.bytes / 1e9).toFixed(1).replace(".", ",")} GB` : `${Math.round(t.bytes / 1e6)} MB`}</td>
+                          <td className="text-sm tabular-nums">{num(t.sesiones)}</td>
+                          {equipos.length > 1 && !filtroEquipo && <td className="text-sm">{t.equipo}</td>}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-ink/50">Aplicaciones y usuarios: sesiones abiertas en el momento del último reporte (FortiView en tiempo real), no el acumulado del día. Para el histórico por aplicación usá los reportes de SD-WAN del FortiAnalyzer.</p>
         </div>
       )}
     </div>

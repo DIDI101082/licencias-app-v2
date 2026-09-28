@@ -107,6 +107,32 @@ create table if not exists public.fg_cambios (
 );
 create index if not exists idx_fg_cambios_fecha on public.fg_cambios(equipo, fecha desc);
 
+-- Enlaces (interfaces WAN y miembros de SD-WAN): lo contratado lo carga un administrador; el resto lo informa el puente
+alter table public.fg_config add column if not exists umbral_uso int not null default 85 check (umbral_uso between 30 and 100);
+create table if not exists public.fg_enlaces (
+  equipo text not null references public.fg_equipos(nombre) on delete cascade,
+  interfaz text not null,
+  nombre text,                 -- proveedor o descripción (ej. "Telecom 300/300")
+  bajada_mbps numeric check (bajada_mbps > 0),
+  subida_mbps numeric check (subida_mbps > 0),
+  respaldo boolean not null default false,
+  velocidad_puerto numeric, conectado boolean, rx_bps numeric, tx_bps numeric,
+  rx_bytes numeric, tx_bytes numeric, contadores_en timestamptz, actualizado timestamptz,
+  primary key (equipo, interfaz)
+);
+-- Consumo medido (bits por segundo promedio entre dos reportes), 8 días
+create table if not exists public.fg_trafico (
+  equipo text not null references public.fg_equipos(nombre) on delete cascade,
+  interfaz text not null, fecha timestamptz not null, rx_bps numeric, tx_bps numeric,
+  primary key (equipo, interfaz, fecha)
+);
+-- Lo que más consume en este momento (FortiView)
+create table if not exists public.fg_top (
+  equipo text not null references public.fg_equipos(nombre) on delete cascade,
+  tipo text not null, nombre text not null, bytes numeric, sesiones numeric, bps numeric,
+  primary key (equipo, tipo, nombre)
+);
+
 -- Fecha/hora en cualquiera de los formatos de FortiOS (segundos, ms, µs, ns o texto)
 create or replace function public.fg_ts(p jsonb) returns timestamptz
 language plpgsql immutable as $$
@@ -134,6 +160,7 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_hash text; v_ahora timestamptz := now();
   e jsonb; vx jsonb; v_nom text; v_sync boolean; g_cod text; g_pais text; g_ciudad text; g_isp text; n int := 0;
+  v_if text; v_rx numeric; v_tx numeric; v_rxbps numeric; v_txbps numeric; u_rx numeric; u_tx numeric; u_en timestamptz; v_seg numeric;
   v_geo_ok boolean := to_regclass('public.inv_geo_cache') is not null;
 begin
   select token_hash into v_hash from fg_config where id = 1;
@@ -220,6 +247,47 @@ begin
       on conflict do nothing;
     end if;
 
+    -- Tráfico de los enlaces: consumo = diferencia de contadores entre dos reportes
+    if jsonb_typeof(e -> 'trafico') = 'array' then
+      for vx in select * from jsonb_array_elements(e -> 'trafico') loop
+        v_if := left(vx ->> 'interfaz', 60);
+        continue when coalesce(v_if, '') = '';
+        v_rx := case when vx ->> 'rx_bytes' ~ '^\d+(\.\d+)?$' then (vx ->> 'rx_bytes')::numeric end;
+        v_tx := case when vx ->> 'tx_bytes' ~ '^\d+(\.\d+)?$' then (vx ->> 'tx_bytes')::numeric end;
+        insert into fg_enlaces (equipo, interfaz) values (v_nom, v_if) on conflict do nothing;
+        select rx_bytes, tx_bytes, contadores_en into u_rx, u_tx, u_en from fg_enlaces where equipo = v_nom and interfaz = v_if;
+        v_rxbps := null; v_txbps := null;
+        v_seg := extract(epoch from v_ahora - u_en);
+        -- Si el contador bajó (reinicio o cambio de miembro del cluster) se descarta ese intervalo
+        if v_rx is not null and u_rx is not null and v_seg between 30 and 3600 and v_rx >= u_rx and v_tx >= u_tx then
+          v_rxbps := round((v_rx - u_rx) * 8 / v_seg); v_txbps := round((v_tx - u_tx) * 8 / v_seg);
+        elsif vx ->> 'rx_bps' ~ '^\d+(\.\d+)?$' and v_rx is null then
+          v_rxbps := (vx ->> 'rx_bps')::numeric; v_txbps := case when vx ->> 'tx_bps' ~ '^\d+(\.\d+)?$' then (vx ->> 'tx_bps')::numeric end;
+        end if;
+        update fg_enlaces set
+          rx_bytes = v_rx, tx_bytes = v_tx, contadores_en = case when v_rx is not null then v_ahora end,
+          rx_bps = coalesce(v_rxbps, case when vx ->> 'rx_bps' ~ '^\d+(\.\d+)?$' then (vx ->> 'rx_bps')::numeric end, case when u_en is null then null else rx_bps end),
+          tx_bps = coalesce(v_txbps, case when vx ->> 'tx_bps' ~ '^\d+(\.\d+)?$' then (vx ->> 'tx_bps')::numeric end, case when u_en is null then null else tx_bps end),
+          velocidad_puerto = case when vx ->> 'velocidad' ~ '^\d+(\.\d+)?$' then (vx ->> 'velocidad')::numeric end,
+          conectado = case when vx ->> 'enlace' in ('true', 'up', '1') then true when vx ->> 'enlace' in ('false', 'down', '0') then false end,
+          actualizado = v_ahora
+         where equipo = v_nom and interfaz = v_if;
+        if v_rxbps is not null then
+          insert into fg_trafico (equipo, interfaz, fecha, rx_bps, tx_bps) values (v_nom, v_if, v_ahora, v_rxbps, v_txbps) on conflict do nothing;
+        end if;
+      end loop;
+    end if;
+    if jsonb_typeof(e -> 'top') = 'array' then
+      delete from fg_top where equipo = v_nom;
+      insert into fg_top (equipo, tipo, nombre, bytes, sesiones, bps)
+      select v_nom, left(x ->> 'tipo', 10), left(x ->> 'nombre', 150),
+             case when x ->> 'bytes' ~ '^\d+(\.\d+)?$' then (x ->> 'bytes')::numeric end,
+             case when x ->> 'sesiones' ~ '^\d+(\.\d+)?$' then (x ->> 'sesiones')::numeric end,
+             case when x ->> 'bps' ~ '^\d+(\.\d+)?$' then (x ->> 'bps')::numeric end
+        from jsonb_array_elements(e -> 'top') x where coalesce(x ->> 'nombre', '') <> '' and x ->> 'tipo' in ('app', 'origen')
+      on conflict do nothing;
+    end if;
+
     -- VPN: sesiones activas, con país (misma geolocalización que Home office)
     if jsonb_typeof(e -> 'vpn') = 'array' then
       delete from fg_vpn where equipo = v_nom;
@@ -269,6 +337,7 @@ begin
   delete from fg_vpn_fallos where fecha < v_ahora - interval '30 days';
   delete from fg_amenazas where fecha < v_ahora - interval '30 days';
   delete from fg_cambios where fecha < v_ahora - interval '365 days';
+  delete from fg_trafico where fecha < v_ahora - interval '8 days';
   update fg_config set ultimo_reporte = v_ahora, version_puente = left(p_datos ->> 'version', 20) where id = 1;
   return jsonb_build_object('ok', true, 'equipos', n);
 end $$;
@@ -458,7 +527,7 @@ returns jsonb language sql stable security definer set search_path = public as $
   select case when puede_ver('red') then jsonb_build_object(
     'configurado', token_hash is not null, 'ultimo_reporte', ultimo_reporte, 'version_puente', version_puente,
     'alertas', alertas, 'alertar_cambios', alertar_cambios, 'umbral_fallos', umbral_fallos, 'dias_aviso', dias_aviso,
-    'paises_vpn', paises_vpn, 'minutos_sin_reporte', minutos_sin_reporte)
+    'paises_vpn', paises_vpn, 'minutos_sin_reporte', minutos_sin_reporte, 'umbral_uso', umbral_uso)
   end from fg_config where id = 1
 $$;
 revoke execute on function public.fg_estado() from public, anon;
@@ -484,11 +553,41 @@ begin
     umbral_fallos = coalesce((p ->> 'umbral_fallos')::int, umbral_fallos),
     dias_aviso = coalesce((p ->> 'dias_aviso')::int, dias_aviso),
     paises_vpn = coalesce((select array_agg(upper(trim(x))) from jsonb_array_elements_text(p -> 'paises_vpn') x where trim(x) ~* '^[a-z]{2}$'), paises_vpn),
-    minutos_sin_reporte = coalesce((p ->> 'minutos_sin_reporte')::int, minutos_sin_reporte)
+    minutos_sin_reporte = coalesce((p ->> 'minutos_sin_reporte')::int, minutos_sin_reporte),
+    umbral_uso = coalesce((p ->> 'umbral_uso')::int, umbral_uso)
   where id = 1;
 end $$;
 revoke execute on function public.fg_config_guardar(jsonb) from public, anon;
 grant execute on function public.fg_config_guardar(jsonb) to authenticated;
+
+-- Datos de un enlace que carga el administrador (lo contratado)
+create or replace function public.fg_enlace_guardar(p jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if mi_rol() is distinct from 'administrador' then raise exception 'Solo un administrador'; end if;
+  update fg_enlaces set
+    nombre = nullif(left(trim(p ->> 'nombre'), 80), ''),
+    bajada_mbps = case when p ->> 'bajada_mbps' ~ '^\d+(\.\d+)?$' and (p ->> 'bajada_mbps')::numeric > 0 then (p ->> 'bajada_mbps')::numeric end,
+    subida_mbps = case when p ->> 'subida_mbps' ~ '^\d+(\.\d+)?$' and (p ->> 'subida_mbps')::numeric > 0 then (p ->> 'subida_mbps')::numeric end,
+    respaldo = coalesce((p ->> 'respaldo')::boolean, false)
+  where equipo = p ->> 'equipo' and interfaz = p ->> 'interfaz';
+  if not found then raise exception 'Enlace inexistente'; end if;
+end $$;
+revoke execute on function public.fg_enlace_guardar(jsonb) from public, anon;
+grant execute on function public.fg_enlace_guardar(jsonb) to authenticated;
+
+-- Serie para el gráfico: promedio y máximo por tramo (10 minutos para 24 h, 1 hora para 7 días)
+create or replace function public.fg_trafico_serie(p_equipo text, p_interfaz text, p_horas int)
+returns table (fecha timestamptz, rx_bps numeric, tx_bps numeric, rx_max numeric, tx_max numeric)
+language sql stable security invoker set search_path = public as $$
+  select date_bin(case when p_horas > 48 then interval '1 hour' else interval '10 minutes' end, t.fecha, timestamptz '2000-01-01') as f,
+         round(avg(t.rx_bps)), round(avg(t.tx_bps)), max(t.rx_bps), max(t.tx_bps)
+    from fg_trafico t
+   where t.equipo = p_equipo and t.interfaz = p_interfaz and t.fecha > now() - make_interval(hours => least(greatest(p_horas, 1), 192))
+   group by 1 order by 1
+$$;
+revoke execute on function public.fg_trafico_serie(text, text, int) from public, anon;
+grant execute on function public.fg_trafico_serie(text, text, int) to authenticated;
 
 -- Quitar un equipo que ya no existe (se vuelve a crear solo si el puente lo sigue informando)
 create or replace function public.fg_quitar_equipo(p_nombre text)
@@ -605,6 +704,36 @@ begin
     on conflict do nothing;
   end if;
 
+  -- Enlace saturado (promedio de los últimos 30 minutos contra lo contratado)
+  insert into _cond
+  select 'fg:sat:' || l.equipo || ':' || l.interfaz || ':' || d.sentido, 'fortigate', 'media',
+         'Enlace saturado: ' || coalesce(l.nombre, l.interfaz) || ' (' || l.equipo || ')',
+         initcap(d.sentido) || ' al ' || round(d.uso) || '% de lo contratado en los últimos 30 minutos', '/red/fortigate?vista=sdwan'
+    from fg_enlaces l
+    cross join lateral (
+      select 'bajada' as sentido, avg(t.rx_bps) / (l.bajada_mbps * 1e4) as uso, count(*) as n
+        from fg_trafico t where t.equipo = l.equipo and t.interfaz = l.interfaz and t.fecha > now() - interval '30 minutes' and l.bajada_mbps is not null
+      union all
+      select 'subida', avg(t.tx_bps) / (l.subida_mbps * 1e4), count(*)
+        from fg_trafico t where t.equipo = l.equipo and t.interfaz = l.interfaz and t.fecha > now() - interval '30 minutes' and l.subida_mbps is not null
+    ) d
+   where d.n >= 2 and d.uso >= c.umbral_uso
+  on conflict do nothing;
+
+  -- El tráfico está saliendo por el enlace de respaldo (el principal está caído o degradado)
+  insert into _cond
+  select 'fg:respaldo:' || r.equipo || ':' || r.interfaz, 'fortigate', 'alta',
+         'El tráfico sale por el enlace de respaldo: ' || coalesce(r.nombre, r.interfaz) || ' (' || r.equipo || ')',
+         'En los últimos 30 minutos pasó más tráfico por el respaldo que por los enlaces principales. Revisá el enlace principal.',
+         '/red/fortigate?vista=sdwan'
+    from fg_enlaces r
+   where r.respaldo
+     and (select avg(t.rx_bps + t.tx_bps) from fg_trafico t where t.equipo = r.equipo and t.interfaz = r.interfaz and t.fecha > now() - interval '30 minutes') > 1e6
+     and (select avg(t.rx_bps + t.tx_bps) from fg_trafico t where t.equipo = r.equipo and t.interfaz = r.interfaz and t.fecha > now() - interval '30 minutes')
+         > coalesce((select sum(x.m) from (select avg(t.rx_bps + t.tx_bps) as m from fg_trafico t join fg_enlaces p on p.equipo = t.equipo and p.interfaz = t.interfaz
+                      where t.equipo = r.equipo and not p.respaldo and t.fecha > now() - interval '30 minutes' group by t.interfaz) x), 0)
+  on conflict do nothing;
+
   -- Recursos altos
   insert into _cond select 'fg:recursos:' || nombre, 'fortigate', 'media', 'FortiGate con recursos al límite: ' || nombre,
          'CPU ' || coalesce(cpu, 0) || '% · memoria ' || coalesce(mem, 0) || '%', '/red/fortigate'
@@ -644,7 +773,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['fg_equipos', 'fg_licencias', 'fg_certificados', 'fg_interfaces', 'fg_admins', 'fg_politicas', 'fg_vpn',
-                           'fg_vpn_fallos', 'fg_amenazas', 'fg_sdwan', 'fg_cambios'] loop
+                           'fg_vpn_fallos', 'fg_amenazas', 'fg_sdwan', 'fg_cambios', 'fg_enlaces', 'fg_trafico', 'fg_top'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists %I on public.%I', t || '_select', t);
     execute format('create policy %I on public.%I for select to authenticated using (puede_ver(''red''))', t || '_select', t);
