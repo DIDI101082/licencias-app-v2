@@ -1,7 +1,7 @@
 // Solapa Servidores: tipos, carga de datos y reglas de estado (compartidas por las tres pantallas).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { conectado, discoCritico, type Disco } from "@/lib/monitoreo";
+import { conectado, discoCritico, tipoDeducido, type Disco } from "@/lib/monitoreo";
 
 export type Criticidad = "critica" | "alta" | "media" | "baja";
 export type Entorno = "produccion" | "pruebas" | "desarrollo" | "contingencia";
@@ -140,8 +140,7 @@ export function usoRam(d: Dispositivo | null) {
 
 // Equipos del agente que parecen servidores (Windows Server o Linux) y todavía no están en la lista
 export function pareceServidor(d: Dispositivo) {
-  const so = d.so_nombre ?? "";
-  return /server/i.test(so) || (so !== "" && !/windows|mac ?os|darwin/i.test(so));
+  return tipoDeducido(d) === "servidor";
 }
 
 export function armarFilas(servidores: Servidor[], datos: Datos | null, config: Config, ahora = Date.now()): Fila[] {

@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
 import { textoUbicacion, ATRIBUCION_GEO } from "@/lib/geo";
-import { conectado, hace, discoCritico, encendidoDesde, MINUTOS_CONECTADO, type Disco } from "@/lib/monitoreo";
+import { conectado, hace, discoCritico, encendidoDesde, MINUTOS_CONECTADO, tipoEquipo, tipoDeducido, TIPOS_EQUIPO, type Disco, type TipoEquipo } from "@/lib/monitoreo";
 import { claseCodigo } from "@/lib/inventario";
 
 type Dispositivo = Record<string, any> & { discos: Disco[]; ultimo_reporte: string };
@@ -17,6 +17,7 @@ export default function Monitoreo() {
   const [cargando, setCargando] = useState(true);
   const [ahora, setAhora] = useState(Date.now());
   const [filtro, setFiltro] = useState<"todos" | "conectados" | "desconectados" | "disco" | "sin_vincular">("todos");
+  const [tipo, setTipo] = useState<TipoEquipo | "todos">("todos");
   const [texto, setTexto] = useState("");
   const [abierto, setAbierto] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,14 +56,28 @@ export default function Monitoreo() {
     if (error) setError(error.message);
   }
 
-  const cuentas = useMemo(() => ({
-    conectados: lista.filter((d) => conectado(d.ultimo_reporte, ahora)).length,
-    desconectados: lista.filter((d) => !conectado(d.ultimo_reporte, ahora)).length,
-    disco: lista.filter((d) => discoCritico(d.discos)).length,
-    sin_vincular: lista.filter((d) => !d.equipo_id).length,
-  }), [lista, ahora]);
+  // Separación por tipo: notebooks, PCs de escritorio, servidores y otros
+  const porTipo = useMemo(() => {
+    const n: Record<TipoEquipo, number> = { notebook: 0, pc: 0, servidor: 0, otro: 0 };
+    lista.forEach((d) => { n[tipoEquipo(d)]++; });
+    return n;
+  }, [lista]);
+  const delTipo = useMemo(() => (tipo === "todos" ? lista : lista.filter((d) => tipoEquipo(d) === tipo)), [lista, tipo]);
 
-  const filtrados = lista.filter((d) => {
+  const cuentas = useMemo(() => ({
+    conectados: delTipo.filter((d) => conectado(d.ultimo_reporte, ahora)).length,
+    desconectados: delTipo.filter((d) => !conectado(d.ultimo_reporte, ahora)).length,
+    disco: delTipo.filter((d) => discoCritico(d.discos)).length,
+    sin_vincular: delTipo.filter((d) => !d.equipo_id).length,
+  }), [delTipo, ahora]);
+
+  async function cambiarTipo(d: Dispositivo, valor: string) {
+    setError(null);
+    const { error } = await createClient().from("inv_dispositivos").update({ tipo: valor || null }).eq("id", d.id);
+    if (error) setError(/tipo/.test(error.message) ? "Falta ejecutar supabase/tipo-dispositivo.sql en Supabase." : error.message);
+  }
+
+  const filtrados = delTipo.filter((d) => {
     const on = conectado(d.ultimo_reporte, ahora);
     if (filtro === "conectados" && !on) return false;
     if (filtro === "desconectados" && on) return false;
@@ -76,9 +91,10 @@ export default function Monitoreo() {
   async function crearEnInventario(d: Dispositivo) {
     setError(null);
     const sb = createClient();
-    const categoria = d.bateria_pct != null ? "Notebook" : "PC de escritorio";
-    const { data: cat } = await sb.from("inv_categorias").select("id").eq("nombre", categoria).single();
-    if (!cat) return setError(`No existe la categoría “${categoria}”.`);
+    const t = tipoEquipo(d);
+    const categoria = t === "servidor" ? "Servidor" : t === "notebook" ? "Notebook" : "PC de escritorio";
+    const { data: cat } = await sb.from("inv_categorias").select("id").eq("nombre", categoria).maybeSingle();
+    if (!cat) return setError(`No existe la categoría “${categoria}”. Creala en Inventario IT → Categorías y ubicaciones y volvé a intentar.`);
     const { data: eq, error } = await sb.from("inv_equipos").insert({
       categoria_id: cat.id, marca: d.fabricante, modelo: d.modelo, numero_serie: d.numero_serie,
       estado: "en_stock", hostname: d.hostname, ip: d.ip, mac: d.mac, procesador: d.procesador,
@@ -115,6 +131,17 @@ export default function Monitoreo() {
           </p>
         </div>
         {esAdmin && <Link href="/inventario/monitoreo/agente" className="btn-secondary">Instalar agente</Link>}
+      </div>
+
+      <div role="tablist" aria-label="Tipo de equipo" className="flex flex-wrap gap-1 rounded-xl bg-line/[0.05] p-1 w-fit max-w-full">
+        {([["todos", "Todos", lista.length], ...(Object.keys(TIPOS_EQUIPO) as TipoEquipo[])
+            .filter((k) => k !== "otro" || porTipo.otro > 0)
+            .map((k) => [k, TIPOS_EQUIPO[k].varios, porTipo[k]] as const)] as const).map(([k, t, n]) => (
+          <button key={k} role="tab" aria-selected={tipo === k} onClick={() => setTipo(k as TipoEquipo | "todos")}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${tipo === k ? "bg-surface text-ink shadow-sm" : "text-ink/55 hover:text-ink"}`}>
+            {t} <span className="tabular-nums text-ink/45">{n}</span>
+          </button>
+        ))}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -205,6 +232,11 @@ export default function Monitoreo() {
                         <button className="font-medium text-ink hover:underline text-left" aria-expanded={abierto === d.id}>
                           {d.hostname}
                         </button>
+                        {tipo === "todos" && (
+                          <span className={`pill ${tipoEquipo(d) === "servidor" ? "bg-brand-50 text-brand-700" : "bg-line/[0.05] text-ink/55"}`}>
+                            {TIPOS_EQUIPO[tipoEquipo(d)].uno}
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-ink/50 pl-[18px]">{d.usuario ?? "Sin sesión iniciada"}{d.ip ? ` · ${d.ip}` : ""}</div>
                     </td>
@@ -237,6 +269,17 @@ export default function Monitoreo() {
                           <div><dt className="text-ink/50 text-xs">Procesador</dt><dd>{d.procesador}{d.nucleos ? ` · ${d.nucleos} núcleos` : ""}</dd></div>
                           <div><dt className="text-ink/50 text-xs">Arquitectura</dt><dd>{d.so_arquitectura ?? "—"}</dd></div>
                           <div><dt className="text-ink/50 text-xs">Encendido hace</dt><dd>{encendidoDesde(d.arranque)}</dd></div>
+                          <div><dt className="text-ink/50 text-xs">Tipo de equipo</dt>
+                            <dd>
+                              {esAdmin ? (
+                                <select className="input py-1 w-auto" value={d.tipo ?? ""} onChange={(e) => cambiarTipo(d, e.target.value)}
+                                  onClick={(e) => e.stopPropagation()} aria-label={`Tipo de ${d.hostname}`}>
+                                  <option value="">Automático ({TIPOS_EQUIPO[tipoDeducido(d)].uno})</option>
+                                  {(Object.keys(TIPOS_EQUIPO) as TipoEquipo[]).map((k) => <option key={k} value={k}>{TIPOS_EQUIPO[k].uno}</option>)}
+                                </select>
+                              ) : TIPOS_EQUIPO[tipoEquipo(d)].uno}
+                            </dd>
+                          </div>
                           <div><dt className="text-ink/50 text-xs">Batería</dt><dd>{d.bateria_pct != null ? `${d.bateria_pct}%` : "Sin batería"}</dd></div>
                           <div><dt className="text-ink/50 text-xs">Antivirus</dt>
                             <dd className={(Array.isArray(d.av_productos) ? !d.av_productos.some((p: any) => p.activo) : d.antivirus_activo === false) ? "text-red-600" : ""}>
@@ -287,7 +330,9 @@ export default function Monitoreo() {
                     ? esAdmin
                       ? <>Todavía ningún equipo reportó. <Link href="/inventario/monitoreo/agente" className="text-brand-600 hover:underline">Instalá el agente</Link> en una PC para empezar.</>
                       : "Todavía ningún equipo reportó."
-                    : "Ningún equipo coincide con el filtro."}
+                    : tipo !== "todos" && delTipo.length === 0
+                      ? `No hay ${TIPOS_EQUIPO[tipo].varios.toLowerCase()} con el agente instalado.`
+                      : "Ningún equipo coincide con el filtro."}
                 </td>
               </tr>
             )}

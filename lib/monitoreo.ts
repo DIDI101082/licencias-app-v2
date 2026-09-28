@@ -31,3 +31,28 @@ export function encendidoDesde(arranque: string | null) {
   const h = Math.floor((Date.now() - new Date(arranque).getTime()) / 3600000);
   return h < 24 ? `${h} h` : `${Math.floor(h / 24)} días`;
 }
+
+// ---------- Tipo de equipo ----------
+export type TipoEquipo = "notebook" | "pc" | "servidor" | "otro";
+
+export const TIPOS_EQUIPO: Record<TipoEquipo, { uno: string; varios: string }> = {
+  notebook: { uno: "Notebook", varios: "Notebooks" },
+  pc: { uno: "PC de escritorio", varios: "PCs de escritorio" },
+  servidor: { uno: "Servidor", varios: "Servidores" },
+  otro: { uno: "Otro", varios: "Otros" },
+};
+
+// Si un administrador lo fijó a mano, se usa ese. Si no, se deduce:
+// sistema de servidor (Windows Server) o Linux → servidor; con batería → notebook; si no → PC de escritorio.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function tipoEquipo(d: { [k: string]: any }): TipoEquipo {
+  if (d.tipo === "notebook" || d.tipo === "pc" || d.tipo === "servidor" || d.tipo === "otro") return d.tipo;
+  return tipoDeducido(d);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function tipoDeducido(d: { [k: string]: any }): TipoEquipo {
+  const so: string = d.so_nombre ?? "";
+  if (/server/i.test(so) || (so !== "" && !/windows|mac ?os|darwin/i.test(so))) return "servidor";
+  return d.bateria_pct != null ? "notebook" : "pc";
+}
