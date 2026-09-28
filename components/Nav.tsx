@@ -81,7 +81,10 @@ const modulos = [
     label: "Red",
     titulo: "Monitoreo de red",
     inicio: "/red",
-    links: [{ href: "/red", label: "Mapas de PRTG" }],
+    links: [
+      { href: "/red", label: "Mapas de PRTG" },
+      { href: "/red/switches", label: "Switches" },
+    ],
     admin: [] as { href: string; label: string }[],
   },
   {
@@ -129,7 +132,7 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
   const subLinks = [...activo.links, ...(esAdmin ? activo.admin : [])];
 
   function esActual(href: string) {
-    if (href === "/" || href === "/inventario" || href === "/inventario/ubicacion" || href === "/auditoria" || href === "/servidores") return pathname === href;
+    if (href === "/" || href === "/inventario" || href === "/inventario/ubicacion" || href === "/auditoria" || href === "/servidores" || href === "/red") return pathname === href;
     if (href === "/empleados") return pathname === href || (/^\/empleados\/[^/]+$/.test(pathname) && !pathname.startsWith("/empleados/movimientos"));
     return pathname.startsWith(href);
   }
