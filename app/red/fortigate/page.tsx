@@ -95,6 +95,7 @@ function Contenido() {
   const [texto, setTexto] = useState("");
   const [abierto, setAbierto] = useState<string | null>(null);
   const [verPoliticas, setVerPoliticas] = useState(false);
+  const [fv, setFv] = useState({ texto: "", tipo: "", pais: "", soloFuera: false });
 
   const cargar = useCallback(async () => {
     const sb = createClient();
@@ -173,6 +174,20 @@ function Contenido() {
     return [...m.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 15);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fallos, filtroEquipo]);
+
+  // Filtro de "Conectados ahora"
+  const vpnEquipo = vpn.filter((v) => deEquipo(v.equipo));
+  const tiposVpn = [...new Set(vpnEquipo.map((v) => v.tipo))].sort();
+  const paisesVpn = [...new Map(vpnEquipo.filter((v) => v.pais_codigo).map((v) => [v.pais_codigo!.toUpperCase(), v.pais ?? v.pais_codigo!])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  const fq = fv.texto.trim().toLowerCase();
+  const vpnFiltrada = vpnEquipo.filter((v) =>
+    coincide(v.usuario, v.ip_publica, v.pais, v.ciudad, v.isp) &&
+    (!fq || [v.usuario, v.ip_publica, v.ip_tunel, v.pais, v.ciudad, v.isp].some((x) => x?.toLowerCase().includes(fq))) &&
+    (!fv.tipo || v.tipo === fv.tipo) &&
+    (!fv.pais || (fv.pais === "?" ? !v.pais_codigo : v.pais_codigo?.toUpperCase() === fv.pais)) &&
+    (!fv.soloFuera || (!!v.pais_codigo && !paisOk(v.pais_codigo)))
+  );
 
   async function quitarEquipo(n: string) {
     const { error } = await createClient().rpc("fg_quitar_equipo", { p_nombre: n });
@@ -438,12 +453,40 @@ function Contenido() {
       {vista === "vpn" && (
         <div className="space-y-4">
           <div className="card overflow-x-auto">
-            <div className="px-4 pt-4 font-medium text-ink">Conectados ahora</div>
+            <div className="px-4 pt-4 flex flex-wrap items-end justify-between gap-3">
+              <div className="font-medium text-ink">
+                Conectados ahora{" "}
+                <span className="text-sm font-normal text-ink/50">
+                  {vpnFiltrada.length === vpnEquipo.length ? `(${vpnEquipo.length})` : `(${vpnFiltrada.length} de ${vpnEquipo.length})`}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="search" className="input w-52" placeholder="Usuario, IP, ciudad, proveedor…" aria-label="Filtrar conectados"
+                  value={fv.texto} onChange={(e) => setFv({ ...fv, texto: e.target.value })} />
+                <select className="input w-auto" aria-label="Tipo de VPN" value={fv.tipo} onChange={(e) => setFv({ ...fv, tipo: e.target.value })}>
+                  <option value="">SSL e IPsec</option>
+                  {tiposVpn.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <select className="input w-auto" aria-label="País" value={fv.pais} onChange={(e) => setFv({ ...fv, pais: e.target.value })}>
+                  <option value="">Todos los países</option>
+                  {paisesVpn.map(([c, n]) => <option key={c} value={c}>{bandera(c)} {n}</option>)}
+                  {vpnEquipo.some((v) => !v.pais_codigo) && <option value="?">Sin ubicar todavía</option>}
+                </select>
+                <label className="flex items-center gap-1.5 text-sm text-ink/70">
+                  <input type="checkbox" checked={fv.soloFuera} onChange={(e) => setFv({ ...fv, soloFuera: e.target.checked })} />
+                  Solo desde países no permitidos
+                </label>
+                {(fv.texto || fv.tipo || fv.pais || fv.soloFuera) && (
+                  <button type="button" className="text-sm text-brand-600 hover:underline" onClick={() => setFv({ texto: "", tipo: "", pais: "", soloFuera: false })}>Limpiar</button>
+                )}
+              </div>
+            </div>
             <table className="data w-full">
               <thead><tr><th>Usuario</th><th>Tipo</th><th>Desde</th><th>IP pública</th><th>IP del túnel</th><th>Conectado</th><th>Equipo</th></tr></thead>
               <tbody>
-                {!vpn.length && vacio(7, "No hay nadie conectado por VPN.")}
-                {vpn.filter((v) => deEquipo(v.equipo) && coincide(v.usuario, v.ip_publica, v.pais, v.ciudad, v.isp)).map((v) => (
+                {!vpnEquipo.length && vacio(7, "No hay nadie conectado por VPN.")}
+                {vpnEquipo.length > 0 && !vpnFiltrada.length && vacio(7, "Nadie coincide con el filtro.")}
+                {vpnFiltrada.map((v) => (
                   <tr key={`${v.equipo}:${v.tipo}:${v.usuario}:${v.ip_publica}`}>
                     <td className="text-sm font-medium">{v.usuario}</td>
                     <td className="text-sm">{v.tipo}</td>
