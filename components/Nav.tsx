@@ -147,30 +147,8 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
           <Mark className="h-6" />
           <span className="font-display font-extrabold text-lg text-brand-600 leading-none tracking-tight">Cyber</span>
         </Link>
-        {/* Solapas de módulos: si no entran, se desplazan en lugar de encimarse */}
-        <div
-          role="tablist"
-          aria-label="Módulos"
-          className="flex gap-1 border-l border-line/10 pl-3 sm:pl-5 min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        >
-          {visibles.map((m) => {
-            const sel = m.id === activo.id;
-            return (
-              <Link
-                key={m.id}
-                href={m.inicio}
-                role="tab"
-                aria-selected={sel}
-                title={(m as { titulo?: string }).titulo ?? m.label}
-                className={`font-display font-bold tracking-tight px-3 py-2 whitespace-nowrap text-sm lg:text-base rounded-t-lg border-x border-t -mb-px transition-colors shrink-0 ${
-                  sel ? "bg-canvas border-line/[0.06] text-ink" : "border-transparent text-ink/45 hover:text-ink"
-                }`}
-              >
-                {m.label}
-              </Link>
-            );
-          })}
-        </div>
+        {/* Solapas de módulos: si no entran, se desplazan y se marca que hay más a los costados */}
+        <Solapas visibles={visibles} activoId={activo.id} />
         <Reloj />
         <MenuUsuario nombre={nombre} rol={rol} esAdmin={esAdmin} enUsuarios={pathname.startsWith("/usuarios")} onSalir={salir} />
       </div>
@@ -194,6 +172,77 @@ export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: stri
         </div>
       </nav>
     </header>
+  );
+}
+
+// Barra de solapas. Si no entran todas, se puede desplazar: aparece un degradé y una flecha
+// del lado donde hay más solapas, y la solapa activa siempre queda a la vista.
+function Solapas({ visibles, activoId }: { visibles: { id: string; label: string; inicio: string; titulo?: string }[]; activoId: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [izq, setIzq] = useState(false);
+  const [der, setDer] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const medir = () => {
+      setIzq(el.scrollLeft > 2);
+      setDer(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+    };
+    medir();
+    el.addEventListener("scroll", medir, { passive: true });
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", medir); ro.disconnect(); };
+  }, [visibles.length]);
+
+  // La solapa activa siempre a la vista (por ejemplo, al entrar a Logs en una pantalla angosta)
+  useEffect(() => {
+    const sel = ref.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    sel?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activoId]);
+
+  const mover = (dir: 1 | -1) => ref.current?.scrollBy({ left: dir * 200, behavior: "smooth" });
+
+  return (
+    <div className="relative min-w-0 flex-1 border-l border-line/10 pl-2 sm:pl-4">
+      <div
+        ref={ref}
+        role="tablist"
+        aria-label="Módulos"
+        className="flex gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {visibles.map((m) => {
+          const sel = m.id === activoId;
+          return (
+            <Link
+              key={m.id}
+              href={m.inicio}
+              role="tab"
+              aria-selected={sel}
+              title={m.titulo ?? m.label}
+              className={`font-display font-bold tracking-tight px-2.5 xl:px-3 py-2 whitespace-nowrap text-sm xl:text-[15px] rounded-t-lg border-x border-t -mb-px transition-colors shrink-0 ${
+                sel ? "bg-canvas border-line/[0.06] text-ink" : "border-transparent text-ink/45 hover:text-ink"
+              }`}
+            >
+              {m.label}
+            </Link>
+          );
+        })}
+      </div>
+      {izq && (
+        <button type="button" onClick={() => mover(-1)} aria-label="Ver solapas anteriores"
+          className="absolute left-2 sm:left-4 top-0 bottom-0 w-9 flex items-center justify-start text-ink/60 hover:text-ink bg-gradient-to-r from-surface via-surface/90 to-transparent">
+          <span aria-hidden className="text-lg leading-none">‹</span>
+        </button>
+      )}
+      {der && (
+        <button type="button" onClick={() => mover(1)} aria-label="Ver más solapas"
+          className="absolute right-0 top-0 bottom-0 w-9 flex items-center justify-end text-ink/60 hover:text-ink bg-gradient-to-l from-surface via-surface/90 to-transparent">
+          <span aria-hidden className="text-lg leading-none">›</span>
+        </button>
+      )}
+    </div>
   );
 }
 
