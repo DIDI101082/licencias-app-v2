@@ -22,7 +22,9 @@ type Vecina = {
 type Equipo = {
   mac: string; sitio: string | null; nombre: string | null; modelo: string | null; tipo: string | null; ip: string | null;
   firmware: string | null; estado: number | null; actualizable: boolean | null; clientes: number | null; actualizado: string;
+  serie?: string | null; zona?: string | null; inventario_id?: string | null; inventario_codigo?: string | null;
 };
+type Categoria = { id: number; nombre: string; grupo: string | null };
 type Red = { sitio: string; ssid: string; seguridad: string | null; wpa: string | null; wpa3: boolean | null; wpa3_transicion: boolean | null; invitados: boolean; habilitada: boolean; oculta: boolean | null };
 type Conocido = { mac: string; descripcion: string; aprobado_por: string | null; aprobado_en: string };
 
@@ -55,6 +57,10 @@ function Contenido() {
   const [todasVecinas, setTodasVecinas] = useState(false);
   const [aprobando, setAprobando] = useState<string | null>(null);
   const [descripcion, setDescripcion] = useState("");
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [cargandoInv, setCargandoInv] = useState<string | null>(null);
+  const [categoria, setCategoria] = useState("");
+  const [zonas, setZonas] = useState<Record<string, string>>({});
 
   const cargar = useCallback(async () => {
     const sb = createClient();
@@ -62,7 +68,7 @@ function Contenido() {
       sb.rpc("unifi_estado"),
       sb.from("unifi_clientes_vista").select("*").order("conectado", { ascending: false }).order("ultima_vez", { ascending: false }).limit(3000),
       sb.from("unifi_vecinas").select("*").order("ultima_vez", { ascending: false }).limit(3000),
-      sb.from("unifi_equipos").select("*").order("nombre"),
+      sb.from("unifi_equipos_vista").select("*").order("nombre").then(async (r) => (r.error ? await sb.from("unifi_equipos").select("*").order("nombre") : r)),
       sb.from("unifi_redes").select("*").order("sitio").order("ssid"),
       sb.from("unifi_conocidos").select("*").order("aprobado_en", { ascending: false }),
     ]);
@@ -74,6 +80,7 @@ function Contenido() {
     setEquipos((q.data ?? []) as Equipo[]);
     setRedes((r.data ?? []) as Red[]);
     setConocidos((k.data ?? []) as Conocido[]);
+    sb.from("inv_categorias").select("id, nombre, grupo").order("grupo").order("nombre").then(({ data }) => setCategorias((data ?? []) as Categoria[]));
     setAhora(Date.now());
     setCargando(false);
   }, []);
@@ -91,7 +98,31 @@ function Contenido() {
   const intrusas = vecinas.filter((v) => v.es_rogue && !v.suplanta && recientes(v));
   const antenas = equipos.filter((q) => q.tipo === "uap");
   const antenasOn = antenas.filter((q) => q.estado === 1).length;
-  const nombreAp = (mac: string | null) => equipos.find((q) => q.mac === mac)?.nombre ?? mac ?? "—";
+  const nombreAp = (mac: string | null) => {
+    const ap = equipos.find((q) => q.mac === mac);
+    return ap ? [ap.zona, ap.nombre].filter(Boolean).join(" · ") : mac ?? "—";
+  };
+
+  async function guardarZona(q: Equipo) {
+    const valor = zonas[q.mac];
+    if (valor === undefined || valor === (q.zona ?? "")) return;
+    const { error } = await createClient().rpc("unifi_zona_guardar", { p_mac: q.mac, p_zona: valor });
+    if (error) return setError(/unifi_zona_guardar/.test(error.message) ? "Falta ejecutar supabase/unifi-extra.sql en Supabase." : error.message);
+    cargar();
+  }
+
+  async function cargarEnInventario(q: Equipo) {
+    if (!categoria) return;
+    const { error } = await createClient().from("inv_equipos").insert({
+      categoria_id: Number(categoria), marca: "Ubiquiti", modelo: q.modelo, numero_serie: q.serie ?? null,
+      hostname: q.nombre, ip: q.ip, mac: q.mac,
+    });
+    if (error) {
+      return setError(error.code === "23505" ? `Ya hay un equipo con el N° de serie ${q.serie}.`
+        : error.message.includes("row-level security") ? "No tenés permiso para cargar equipos en el inventario." : error.message);
+    }
+    setCargandoInv(null); setCategoria(""); cargar();
+  }
 
   const reporteViejo = estado?.ultimo_reporte ? ahora - Date.parse(estado.ultimo_reporte) > (estado.minutos_sin_reporte ?? 20) * 60000 : false;
   const q = texto.trim().toLowerCase();
@@ -322,14 +353,24 @@ function Contenido() {
             </table>
           </div>
           <div className="card overflow-x-auto">
-            <div className="p-5 pb-2"><h2 className="font-medium text-ink">Equipos UniFi</h2></div>
+            <div className="p-5 pb-2">
+              <h2 className="font-medium text-ink">Equipos UniFi</h2>
+              {esAdmin && <p className="text-sm text-ink/60 mt-1">Poné la <b>zona</b> de cada antena (por ejemplo “Piso 5” o “Córdoba”): con eso Oficina / Home office muestra en qué piso está cada equipo y la ocupación por piso.</p>}
+            </div>
             <table className="data w-full">
-              <thead><tr><th>Equipo</th><th>Tipo</th><th>IP</th><th>Firmware</th><th>Clientes</th><th>Estado</th></tr></thead>
+              <thead><tr><th>Equipo</th><th>Zona</th><th>Tipo</th><th>IP</th><th>Firmware</th><th>Clientes</th><th>Estado</th><th>Inventario</th></tr></thead>
               <tbody>
-                {!equipos.length && <tr><td colSpan={6} className="text-center text-ink/40 py-6">Sin datos todavía.</td></tr>}
-                {equipos.filter((x) => coincide(x.nombre, x.modelo, x.ip, x.mac)).map((x) => (
+                {!equipos.length && <tr><td colSpan={8} className="text-center text-ink/40 py-6">Sin datos todavía.</td></tr>}
+                {equipos.filter((x) => coincide(x.nombre, x.modelo, x.ip, x.mac, x.zona)).map((x) => (
                   <tr key={x.mac}>
                     <td><div className="font-medium text-ink">{x.nombre ?? x.mac}</div><div className="text-xs text-ink/50">{[x.modelo, x.sitio].filter(Boolean).join(" · ")}</div></td>
+                    <td className="text-sm">
+                      {esAdmin && x.tipo === "uap" ? (
+                        <input className="input py-1 w-36" placeholder="Ej. Piso 5" value={zonas[x.mac] ?? x.zona ?? ""} aria-label={`Zona de ${x.nombre ?? x.mac}`}
+                          onChange={(e) => setZonas({ ...zonas, [x.mac]: e.target.value })} onBlur={() => guardarZona(x)}
+                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                      ) : <span className="text-ink/70">{x.zona ?? "—"}</span>}
+                    </td>
                     <td className="text-sm text-ink/70">{TIPO_EQUIPO[x.tipo ?? ""] ?? x.tipo ?? "—"}</td>
                     <td className="text-sm text-ink/70">{x.ip ?? "—"}</td>
                     <td className="text-sm">
@@ -338,6 +379,24 @@ function Contenido() {
                     </td>
                     <td className="text-sm text-ink/70 tabular-nums">{x.clientes ?? "—"}</td>
                     <td>{x.estado === 1 ? <span className="pill bg-emerald-50 text-emerald-700">En línea</span> : <span className="pill bg-red-50 text-red-600">Desconectado</span>}</td>
+                    <td className="text-sm">
+                      {x.inventario_codigo ? (
+                        <Link href={`/inventario/equipos/${x.inventario_id}`} className="tag-inv">{x.inventario_codigo}</Link>
+                      ) : puedeEditar && categorias.length > 0 && x.inventario_id === null ? (
+                        cargandoInv === x.mac ? (
+                          <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); cargarEnInventario(x); }}>
+                            <select className="input py-1 w-40" value={categoria} onChange={(e) => setCategoria(e.target.value)} aria-label="Categoría">
+                              <option value="">Categoría…</option>
+                              {categorias.map((c) => <option key={c.id} value={c.id}>{c.grupo ? `${c.grupo} · ` : ""}{c.nombre}</option>)}
+                            </select>
+                            <button className="btn-primary py-1" disabled={!categoria}>Cargar</button>
+                            <button type="button" className="btn-secondary py-1" onClick={() => setCargandoInv(null)}>Cancelar</button>
+                          </form>
+                        ) : (
+                          <button className="text-brand-600 hover:underline whitespace-nowrap" onClick={() => { setCargandoInv(x.mac); setCategoria(""); }}>Cargar en inventario</button>
+                        )
+                      ) : <span className="text-ink/40">—</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>

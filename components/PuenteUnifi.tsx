@@ -11,6 +11,7 @@ export type EstadoUnifi = {
   configurado: boolean; udm_url: string | null; ultimo_reporte: string | null; version_puente: string | null;
   resumen: { equipos: number; redes: number; clientes: number; vecinas: number } | null;
   alertas: boolean; alertar_aleatorias: boolean; alertar_cableados: boolean; minutos_sin_reporte: number;
+  alertar_antenas?: boolean; alertar_red_abierta?: boolean; alertar_firmware?: boolean;
 };
 
 // Configuración (solo administradores): instalador del puente y alertas.
@@ -30,6 +31,8 @@ export default function PuenteUnifi({ estado, alCambiar }: { estado: EstadoUnifi
   const [al, setAl] = useState({
     alertas: estado.alertas, alertar_aleatorias: estado.alertar_aleatorias,
     alertar_cableados: estado.alertar_cableados, minutos_sin_reporte: estado.minutos_sin_reporte,
+    alertar_antenas: estado.alertar_antenas ?? true, alertar_red_abierta: estado.alertar_red_abierta ?? true,
+    alertar_firmware: estado.alertar_firmware ?? false,
   });
   const [avisoAl, setAvisoAl] = useState<{ ok: boolean; texto: string } | null>(null);
 
@@ -165,6 +168,22 @@ export default function PuenteUnifi({ estado, alCambiar }: { estado: EstadoUnifi
           <input type="checkbox" disabled={!al.alertas} checked={al.alertar_cableados} onChange={(e) => setAl({ ...al, alertar_cableados: e.target.checked })} />
           Incluir dispositivos desconocidos conectados por cable
         </label>
+        {estado.alertar_antenas !== undefined && (
+          <>
+            <label className="flex items-center gap-2 text-sm pl-6">
+              <input type="checkbox" disabled={!al.alertas} checked={al.alertar_antenas} onChange={(e) => setAl({ ...al, alertar_antenas: e.target.checked })} />
+              Antena, switch o gateway UniFi desconectado
+            </label>
+            <label className="flex items-center gap-2 text-sm pl-6">
+              <input type="checkbox" disabled={!al.alertas} checked={al.alertar_red_abierta} onChange={(e) => setAl({ ...al, alertar_red_abierta: e.target.checked })} />
+              Red WiFi sin contraseña
+            </label>
+            <label className="flex items-center gap-2 text-sm pl-6">
+              <input type="checkbox" disabled={!al.alertas} checked={al.alertar_firmware} onChange={(e) => setAl({ ...al, alertar_firmware: e.target.checked })} />
+              Firmware con actualización disponible (aviso informativo)
+            </label>
+          </>
+        )}
         <label className="block text-sm max-w-xs">
           Avisar si el puente no reporta en (minutos)
           <input type="number" min={5} max={720} className="input mt-1" value={al.minutos_sin_reporte}

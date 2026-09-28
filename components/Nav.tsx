@@ -72,6 +72,7 @@ const modulos = [
     links: [
       { href: "/inventario/ubicacion", label: "Dónde están los equipos" },
       { href: "/inventario/ubicacion/asistencia", label: "Asistencia semanal" },
+      { href: "/inventario/ubicacion/ocupacion", label: "Ocupación por piso" },
     ],
     admin: [] as { href: string; label: string }[],
   },

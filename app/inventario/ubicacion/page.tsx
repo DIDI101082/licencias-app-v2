@@ -86,6 +86,9 @@ export default function Ubicacion() {
   const [ahora, setAhora] = useState(Date.now());
   const [filtro, setFiltro] = useState<Tipo | null>(null);
   const [verRedes, setVerRedes] = useState(false);
+  // Antena UniFi de cada equipo (si está conectado el puente de UniFi)
+  const [uni, setUni] = useState<{ actualizado: string | null; dispositivos: { dispositivo_id: string; zona: string; antena: string | null; ssid: string | null }[];
+    zonas: { zona: string; con_agente: number; otros: number; invitados: number }[] } | null>(null);
 
   useEffect(() => {
     const sb = createClient();
@@ -101,8 +104,11 @@ export default function Ubicacion() {
     const canal = sb.channel("inv-ubicacion")
       .on("postgres_changes", { event: "*", schema: "public", table: "inv_dispositivos" }, () => cargar())
       .subscribe();
+    const cargarUni = () => sb.rpc("unifi_ubicacion").then(({ data, error }) => setUni(error ? null : data));
+    cargarUni();
+    const uniIntervalo = setInterval(cargarUni, 120000);
     const reloj = setInterval(() => setAhora(Date.now()), 30000);
-    return () => { sb.removeChannel(canal); clearInterval(reloj); };
+    return () => { sb.removeChannel(canal); clearInterval(reloj); clearInterval(uniIntervalo); };
   }, []);
 
   const conectados = disp.filter((d) => conectado(d.ultimo_reporte, ahora));
@@ -138,6 +144,9 @@ export default function Ubicacion() {
     return out;
   }, [historial]);
   const maxDia = Math.max(1, ...dias.map((d) => d.oficina + d.casa));
+  const uniFresco = !!uni?.actualizado && ahora - Date.parse(uni.actualizado) < 30 * 60000;
+  const zonaDe = useMemo(() => new Map((uniFresco ? uni?.dispositivos ?? [] : []).map((x) => [x.dispositivo_id, x])), [uni, uniFresco]);
+  const zonas = uniFresco ? uni?.zonas ?? [] : [];
   const hayHistorial = dias.some((d) => d.oficina + d.casa > 0);
 
   return (
@@ -184,7 +193,27 @@ export default function Ubicacion() {
       <div className="grid md:grid-cols-2 gap-6">
         <div className="card p-5">
           <h2 className="font-medium text-ink mb-3">En la oficina, por sede y piso</h2>
-          {porRed.length === 0 ? <p className="text-sm text-ink/50">Ningún equipo conectado desde la oficina en este momento.</p> : (
+          {zonas.length > 0 ? (
+            <>
+              <ul className="space-y-2">
+                {zonas.map((z) => (
+                  <li key={z.zona} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-ink">{z.zona}</span>
+                    <span className="text-right">
+                      <span className="font-display text-lg">{z.con_agente}</span>
+                      <span className="text-xs text-ink/50"> con agente</span>
+                      {z.otros > 0 && <span className="text-xs text-ink/50"> · {z.otros} otros</span>}
+                      {z.invitados > 0 && <span className="text-xs text-amber-700"> · {z.invitados} en invitados</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-ink/50 mt-3">
+                Según la antena WiFi de UniFi a la que está conectado cada dispositivo. “Otros” son celulares y equipos sin agente.{" "}
+                <Link href="/inventario/ubicacion/ocupacion" className="text-brand-600 hover:underline">Ver ocupación por piso</Link>
+              </p>
+            </>
+          ) : porRed.length === 0 ? <p className="text-sm text-ink/50">Ningún equipo conectado desde la oficina en este momento.</p> : (
             <ul className="space-y-2">
               {porRed.map((r) => (
                 <li key={r.sede + r.red} className="flex items-center justify-between text-sm">
@@ -238,6 +267,7 @@ export default function Ubicacion() {
                   </td>
                   <td><span className={`pill ${TIPOS[t].pill}`}>{t === "oficina" ? d.ubicacion_sede : TIPOS[t].titulo}</span></td>
                   <td className="text-ink/70">
+                    {zonaDe.get(d.id) && <div className="text-ink">{zonaDe.get(d.id)!.zona}<span className="text-xs text-ink/50"> · antena {zonaDe.get(d.id)!.antena}</span></div>}
                     {d.ubicacion_red ?? (t === "remoto" ? "Red de su casa" : "—")}
                     {d.ssid && <div className="text-xs text-ink/50">WiFi: {d.ssid}</div>}
                   </td>
