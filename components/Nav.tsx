@@ -57,6 +57,7 @@ const modulos = [
       { href: "/inventario/riesgos", label: "Riesgos" },
       { href: "/inventario/vulnerabilidades", label: "Vulnerabilidades" },
       { href: "/inventario/identidad", label: "Identidad" },
+      { href: "/inventario/wifi", label: "WiFi" },
       { href: "/inventario/incidentes", label: "Incidentes" },
       { href: "/inventario/backups", label: "Backups" },
       { href: "/inventario/concientizacion", label: "Concientización" },

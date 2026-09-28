@@ -33,7 +33,7 @@ const REGLAS: { k: string; titulo: string; ayuda: string }[] = [
   { k: "baja_pendiente", titulo: "Baja sin cerrar", ayuda: "La baja de un empleado sigue abierta después de 7 días." },
   { k: "revision_accesos", titulo: "Revisión de accesos", ayuda: "Pasaron 90 días sin revisar los accesos, o la revisión abierta está vencida." },
 ];
-const NOMBRE_REGLA: Record<string, string> = { ...Object.fromEntries(REGLAS.map((r) => [r.k, r.titulo])), backup: "Backups (Veeam)", servidor: "Servidores" };
+const NOMBRE_REGLA: Record<string, string> = { ...Object.fromEntries(REGLAS.map((r) => [r.k, r.titulo])), backup: "Backups (Veeam)", servidor: "Servidores", wifi: "WiFi (UniFi)" };
 
 const SEV = {
   critica: { texto: "Crítica", clase: "bg-red-600 text-white" },
