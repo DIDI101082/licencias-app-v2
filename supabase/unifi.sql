@@ -240,7 +240,8 @@ begin
   update unifi_vecinas v set suplanta = (
     v.ssid is not null
     and exists (select 1 from unifi_redes r where r.habilitada and lower(r.ssid) = lower(v.ssid))
-    and not exists (select 1 from unifi_equipos q where v.bssid = any(q.bssids) or q.mac = v.bssid));
+    and not exists (select 1 from unifi_equipos q where v.bssid = any(q.bssids) or q.mac = v.bssid))
+   where v.bssid is not null;   -- Supabase exige WHERE en todo UPDATE que llega por la API
   delete from unifi_vecinas where ultima_vez < v_ahora - interval '30 days';
 
   update unifi_config set ultimo_reporte = v_ahora, version_puente = left(p_datos ->> 'version', 20),
