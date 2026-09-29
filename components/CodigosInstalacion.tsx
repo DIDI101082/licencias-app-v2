@@ -26,7 +26,9 @@ export default function CodigosInstalacion({ intervalo }: { intervalo: number })
   const [descripcion, setDescripcion] = useState("");
   const [dias, setDias] = useState(7);
   const [usos, setUsos] = useState(1);
-  const [formato, setFormato] = useState<"cmd" | "ps1" | "linux">("cmd");
+  const [formato, setFormato] = useState<"cmd" | "ps1" | "linux" | "eset">("cmd");
+  const [comando, setComando] = useState<{ descripcion: string; texto: string } | null>(null);
+  const [copiado, setCopiado] = useState(false);
   const [generando, setGenerando] = useState(false);
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
 
@@ -52,6 +54,18 @@ export default function CodigosInstalacion({ intervalo }: { intervalo: number })
     if (error) return setAviso({ ok: false, texto: error.message });
 
     const args = [process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, codigo, intervalo] as const;
+    if (formato === "eset") {
+      // No se descarga nada: el comando baja el instalador de la app con este código y lo ejecuta como SYSTEM
+      const origen = window.location.origin;
+      const texto = `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $f=Join-Path $env:TEMP ('accusys-agente-'+[guid]::NewGuid().ToString('N')+'.ps1'); $c=1; try { Invoke-WebRequest -UseBasicParsing -Uri '${origen}/api/agente/instalar?codigo=${codigo}' -OutFile $f; & $f; $c=[int]$LASTEXITCODE } catch { Write-Output ('ERROR: ' + $_.Exception.Message) } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }; exit $c"`;
+      setComando({ descripcion: descripcion.trim(), texto });
+      setCopiado(false);
+      setAviso({ ok: true, texto: `Comando para "${descripcion.trim()}" listo: sirve para ${usos === 1 ? "1 equipo" : `${usos} equipos`} y vence en ${dias} ${dias === 1 ? "día" : "días"}. Copialo ahora: no se vuelve a mostrar.` });
+      setDescripcion("");
+      cargar();
+      return;
+    }
+    setComando(null);
     if (formato === "cmd") descargar("Instalar Agente Accusys Cyber.cmd", generarInstaladorCmd(...args));
     else if (formato === "ps1") descargar("instalar-agente-accusys.ps1", generarInstalador(...args));
     else descargar("instalar-agente-accusys.sh", generarInstaladorLinux(...args), { linux: true });
@@ -101,13 +115,18 @@ export default function CodigosInstalacion({ intervalo }: { intervalo: number })
         </div>
         <div>
           <label className="label">Formato</label>
-          <select className="input" value={formato} onChange={(e) => setFormato(e.target.value as "cmd" | "ps1" | "linux")}>
+          <select className="input" value={formato} onChange={(e) => {
+            const f = e.target.value as "cmd" | "ps1" | "linux" | "eset";
+            setFormato(f);
+            if (f === "eset" && usos === 1) { setUsos(100); setDias(7); }
+          }}>
             <option value="cmd">Windows: doble clic (.cmd)</option>
             <option value="ps1">Windows: PowerShell (.ps1) para ESET, Intune o GPO</option>
             <option value="linux">Linux (.sh)</option>
+            <option value="eset">ESET PROTECT: comando para "Ejecutar comando"</option>
           </select>
         </div>
-        <button className="btn-primary" disabled={generando || !descripcion.trim()}>{generando ? "Generando…" : "Generar y descargar"}</button>
+        <button className="btn-primary" disabled={generando || !descripcion.trim()}>{generando ? "Generando…" : formato === "eset" ? "Generar comando" : "Generar y descargar"}</button>
       </form>
 
       {formato === "linux" && (
@@ -115,6 +134,33 @@ export default function CodigosInstalacion({ intervalo }: { intervalo: number })
           En el equipo Linux se ejecuta con <code className="bg-line/[0.04] px-1 rounded">sudo bash instalar-agente-accusys.sh</code>.
           Funciona en Ubuntu, Debian, Red Hat, Rocky, Alma y derivadas (con systemd o cron). Solo necesita <code>curl</code>.
         </p>
+      )}
+
+      {formato === "eset" && !comando && (
+        <p className="text-xs text-ink/60">
+          Para equipos remotos sin VPN: ESET PROTECT ejecuta el comando como SYSTEM, el equipo baja el instalador de esta app con el código y
+          queda pendiente de aprobación. Poné como límite la cantidad de equipos a instalar (con un margen) y un vencimiento corto.
+        </p>
+      )}
+
+      {comando && (
+        <div className="rounded-lg border border-line/10 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm font-medium text-ink">Comando para ESET PROTECT · {comando.descripcion}</div>
+            <button type="button" className="btn-secondary" onClick={async () => { await navigator.clipboard.writeText(comando.texto); setCopiado(true); }}>
+              {copiado ? "Copiado" : "Copiar comando"}
+            </button>
+          </div>
+          <pre className="text-xs bg-line/[0.04] rounded-md p-3 whitespace-pre-wrap break-all select-all">{comando.texto}</pre>
+          <ol className="text-sm text-ink/70 space-y-1 list-decimal pl-5">
+            <li>En <b>ESET PROTECT Cloud</b>: <b>Tareas → Nueva → Tarea de cliente</b>.</li>
+            <li>En <b>Tarea</b> elegí <b>Ejecutar comando</b> (Run Command). Pegá el comando en <b>Línea de comandos</b> y dejá vacío el directorio de trabajo.</li>
+            <li>En <b>Destino</b>, elegí primero 1 o 2 equipos de prueba; cuando aparezcan en Monitoreo como pendientes, repetí con el grupo completo.</li>
+            <li>Activador: <b>Lo antes posible</b>. Los equipos apagados la ejecutan cuando se conectan.</li>
+            <li>Aprobá los equipos nuevos en Monitoreo. Al terminar el despliegue, revocá este código desde la lista de abajo.</li>
+          </ol>
+          <p className="text-xs text-ink/50">El comando contiene el código: tratalo como una contraseña. La app no lo guarda, solo su huella.</p>
+        </div>
       )}
 
       {aviso && (

@@ -31,8 +31,10 @@ export async function middleware(request: NextRequest) {
 
   const isLoginPage = request.nextUrl.pathname.startsWith("/login");
   const isAuthCallback = request.nextUrl.pathname.startsWith("/auth/callback");
+  // Descarga del instalador del agente con código de instalación (la usa ESET PROTECT, sin sesión)
+  const isInstalador = request.nextUrl.pathname === "/api/agente/instalar";
 
-  if (!user && !isLoginPage && !isAuthCallback) {
+  if (!user && !isLoginPage && !isAuthCallback && !isInstalador) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
