@@ -1,11 +1,12 @@
 // Puente de virtualización y storage -> Accusys Cyber. Se instala en un servidor interno que llegue a vCenter y al storage.
 // Lee vCenter con PowerCLI (usuario de solo lectura) y el storage IBM (V5000 / FlashSystem) con su API REST (usuario Monitor).
 // No modifica nada. Las claves quedan solo en la carpeta protegida del servidor.
+// Desde 1.1 también verifica los certificados internos cargados en Vencimientos (cada 6 horas).
 // Reglas: el PowerShell es solo ASCII, sin la secuencia signo pesos + llave, sin comillas invertidas
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_VIRT_VERSION = "1.0";
+export const PUENTE_VIRT_VERSION = "1.1";
 
 const PUENTE = String.raw`# Puente de virtualizacion y storage -> Accusys Cyber: lee vCenter (PowerCLI) y el storage IBM (API REST), solo lectura
 $ErrorActionPreference = 'Stop'
@@ -133,6 +134,57 @@ function Leer-VCenter() {
 }
 
 # ---------- Storage IBM (Spectrum Virtualize: V5000 / FlashSystem) ----------
+# Certificados internos cargados en Vencimientos (se leen desde la red interna, cada 6 horas)
+function Certs-Internos() {
+  $script:paso = 'certificados internos'
+  $marca = Join-Path $Carpeta 'certificados-internos.txt'
+  if ((Test-Path $marca) -and (((Get-Date) - (Get-Item $marca).LastWriteTime).TotalHours -lt 6)) { return $null }
+  if (-not ('CertInterno' -as [type])) {
+    $cs = @(
+      'using System;', 'using System.Net.Sockets;', 'using System.Net.Security;', 'using System.Security.Authentication;',
+      'using System.Security.Cryptography.X509Certificates;',
+      'public static class CertInterno {',
+      '  public static X509Certificate2 Leer(string host, int puerto, int ms) {',
+      '    using (TcpClient tcp = new TcpClient()) {',
+      '      IAsyncResult ar = tcp.BeginConnect(host, puerto, null, null);',
+      '      if (!ar.AsyncWaitHandle.WaitOne(ms)) { throw new Exception("Sin respuesta en el puerto " + puerto); }',
+      '      tcp.EndConnect(ar);',
+      '      tcp.ReceiveTimeout = ms; tcp.SendTimeout = ms;',
+      '      using (SslStream ssl = new SslStream(tcp.GetStream(), false, (a, b, c, d) => true)) {',
+      '        ssl.AuthenticateAsClient(host, null, (SslProtocols)(3072 | 768 | 192), false);',
+      '        if (ssl.RemoteCertificate == null) { throw new Exception("El servidor no presento certificado"); }',
+      '        return new X509Certificate2(ssl.RemoteCertificate);',
+      '      }',
+      '    }',
+      '  }',
+      '}') -join [Environment]::NewLine
+    Add-Type -TypeDefinition $cs
+  }
+  $headers = @{ apikey = $AnonKey; Authorization = ('Bearer ' + $AnonKey) }
+  $lista = Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/venc_internos_pendientes') -Headers $headers -Body ('{"p_token":' + (ConvertTo-Json $Token) + '}') -ContentType 'application/json' -TimeoutSec 60
+  $res = New-Object System.Collections.ArrayList
+  foreach ($it in @($lista)) {
+    if ($null -eq $it -or -not $it.host) { continue }
+    $h = (([string]$it.host) -replace '^https?://', '') -replace '/.*$', ''
+    $puerto = 443
+    if ($h -match '^(.+):(\d+)$') { $h = $Matches[1]; $puerto = [int]$Matches[2] }
+    try {
+      $c = [CertInterno]::Leer($h, $puerto, 8000)
+      $emisor = $c.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $true)
+      [void]$res.Add([ordered]@{ id = $it.id; vence = $c.NotAfter.ToUniversalTime().ToString('o'); emisor = $emisor; error = $null })
+    } catch {
+      $e = $_.Exception; while ($e.InnerException) { $e = $e.InnerException }
+      [void]$res.Add([ordered]@{ id = $it.id; vence = $null; emisor = $null; error = $e.Message })
+    }
+  }
+  if ($res.Count) {
+    $cuerpo = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_datos":' + (ConvertTo-Json -InputObject @($res) -Depth 4 -Compress) + '}'
+    Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/venc_internos_reportar') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpo)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 60 | Out-Null
+  }
+  Set-Content -Path $marca -Value ('OK ' + (Get-Date).ToString('s') + ' ' + $res.Count + ' certificados')
+  return $res.Count
+}
+
 function Bytes-GB($v) {
   if ($null -eq $v -or [string]$v -eq '') { return $null }
   $t = ([string]$v).Trim()
@@ -227,6 +279,12 @@ try {
   $cuerpo = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_datos":' + (ConvertTo-Json -InputObject $datos -Depth 6 -Compress) + '}'
   $headers = @{ apikey = $AnonKey; Authorization = ('Bearer ' + $AnonKey) }
   Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/virt_reportar') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpo)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 120 | Out-Null
+  try { $nc = Certs-Internos; if ($null -ne $nc) { $partes += ('certificados internos: ' + $nc) } }
+  catch {
+    $e = $_.Exception; while ($e.InnerException) { $e = $e.InnerException }
+    $d = $e.Message; if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $d = $d + ' | ' + $_.ErrorDetails.Message }
+    $partes += ('certificados internos ERROR: ' + ($d -replace '\s+', ' '))
+  }
   $linea = 'OK ' + (Get-Date).ToString('s') + ' ' + ($partes -join ' | ')
   if ($avisos.Count) { $linea = $linea + ' | avisos: ' + ($avisos -join '; ') }
   Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value $linea

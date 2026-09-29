@@ -5,18 +5,19 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { fecha, diasHasta } from "@/lib/inventario";
+import TareasProgramadas from "@/components/TareasProgramadas";
 
 type Venc = {
-  origen: "licencia" | "garantia" | "manual"; ref: string; tipo: string; descripcion: string; fecha_vencimiento: string | null;
+  origen: "licencia" | "garantia" | "manual" | "fortigate" | "vmware"; ref: string; tipo: string; descripcion: string; fecha_vencimiento: string | null;
   aviso_dias: number; responsable: string | null; enlace: string; verificado: string | null; verificacion_error: string | null;
-  emisor: string | null; host: string | null;
+  emisor: string | null; host: string | null; interno?: boolean;
 };
 
 const TIPO: Record<string, string> = {
   licencia: "Licencia", garantia: "Garantía", certificado: "Certificado SSL", dominio: "Dominio",
   secreto: "Secreto / clave", contrato: "Contrato", otro: "Otro",
 };
-const VACIO = { id: 0, tipo: "certificado", descripcion: "", host: "", fecha_vencimiento: "", aviso_dias: 30, responsable: "", notas: "" };
+const VACIO = { id: 0, tipo: "certificado", descripcion: "", host: "", fecha_vencimiento: "", aviso_dias: 30, responsable: "", notas: "", interno: false };
 
 function estado(v: Venc) {
   const d = diasHasta(v.fecha_vencimiento);
@@ -38,11 +39,14 @@ export default function Vencimientos() {
   const [verificando, setVerificando] = useState(false);
   const [cargando, setCargando] = useState(true);
 
-  const cargar = () => createClient().from("vencimientos_v").select("*").order("fecha_vencimiento", { nullsFirst: false })
-    .then(({ data, error }) => {
-      if (error) setError(error.message.includes("vencimientos") ? "Falta ejecutar vencimientos.sql en Supabase." : error.message);
-      setItems((data ?? []) as Venc[]); setCargando(false);
-    });
+  // vencimientos_todos suma lo que traen FortiGate y vCenter (postura.sql); si todavía no está, la lista básica
+  const cargar = async () => {
+    const sb = createClient();
+    let r = await sb.from("vencimientos_todos").select("*").order("fecha_vencimiento", { nullsFirst: false });
+    if (r.error) r = await sb.from("vencimientos_v").select("*").order("fecha_vencimiento", { nullsFirst: false });
+    if (r.error) setError(r.error.message.includes("vencimientos") ? "Falta ejecutar vencimientos.sql en Supabase." : r.error.message);
+    setItems((r.data ?? []) as Venc[]); setCargando(false);
+  };
   useEffect(() => { cargar(); }, []);
 
   const lista = useMemo(() => items
@@ -62,7 +66,7 @@ export default function Vencimientos() {
 
   async function editar(v: Venc) {
     const { data } = await createClient().from("vencimientos").select("*").eq("id", Number(v.ref)).single();
-    if (data) setForm({ ...VACIO, ...data, host: data.host ?? "", fecha_vencimiento: data.fecha_vencimiento ?? "", responsable: data.responsable ?? "", notas: data.notas ?? "" });
+    if (data) setForm({ ...VACIO, ...data, interno: !!data.interno, host: data.host ?? "", fecha_vencimiento: data.fecha_vencimiento ?? "", responsable: data.responsable ?? "", notas: data.notas ?? "" });
   }
 
   async function guardar(e: React.FormEvent) {
@@ -73,6 +77,7 @@ export default function Vencimientos() {
       tipo: form.tipo, descripcion: form.descripcion.trim(), host: form.host.trim() || null,
       fecha_vencimiento: form.fecha_vencimiento || null, aviso_dias: form.aviso_dias,
       responsable: form.responsable.trim() || null, notas: form.notas.trim() || null,
+      ...(form.tipo === "certificado" && form.interno ? { interno: true } : form.id ? { interno: false } : {}),
     };
     const sb = createClient();
     const { error } = form.id ? await sb.from("vencimientos").update(fila).eq("id", form.id) : await sb.from("vencimientos").insert(fila);
@@ -85,6 +90,14 @@ export default function Vencimientos() {
     const { error } = await createClient().from("vencimientos").delete().eq("id", form.id);
     if (error) return setError(error.message);
     setForm(null); cargar();
+  }
+
+  async function tipicos() {
+    setError(null); setAviso(null);
+    const { data, error } = await createClient().rpc("vencimientos_agregar_tipicos");
+    if (error) return setError(/vencimientos_agregar_tipicos/.test(error.message) ? "Falta ejecutar supabase/postura.sql en Supabase." : error.message);
+    setAviso(data ? `Se agregaron ${data} contratos para completar con su fecha (aparecen como “Sin fecha”).` : "Ya estaban todos los contratos típicos.");
+    cargar();
   }
 
   async function verificar() {
@@ -107,11 +120,13 @@ export default function Vencimientos() {
         {puedeEditar && (
           <div className="flex gap-2">
             {verificables > 0 && <button className="btn-secondary" disabled={verificando} onClick={verificar}>{verificando ? "Verificando…" : "Verificar certificados y dominios"}</button>}
+            <button className="btn-secondary" onClick={tipicos}>Agregar contratos típicos</button>
             <button className="btn-primary" onClick={() => setForm({ ...VACIO })}>Agregar</button>
           </div>
         )}
       </div>
 
+      <TareasProgramadas parte="vencimientos" alTerminar={cargar} />
       {error && <div className="card p-3 text-sm text-red-600 bg-red-50">{error}</div>}
       {aviso && <div className="card p-3 text-sm bg-brand-50 text-ink/80">{aviso}</div>}
 
@@ -133,7 +148,13 @@ export default function Vencimientos() {
           {(form.tipo === "certificado" || form.tipo === "dominio") && (
             <label className="block sm:col-span-2"><span className="label">{form.tipo === "certificado" ? "Sitio a verificar (ej. www.accusys.com.ar o vpn.accusys.com.ar:10443)" : "Dominio (ej. accusys.com.ar)"}</span>
               <input className="input font-mono" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} />
-              <span className="text-xs text-ink/50">La fecha se completa sola al tocar “Verificar certificados y dominios”.</span></label>
+              <span className="text-xs text-ink/50">La fecha se completa sola todos los días (o al tocar “Verificar certificados y dominios”).</span>
+              {form.tipo === "certificado" && (
+                <label className="flex items-center gap-2 text-sm mt-2">
+                  <input type="checkbox" checked={form.interno} onChange={(e) => setForm({ ...form, interno: e.target.checked })} />
+                  Es interno (IP o nombre de la red interna): lo verifica el puente de Virtualización desde adentro
+                </label>
+              )}</label>
           )}
           <label className="block"><span className="label">Vence el</span>
             <input type="date" className="input" value={form.fecha_vencimiento} onChange={(e) => setForm({ ...form, fecha_vencimiento: e.target.value })} /></label>
@@ -174,7 +195,8 @@ export default function Vencimientos() {
                     {v.origen === "manual" && puedeEditar
                       ? <button className="text-left text-ink font-medium hover:text-brand-700" onClick={() => editar(v)}>{v.descripcion}</button>
                       : <Link href={v.enlace} className="text-ink font-medium hover:text-brand-700">{v.descripcion}</Link>}
-                    {v.host && <div className="text-xs text-ink/50 font-mono">{v.host}</div>}
+                    {v.host && <div className="text-xs text-ink/50 font-mono">{v.host}{v.interno ? " · interno" : ""}</div>}
+                    {(v.origen === "fortigate" || v.origen === "vmware") && <div className="text-xs text-ink/45">Automático desde {v.origen === "fortigate" ? "FortiGate" : "vCenter"}</div>}
                   </td>
                   <td className="text-ink/70 whitespace-nowrap">{TIPO[v.tipo] ?? v.tipo}</td>
                   <td className="text-ink/70 whitespace-nowrap">{fecha(v.fecha_vencimiento)}</td>
@@ -192,7 +214,8 @@ export default function Vencimientos() {
         </table>
       </div>
       <p className="text-xs text-ink/50">
-        Las licencias y garantías se toman de sus pantallas (se editan allá). Con las alertas activas, llega un aviso a Teams
+        Las licencias, garantías, licencias de FortiGate (FortiGuard y FortiCare), certificados de los FortiGate y de los hosts ESXi y licencias de
+        VMware se toman de sus pantallas. Los certificados y dominios públicos se verifican solos todos los días; los internos, con el puente de Virtualización. Con las alertas activas, llega un aviso a Teams
         cuando algo entra en su período de aviso.
       </p>
     </div>

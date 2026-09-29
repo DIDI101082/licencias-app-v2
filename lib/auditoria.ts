@@ -12,6 +12,8 @@ export const SECCION: Record<string, string> = {
   empleados_tareas: "Tareas de altas y bajas", empleados_actas: "Actas de equipos", vencimientos: "Vencimientos",
   vuln_productos: "Aplicaciones controladas (vulnerabilidades)", revision_campanas: "Revisión de accesos",
   revision_items: "Revisión de accesos (usuarios)", eset_config: "Integración con ESET", eset_detecciones: "Detecciones de ESET",
+  correo_dominios: "Correo y dominio", correo_cambios: "Cambios de DNS del correo", sup_objetivos: "Superficie expuesta",
+  sup_puertos: "Superficie expuesta (puertos)", norma_evaluacion: "Normativa", prog_config: "Verificaciones diarias",
 };
 
 const CAMPO: Record<string, string> = {

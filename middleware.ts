@@ -33,8 +33,10 @@ export async function middleware(request: NextRequest) {
   const isAuthCallback = request.nextUrl.pathname.startsWith("/auth/callback");
   // Descarga del instalador del agente con código de instalación (la usa ESET PROTECT, sin sesión)
   const isInstalador = request.nextUrl.pathname === "/api/agente/instalar";
+  // Tarea diaria de Vercel (se autentica con CRON_SECRET dentro de la ruta)
+  const isProgramado = request.nextUrl.pathname === "/api/programado";
 
-  if (!user && !isLoginPage && !isAuthCallback && !isInstalador) {
+  if (!user && !isLoginPage && !isAuthCallback && !isInstalador && !isProgramado) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
