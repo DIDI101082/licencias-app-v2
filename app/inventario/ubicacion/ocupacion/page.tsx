@@ -13,11 +13,19 @@ const DIAS = [
 ];
 const diaSemana = (f: string) => new Date(f + "T12:00:00").getDay();
 
+// Piso de una zona a partir de su nombre: "Piso 4 - AP1" -> "Piso 4", "CBA-AP2" -> "CBA". Sin patrón, la zona es su propio piso.
+function pisoDe(zona: string) {
+  const p = zona.match(/^\s*piso\s*(\d+)/i);
+  if (p) return `Piso ${p[1]}`;
+  const q = zona.match(/^\s*([^\s\-_]+?)\s*[-_]\s*\S/);
+  return q ? q[1] : zona;
+}
+
 export default function Ocupacion() {
   const [filas, setFilas] = useState<Fila[]>([]);
   const [ahora, setAhora] = useState<Ahora[]>([]);
   const [dias, setDias] = useState(28);
-  const [zona, setZona] = useState("todas");
+  const [zona, setZona] = useState("todas");   // "todas", "piso:<nombre>" o una zona
   const [medida, setMedida] = useState<"empresa" | "con_agente">("empresa");
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,8 +42,26 @@ export default function Ocupacion() {
     });
   }, [dias]);
 
-  const listaZonas = useMemo(() => Array.from(new Set(filas.map((f) => f.zona))).sort(), [filas]);
-  const elegidas = useMemo(() => filas.filter((f) => zona === "todas" || f.zona === zona), [filas, zona]);
+  const listaZonas = useMemo(() => Array.from(new Set(filas.map((f) => f.zona))).sort((a, b) => a.localeCompare(b, "es", { numeric: true })), [filas]);
+  const listaPisos = useMemo(() => Array.from(new Set([...filas.map((f) => pisoDe(f.zona)), ...ahora.map((z) => pisoDe(z.zona))]))
+    .sort((a, b) => a.localeCompare(b, "es", { numeric: true })), [filas, ahora]);
+  const enSeleccion = (z: string) => zona === "todas" || (zona.startsWith("piso:") ? pisoDe(z) === zona.slice(5) : z === zona);
+  const elegidas = useMemo(() => filas.filter((f) => enSeleccion(f.zona)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filas, zona]);
+
+  // Totales de ahora por piso
+  const pisosAhora = useMemo(() => {
+    const m = new Map<string, { piso: string; total: number; con_agente: number; otros: number; invitados: number; antenas: number }>();
+    for (const z of ahora) {
+      const k = pisoDe(z.zona);
+      const g = m.get(k) ?? { piso: k, total: 0, con_agente: 0, otros: 0, invitados: 0, antenas: 0 };
+      g.total += z.con_agente + z.otros; g.con_agente += z.con_agente; g.otros += z.otros; g.invitados += z.invitados; g.antenas += 1;
+      m.set(k, g);
+    }
+    return [...m.values()].sort((a, b) => a.piso.localeCompare(b.piso, "es", { numeric: true }));
+  }, [ahora]);
+  const totalAhora = pisosAhora.reduce((a, g) => a + g.total, 0);
 
   // Por fecha y hora se suman las zonas elegidas; después se promedia por día de la semana
   const matriz = useMemo(() => {
@@ -70,22 +96,36 @@ export default function Ocupacion() {
   const diasVisibles = DIAS.filter((x) => x.d !== 0 && x.d !== 6 || horas.some((h) => (matriz.valor(x.d, h) ?? 0) > 0));
   const maximo = Math.max(1, ...diasVisibles.flatMap((x) => horas.map((h) => matriz.valor(x.d, h) ?? 0)));
 
-  // Resumen por zona: pico promedio en días hábiles y pico máximo del período
-  const resumen = useMemo(() => listaZonas.map((z) => {
-    const deZona = filas.filter((f) => f.zona === z);
-    const picoPorFecha = new Map<string, number>();
-    deZona.forEach((f) => picoPorFecha.set(f.fecha, Math.max(picoPorFecha.get(f.fecha) ?? 0, f[medida])));
-    const habiles = Array.from(picoPorFecha.entries()).filter(([f]) => ![0, 6].includes(diaSemana(f)));
-    const promedio = habiles.length ? Math.round(habiles.reduce((a, [, v]) => a + v, 0) / habiles.length) : 0;
-    let max = 0; let fechaMax = "";
-    picoPorFecha.forEach((v, f) => { if (v > max) { max = v; fechaMax = f; } });
-    const porDia = DIAS.slice(0, 5).map((x) => {
-      const vals = habiles.filter(([f]) => diaSemana(f) === x.d).map(([, v]) => v);
-      return { t: x.t, v: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0 };
-    });
-    const masConcurrido = porDia.reduce((a, b) => (b.v > a.v ? b : a), porDia[0]);
-    return { zona: z, promedio, max, fechaMax, dia: masConcurrido.v > 0 ? masConcurrido.t : "—" };
-  }), [filas, listaZonas, medida]);
+  // Resumen: pico promedio en días hábiles y pico máximo del período, por piso (suma de sus zonas) y por zona
+  const resumen = useMemo(() => {
+    const calcular = (nombre: string, esPiso: boolean, incluye: (z: string) => boolean) => {
+      const porFechaHora = new Map<string, number>();
+      filas.filter((f) => incluye(f.zona)).forEach((f) => {
+        const k = `${f.fecha}|${f.hora}`;
+        porFechaHora.set(k, (porFechaHora.get(k) ?? 0) + f[medida]);
+      });
+      const picoPorFecha = new Map<string, number>();
+      porFechaHora.forEach((v, k) => { const fecha = k.split("|")[0]; picoPorFecha.set(fecha, Math.max(picoPorFecha.get(fecha) ?? 0, v)); });
+      const habiles = Array.from(picoPorFecha.entries()).filter(([f]) => ![0, 6].includes(diaSemana(f)));
+      const promedio = habiles.length ? Math.round(habiles.reduce((a, [, v]) => a + v, 0) / habiles.length) : 0;
+      let max = 0; let fechaMax = "";
+      picoPorFecha.forEach((v, f) => { if (v > max) { max = v; fechaMax = f; } });
+      const porDia = DIAS.slice(0, 5).map((x) => {
+        const vals = habiles.filter(([f]) => diaSemana(f) === x.d).map(([, v]) => v);
+        return { t: x.t, v: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0 };
+      });
+      const masConcurrido = porDia.reduce((a, b) => (b.v > a.v ? b : a), porDia[0]);
+      return { zona: nombre, esPiso, promedio, max, fechaMax, dia: masConcurrido.v > 0 ? masConcurrido.t : "—" };
+    };
+    const filasResumen: ReturnType<typeof calcular>[] = [];
+    for (const p of listaPisos) {
+      const zonas = listaZonas.filter((z) => pisoDe(z) === p);
+      if (!zonas.length) continue;
+      if (zonas.length > 1 || zonas[0] !== p) filasResumen.push(calcular(p, true, (z) => pisoDe(z) === p));
+      zonas.forEach((z) => filasResumen.push(calcular(z, false, (x) => x === z)));
+    }
+    return filasResumen;
+  }, [filas, listaZonas, listaPisos, medida]);
 
   const color = (v: number | null) => {
     if (!v) return undefined;
@@ -106,15 +146,49 @@ export default function Ocupacion() {
 
       {error && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
 
+      {pisosAhora.length > 0 && (
+        <div>
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <h2 className="text-sm font-medium text-ink">Total por piso · ahora</h2>
+            <span className="text-xs text-ink/50">{totalAhora} dispositivos en total</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {pisosAhora.map((g) => {
+              const activo = zona === `piso:${g.piso}`;
+              return (
+                <button key={g.piso} onClick={() => setZona(activo ? "todas" : `piso:${g.piso}`)} aria-pressed={activo}
+                  className={`card p-5 text-left transition-colors ${activo ? "border-brand-400 bg-brand-500/10" : "hover:border-brand-300"}`}>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium text-ink">{g.piso}</span>
+                    <span className="text-xs text-ink/45">{g.antenas} {g.antenas === 1 ? "antena" : "antenas"}</span>
+                  </div>
+                  <div className="font-display text-4xl mt-1 tabular-nums text-ink">{g.total}</div>
+                  <div className="text-xs text-ink/50 mt-0.5">{g.con_agente} con agente · {g.otros} otros{g.invitados ? ` · ${g.invitados} invitados` : ""}</div>
+                  <div className="h-1.5 rounded-full bg-line/[0.08] overflow-hidden mt-3">
+                    <div className="h-full bg-[#2a78d6] dark:bg-[#3987e5]" style={{ width: `${totalAhora ? Math.max(2, (g.total / totalAhora) * 100) : 0}%` }} />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {ahora.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {ahora.map((z) => (
-            <div key={z.zona} className="card p-5">
-              <div className="text-xs text-ink/50 font-medium">{z.zona} · ahora</div>
-              <div className="font-display text-3xl mt-1 tabular-nums">{z.con_agente + z.otros}</div>
-              <div className="text-xs text-ink/50 mt-0.5">{z.con_agente} con agente · {z.otros} otros{z.invitados ? ` · ${z.invitados} invitados` : ""}</div>
-            </div>
-          ))}
+        <div>
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <h2 className="text-sm font-medium text-ink">Por antena · ahora{zona.startsWith("piso:") ? ` · ${zona.slice(5)}` : ""}</h2>
+            {zona !== "todas" && <button className="text-xs text-brand-600 hover:underline" onClick={() => setZona("todas")}>Ver todas</button>}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {ahora.filter((z) => enSeleccion(z.zona)).map((z) => (
+              <div key={z.zona} className="card p-5">
+                <div className="text-xs text-ink/50 font-medium">{z.zona} · ahora</div>
+                <div className="font-display text-3xl mt-1 tabular-nums">{z.con_agente + z.otros}</div>
+                <div className="text-xs text-ink/50 mt-0.5">{z.con_agente} con agente · {z.otros} otros{z.invitados ? ` · ${z.invitados} invitados` : ""}</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -122,7 +196,14 @@ export default function Ocupacion() {
         <label className="block text-sm"><span className="label">Zona</span>
           <select className="input w-auto" value={zona} onChange={(e) => setZona(e.target.value)}>
             <option value="todas">Todas las zonas</option>
-            {listaZonas.map((z) => <option key={z} value={z}>{z}</option>)}
+            {listaPisos.length > 0 && (
+              <optgroup label="Pisos (suma de sus antenas)">
+                {listaPisos.map((p) => <option key={p} value={`piso:${p}`}>{p}</option>)}
+              </optgroup>
+            )}
+            <optgroup label="Antenas">
+              {listaZonas.map((z) => <option key={z} value={z}>{z}</option>)}
+            </optgroup>
           </select>
         </label>
         <label className="block text-sm"><span className="label">Contar</span>
@@ -187,8 +268,8 @@ export default function Ocupacion() {
             <thead><tr><th>Zona</th><th>Pico promedio (días hábiles)</th><th>Día más concurrido</th><th>Pico máximo del período</th></tr></thead>
             <tbody>
               {resumen.map((r) => (
-                <tr key={r.zona}>
-                  <td className="text-ink font-medium">{r.zona}</td>
+                <tr key={(r.esPiso ? "p:" : "z:") + r.zona} className={r.esPiso ? "bg-line/[0.03]" : ""}>
+                  <td className={r.esPiso ? "text-ink font-semibold" : "text-ink/80 pl-6"}>{r.zona}{r.esPiso && <span className="text-xs font-normal text-ink/50"> · total</span>}</td>
                   <td className="tabular-nums">{r.promedio}</td>
                   <td>{r.dia}</td>
                   <td className="tabular-nums">{r.max}{r.fechaMax && <span className="text-xs text-ink/50"> · {r.fechaMax.split("-").reverse().join("/")}</span>}</td>
