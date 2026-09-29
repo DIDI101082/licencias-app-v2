@@ -6,7 +6,7 @@
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_SWITCHES_VERSION = "1.0";
+export const PUENTE_SWITCHES_VERSION = "1.1";
 
 // Cliente SNMP v2c mínimo (GET y GETBULK). Compatible con Windows PowerShell 5.1.
 const CLIENTE_SNMP = String.raw`using System;
@@ -53,7 +53,7 @@ public static class SnmpAccusys {
       List<byte> t = new List<byte>();
       t.Insert(0, (byte)(n & 0x7F));
       n >>= 7;
-      while (n > 0) { t.Insert(0, (byte)((n & 0x7F) | 0x80)); n >>= 7; }
+      while (n > 0) { t.Insert(0, (byte)((n & 0x7F) + 0x80)); n >>= 7; }
       b.AddRange(t);
     }
     return Tlv(0x06, b.ToArray());
@@ -67,7 +67,7 @@ public static class SnmpAccusys {
     else sb.Append("2.").Append(f - 80);
     long n = 0;
     for (int i = o + 1; i < o + l; i++) {
-      n = (n << 7) | (long)(d[i] & 0x7F);
+      n = n * 128 + (d[i] & 0x7F);
       if ((d[i] & 0x80) == 0) { sb.Append('.').Append(n); n = 0; }
     }
     return sb.ToString();
@@ -90,13 +90,13 @@ public static class SnmpAccusys {
     int l = d[p++];
     if ((l & 0x80) != 0) {
       int n = l & 0x7F; l = 0;
-      for (int i = 0; i < n; i++) l = (l << 8) | d[p++];
+      for (int i = 0; i < n; i++) l = l * 256 + d[p++];
     }
     len = l;
   }
   static long LeerEntero(byte[] d, int o, int l) {
     long v = (l > 0 && (d[o] & 0x80) != 0) ? -1 : 0;
-    for (int i = 0; i < l; i++) v = (v << 8) | d[o + i];
+    for (int i = 0; i < l; i++) v = v * 256 + d[o + i];
     return v;
   }
   static List<Vb> Decodificar(byte[] d, int id) {
@@ -196,7 +196,7 @@ public static class SnmpAccusys {
     for (int i = 0; i < v.Valor.Length; i++) { if (i > 0) sb.Append(':'); sb.Append(v.Valor[i].ToString("x2")); }
     return sb.ToString();
   }
-  static ulong Sin(byte[] b) { ulong v = 0; foreach (byte c in b) v = (v << 8) | c; return v; }
+  static ulong Sin(byte[] b) { ulong v = 0; foreach (byte c in b) v = v * 256 + c; return v; }
   public static string Sufijo(Vb v, string raiz) { return v.Oid.Length > raiz.Length + 1 ? v.Oid.Substring(raiz.Length + 1) : ""; }
 }
 `;
@@ -363,7 +363,8 @@ $Carpeta     = 'C:\ProgramData\AccusysPuenteSwitches'
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 if (-not ('SnmpAccusys' -as [type])) {
-  Add-Type -TypeDefinition ([Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('__CLIENTE__')))
+  try { Add-Type -TypeDefinition ([Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('__CLIENTE__'))) -IgnoreWarnings }
+  catch { Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' [cliente SNMP] ' + $_.Exception.Message); exit 1 }
 }
 
 __COLECTOR__
@@ -383,7 +384,9 @@ try {
   Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value $linea
 }
 catch {
-  Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+  $d = $_.Exception.Message
+  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $d = $d + ' | ' + $_.ErrorDetails.Message }
+  Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + ($d -replace '\s+', ' '))
   exit 1
 }
 `;
