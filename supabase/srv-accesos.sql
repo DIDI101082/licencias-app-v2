@@ -20,6 +20,8 @@ create table if not exists public.srv_accesos_config (
   dias_historial int not null default 180 check (dias_historial between 30 and 730)
 );
 insert into public.srv_accesos_config (id) values (1) on conflict (id) do nothing;
+-- Avisar por Teams cada inicio de sesión (no solo los sospechosos)
+alter table public.srv_accesos_config add column if not exists alertar_todos boolean not null default false;
 
 create table if not exists public.srv_accesos (
   id bigserial primary key,
@@ -118,7 +120,8 @@ begin
     hora_desde = coalesce((p ->> 'hora_desde')::int, hora_desde),
     hora_hasta = coalesce((p ->> 'hora_hasta')::int, hora_hasta),
     fines_de_semana = coalesce((p ->> 'fines_de_semana')::boolean, fines_de_semana),
-    umbral_fallos = coalesce((p ->> 'umbral_fallos')::int, umbral_fallos)
+    umbral_fallos = coalesce((p ->> 'umbral_fallos')::int, umbral_fallos),
+    alertar_todos = coalesce((p ->> 'alertar_todos')::boolean, alertar_todos)
   where id = 1;
 end $$;
 revoke execute on function public.srv_accesos_config_guardar(jsonb) from public, anon;
@@ -178,14 +181,27 @@ begin
     from srv_sesiones where fecha > now() - interval '24 hours' and cuenta_local
   on conflict do nothing;
 
-  if c.alertar_primer_acceso then
+  -- Cada inicio de sesión (aviso informativo, con sus marcas); reemplaza a los avisos de primer acceso y fuera de horario
+  if c.alertar_todos then
+    insert into _cond select 'acc:ingreso:' || id, 'acceso', case when primer_acceso or fuera_horario then 'media' else 'info' end,
+           'Ingreso a ' || servidor || ': ' || usuario,
+           concat_ws(' · ', case logon_type when 10 then 'Escritorio remoto' when 2 then 'Consola' when 11 then 'Consola sin dominio' else 'Tipo ' || logon_type end,
+                     'desde ' || coalesce(ip || coalesce(' (' || origen || ')', ''), origen),
+                     to_char(fecha at time zone 'America/Argentina/Buenos_Aires', 'DD/MM HH24:MI'),
+                     case when primer_acceso then 'primer acceso a este servidor' end,
+                     case when fuera_horario then 'fuera de horario' end), '/servidores/accesos'
+      from srv_sesiones where fecha > now() - interval '24 hours' and autorizado is distinct from false and not cuenta_local
+    on conflict do nothing;
+  end if;
+
+  if c.alertar_primer_acceso and not c.alertar_todos then
     insert into _cond select 'acc:primero:' || id, 'acceso', 'media', 'Primer acceso de ' || usuario || ' a ' || servidor,
            concat_ws(' · ', 'desde ' || coalesce(ip, origen), to_char(fecha at time zone 'America/Argentina/Buenos_Aires', 'DD/MM HH24:MI')), '/servidores/accesos'
       from srv_sesiones where fecha > now() - interval '24 hours' and primer_acceso and autorizado is distinct from false
     on conflict do nothing;
   end if;
 
-  if c.alertar_fuera_horario then
+  if c.alertar_fuera_horario and not c.alertar_todos then
     insert into _cond select 'acc:horario:' || id, 'acceso', 'media', 'Acceso fuera de horario a ' || servidor || ': ' || usuario,
            concat_ws(' · ', 'desde ' || coalesce(ip, origen), to_char(fecha at time zone 'America/Argentina/Buenos_Aires', 'Dy DD/MM HH24:MI')), '/servidores/accesos'
       from srv_sesiones where fecha > now() - interval '24 hours' and fuera_horario and autorizado is distinct from false and not cuenta_local

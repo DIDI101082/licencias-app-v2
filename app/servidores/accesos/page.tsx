@@ -13,7 +13,7 @@ type Sesion = {
 type Fallo = { id: number; dispositivo_id: string; hostname: string | null; fecha: string; usuario: string; dominio: string | null; logon_type: number | null; ip: string | null; origen: string | null; motivo: string | null };
 type Equipo = { dispositivo_id: string; servidor: string; hostname: string | null; ultimo_evento: string; autorizados: number };
 type Autorizado = { dispositivo_id: string; usuario: string; agregado_en: string };
-type Config = { alertas: boolean; alertar_primer_acceso: boolean; alertar_fuera_horario: boolean; hora_desde: number; hora_hasta: number; fines_de_semana: boolean; umbral_fallos: number };
+type Config = { alertas: boolean; alertar_todos?: boolean; alertar_primer_acceso: boolean; alertar_fuera_horario: boolean; hora_desde: number; hora_hasta: number; fines_de_semana: boolean; umbral_fallos: number };
 
 const TIPO: Record<number, string> = { 2: "Consola", 10: "Escritorio remoto", 11: "Consola (sin conexión al dominio)", 3: "Red" };
 const MOTIVO: Record<string, string> = {
@@ -154,11 +154,15 @@ export default function Accesos() {
               Enviar alertas de accesos (no autorizados, cuentas locales o genéricas e intentos fallidos)
             </label>
             <label className="flex items-center gap-2 text-sm pl-6">
-              <input type="checkbox" disabled={!cfg.alertas} checked={cfg.alertar_primer_acceso} onChange={(e) => setCfg({ ...cfg, alertar_primer_acceso: e.target.checked })} />
+              <input type="checkbox" disabled={!cfg.alertas} checked={!!cfg.alertar_todos} onChange={(e) => setCfg({ ...cfg, alertar_todos: e.target.checked })} />
+              Avisar cada inicio de sesión en un servidor (usuario, tipo, desde dónde y hora), no solo los sospechosos
+            </label>
+            <label className="flex items-center gap-2 text-sm pl-6">
+              <input type="checkbox" disabled={!cfg.alertas || !!cfg.alertar_todos} checked={cfg.alertar_primer_acceso} onChange={(e) => setCfg({ ...cfg, alertar_primer_acceso: e.target.checked })} />
               Avisar la primera vez que un usuario entra a un servidor
             </label>
             <label className="flex items-center gap-2 text-sm pl-6">
-              <input type="checkbox" disabled={!cfg.alertas} checked={cfg.alertar_fuera_horario} onChange={(e) => setCfg({ ...cfg, alertar_fuera_horario: e.target.checked })} />
+              <input type="checkbox" disabled={!cfg.alertas || !!cfg.alertar_todos} checked={cfg.alertar_fuera_horario} onChange={(e) => setCfg({ ...cfg, alertar_fuera_horario: e.target.checked })} />
               Avisar los accesos fuera de horario
             </label>
             <div className="flex flex-wrap gap-3 items-end">
