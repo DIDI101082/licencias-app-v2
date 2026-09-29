@@ -5,7 +5,7 @@
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_UNIFI_VERSION = "1.0";
+export const PUENTE_UNIFI_VERSION = "1.1";
 
 const PUENTE = String.raw`# Puente UniFi -> Accusys Cyber: envia el estado de la red UniFi a la app cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -47,13 +47,23 @@ if ($IgnorarCert) {
 
 $Base = $UdmUrl.TrimEnd('/')
 $sesion = $null
+$paso = 'UDM (login)'
+try {
 if (-not $ApiKey) {
   # Alternativa sin clave de API: usuario local de la UDM (conviene que sea de solo lectura)
   $login = ConvertTo-Json @{ username = $Usuario; password = $Clave; rememberMe = $false } -Compress
   Invoke-WebRequest -Uri ($Base + '/api/auth/login') -Method Post -Body $login -ContentType 'application/json' -SessionVariable sesion -UseBasicParsing -TimeoutSec 30 | Out-Null
 }
+} catch {
+  $d = $_.Exception.Message
+  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $d = $d + ' | ' + $_.ErrorDetails.Message }
+  $d = ($d -replace '\s+', ' ')
+  Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' [UDM (login)] ' + $d)
+  exit 1
+}
 
 function Unifi($ruta) {
+  $script:paso = 'UDM ' + $ruta
   $u = $Base + '/proxy/network' + $ruta
   if ($ApiKey) {
     $r = Invoke-RestMethod -Uri $u -Method Get -Headers @{ 'X-API-KEY' = $ApiKey; 'Accept' = 'application/json' } -TimeoutSec 90
@@ -128,13 +138,17 @@ try {
   $datos = [ordered]@{ version = $Version; equipos = $equipos; redes = $redes; clientes = $clientes; vecinas = $vecinas }
   $cuerpo = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_datos":' + (ConvertTo-Json -InputObject $datos -Depth 6 -Compress) + '}'
   $headers = @{ apikey = $AnonKey; Authorization = ('Bearer ' + $AnonKey) }
+  $paso = 'App (envio a Accusys Cyber)'
   Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/unifi_reportar') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpo)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 90 | Out-Null
   $linea = 'OK ' + (Get-Date).ToString('s') + ' ' + $equipos.Count + ' equipos UniFi, ' + $clientes.Count + ' clientes, ' + $vecinas.Count + ' redes vecinas'
   if ($avisos.Count) { $linea = $linea + ' | avisos: ' + ($avisos -join '; ') }
   Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value $linea
 }
 catch {
-  Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+  $d = $_.Exception.Message
+  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $d = $d + ' | ' + $_.ErrorDetails.Message }
+  $d = ($d -replace '\s+', ' ')
+  Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' [' + $paso + '] ' + $d)
   exit 1
 }
 `;
