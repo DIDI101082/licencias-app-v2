@@ -35,7 +35,8 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
   const [actas, setActas] = useState<any[]>([]);
   const [acta, setActa] = useState<"entrega" | "devolucion" | null>(null);
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
-  const { puedeEditar } = usePerfil();
+  const { puedeEditar, verPagina } = usePerfil();
+  const verMovimientos = verPagina("/empleados/movimientos");
   const router = useRouter();
 
   async function iniciar(tipo: "alta" | "baja") {
@@ -139,7 +140,7 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
             <span className={`pill ${emp.activo ? "bg-emerald-50 text-emerald-700" : "bg-line/[0.05] text-ink/50"}`}>{emp.activo ? "Activo" : "Inactivo"}</span>
             {emp.entra_id && <span className="pill bg-brand-50 text-brand-700">Sincronizado con Entra ID</span>}
             {!emp.activo && equipos.length > 0 && <span className="pill bg-red-50 text-red-600">Tiene equipos para recuperar</span>}
-            {movs.filter((m) => m.estado === "abierto").map((m) => (
+            {verMovimientos && movs.filter((m) => m.estado === "abierto").map((m) => (
               <Link key={m.id} href={`/empleados/movimientos/${m.id}`} className={`pill ${m.tipo === "alta" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"} hover:underline`}>
                 {m.tipo === "alta" ? "Alta en curso" : "Baja en curso"} →
               </Link>
@@ -150,7 +151,7 @@ export default function FichaEmpleado({ params }: { params: { id: string } }) {
           <div className="flex gap-2 flex-wrap print:hidden">
             <button className="btn-secondary" onClick={() => setActa("entrega")}>Acta de entrega</button>
             <button className="btn-secondary" onClick={() => setActa("devolucion")}>Acta de devolución</button>
-            {!movs.some((m) => m.estado === "abierto") && (
+            {verMovimientos && !movs.some((m) => m.estado === "abierto") && (
               <button className="btn-secondary" onClick={() => iniciar(emp.activo ? "baja" : "alta")}>
                 {emp.activo ? "Iniciar baja" : "Iniciar alta"}
               </button>

@@ -20,7 +20,8 @@ const RAPIDAS = [
 type Cargado = { id: string; codigo: string; serie: string; asignado?: string };
 
 export default function Escanear() {
-  const { perfil, puedeEditar, esAdmin } = usePerfil();
+  const { perfil, puedeEditar, esAdmin, verPagina } = usePerfil();
+  const verFichas = verPagina("/inventario/equipos");
   const areaFija = !esAdmin && perfil?.rol === "lectura_escritura" ? perfil.area : null;
 
   const [cats, setCats] = useState<any[]>([]);
@@ -355,7 +356,7 @@ export default function Escanear() {
       {aviso && (
         <div role="status" className={`rounded-md px-3 py-2 text-sm ${aviso.tipo === "ok" ? "bg-emerald-50 text-emerald-700" : aviso.tipo === "duplicado" ? "bg-amber-500/10 text-amber-800" : "bg-red-50 text-red-600"}`}>
           {aviso.texto}{" "}
-          {aviso.id && <Link href={`/inventario/equipos/${aviso.id}`} className="underline">Ver ficha</Link>}
+          {aviso.id && verFichas && <Link href={`/inventario/equipos/${aviso.id}`} className="underline">Ver ficha</Link>}
         </div>
       )}
 
@@ -372,7 +373,7 @@ export default function Escanear() {
             {cargados.map((c) => (
               <li key={c.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
                 <span className="flex items-center gap-2 min-w-0">
-                  <Link href={`/inventario/equipos/${c.id}`} className={claseCodigo(c.codigo)}>{c.codigo}</Link>
+                  {verFichas ? <Link href={`/inventario/equipos/${c.id}`} className={claseCodigo(c.codigo)}>{c.codigo}</Link> : <span className={claseCodigo(c.codigo)}>{c.codigo}</span>}
                   <span className="truncate text-ink/70">{c.serie}</span>
                 </span>
                 <button className="text-xs text-ink/40 hover:text-red-600 shrink-0" onClick={() => deshacer(c)}>Deshacer</button>

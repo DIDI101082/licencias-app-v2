@@ -6,118 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Mark from "./Mark";
 import { moduloDeRuta } from "@/lib/modulos";
+import { MENU as modulos, esActual as coincide, paginasHabilitadas, inicioPermitido, type PaginasGrupo } from "@/lib/menu";
 import { type Tema, temaGuardado, guardarTema, aplicarTema } from "@/lib/tema";
-
-// Cada solapa es un módulo con sus propias secciones
-const modulos = [
-  {
-    id: "empleados",
-    label: "Empleados",
-    inicio: "/empleados",
-    links: [
-      { href: "/empleados", label: "Empleados" },
-      { href: "/empleados/movimientos", label: "Altas y bajas" },
-    ],
-    admin: [] as { href: string; label: string }[],
-  },
-  {
-    id: "licencias",
-    label: "Licencias",
-    inicio: "/",
-    links: [
-      { href: "/", label: "Panel" },
-      { href: "/licencias", label: "Licencias" },
-      { href: "/asignaciones", label: "Asignaciones" },
-      { href: "/reportes", label: "Reportes" },
-      { href: "/vencimientos", label: "Vencimientos" },
-    ],
-    admin: [] as { href: string; label: string }[],
-  },
-  {
-    id: "inventario",
-    label: "Inventario IT",
-    inicio: "/inventario",
-    links: [
-      { href: "/inventario", label: "Panel" },
-      { href: "/inventario/equipos", label: "Equipos" },
-      { href: "/inventario/escanear", label: "Escanear" },
-      { href: "/inventario/personas", label: "Por persona" },
-      { href: "/inventario/monitoreo", label: "Monitoreo" },
-      { href: "/inventario/aplicaciones", label: "Aplicaciones" },
-    ],
-    admin: [{ href: "/inventario/catalogos", label: "Categorías y ubicaciones" }],
-  },
-  {
-    id: "seguridad",
-    label: "Seguridad",
-    inicio: "/inventario/seguridad",
-    links: [
-      { href: "/inventario/cumplimiento", label: "Cumplimiento" },
-      { href: "/inventario/seguridad", label: "Estado de los equipos" },
-      { href: "/inventario/riesgos", label: "Riesgos" },
-      { href: "/inventario/vulnerabilidades", label: "Vulnerabilidades" },
-      { href: "/inventario/identidad", label: "Identidad" },
-      { href: "/inventario/ad", label: "Active Directory" },
-      { href: "/inventario/wifi", label: "WiFi" },
-      { href: "/inventario/incidentes", label: "Incidentes" },
-      { href: "/inventario/backups", label: "Backups" },
-      { href: "/inventario/concientizacion", label: "Concientización" },
-    ],
-    admin: [] as { href: string; label: string }[],
-  },
-  {
-    id: "ubicacion",
-    label: "Home office",
-    titulo: "Oficina / Home office",
-    inicio: "/inventario/ubicacion",
-    links: [
-      { href: "/inventario/ubicacion", label: "Dónde están los equipos" },
-      { href: "/inventario/ubicacion/asistencia", label: "Asistencia semanal" },
-      { href: "/inventario/ubicacion/ocupacion", label: "Ocupación por piso" },
-    ],
-    admin: [] as { href: string; label: string }[],
-  },
-  {
-    id: "red",
-    label: "Red",
-    titulo: "Monitoreo de red",
-    inicio: "/red",
-    links: [
-      { href: "/red", label: "Mapas de PRTG" },
-      { href: "/red/switches", label: "Switches" },
-      { href: "/red/fortigate", label: "FortiGate" },
-    ],
-    admin: [] as { href: string; label: string }[],
-  },
-  {
-    id: "servidores",
-    label: "Servidores",
-    titulo: "Servidores: estado, parches y backups",
-    inicio: "/servidores",
-    links: [
-      { href: "/servidores", label: "Estado" },
-      { href: "/servidores/parches", label: "Parches y fin de soporte" },
-      { href: "/servidores/backups", label: "Backups" },
-      { href: "/servidores/accesos", label: "Accesos" },
-      { href: "/servidores/virtualizacion", label: "Virtualización" },
-      { href: "/servidores/storage", label: "Storage" },
-    ],
-    admin: [{ href: "/servidores/configuracion", label: "Configuración" }],
-  },
-  {
-    id: "auditoria",
-    label: "Logs",
-    titulo: "Registro de cambios, accesos y alertas",
-    inicio: "/auditoria",
-    links: [
-      { href: "/auditoria", label: "Cambios" },
-      { href: "/auditoria/sesiones", label: "Inicios de sesión" },
-      { href: "/auditoria/alertas", label: "Alertas" },
-      { href: "/auditoria/revision", label: "Revisión de accesos" },
-    ],
-    admin: [] as { href: string; label: string }[],
-  },
-];
 
 const rolLabel: Record<string, string> = {
   administrador: "Administrador",
@@ -125,22 +15,19 @@ const rolLabel: Record<string, string> = {
   solo_lectura: "Solo lectura",
 };
 
-export default function Nav({ nombre, rol, modulos: permitidos }: { nombre: string; rol: string; modulos: string[] }) {
+export default function Nav({ nombre, rol, modulos: permitidos, paginas }: { nombre: string; rol: string; modulos: string[]; paginas?: PaginasGrupo | null }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
   const esAdmin = rol === "administrador";
 
   // Solo las solapas habilitadas para el grupo de acceso del usuario
-  const visibles = modulos.filter((m) => permitidos.includes(m.id));
+  // (y, si el grupo tiene páginas restringidas, solo esas páginas; la solapa abre en la primera habilitada)
+  const visibles = modulos.filter((m) => permitidos.includes(m.id)).map((m) => ({ ...m, inicio: inicioPermitido(paginas, m) }));
   const activo = visibles.find((m) => m.id === moduloDeRuta(pathname)) ?? visibles[0] ?? modulos[0];
-  const subLinks = [...activo.links, ...(esAdmin ? activo.admin : [])];
-
-  function esActual(href: string) {
-    if (href === "/" || href === "/inventario" || href === "/inventario/ubicacion" || href === "/auditoria" || href === "/servidores" || href === "/red") return pathname === href;
-    if (href === "/empleados") return pathname === href || (/^\/empleados\/[^/]+$/.test(pathname) && !pathname.startsWith("/empleados/movimientos"));
-    return pathname.startsWith(href);
-  }
+  const habilitadas = paginasHabilitadas(paginas, activo.id);
+  const subLinks = [...activo.links, ...(esAdmin ? activo.admin : [])].filter((l) => !habilitadas || habilitadas.includes(l.href));
+  const esActual = (href: string) => coincide(href, pathname);
 
   async function salir() {
     // queda registrada la salida en Logs (si falla, se cierra la sesión igual)
