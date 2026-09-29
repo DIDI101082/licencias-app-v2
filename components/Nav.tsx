@@ -98,6 +98,7 @@ const modulos = [
       { href: "/servidores", label: "Estado" },
       { href: "/servidores/parches", label: "Parches y fin de soporte" },
       { href: "/servidores/backups", label: "Backups" },
+      { href: "/servidores/accesos", label: "Accesos" },
     ],
     admin: [{ href: "/servidores/configuracion", label: "Configuración" }],
   },

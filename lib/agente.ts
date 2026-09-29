@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.8";
+export const AGENTE_VERSION = "1.9";
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -486,6 +486,67 @@ try {
 }
 catch {
   Set-Content -Path (Join-Path $Carpeta 'ultima-seguridad.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+}
+
+# ---- Accesos (solo servidores): inicios de sesion por consola y Escritorio remoto, cierres e intentos fallidos ----
+try {
+  if ($os -and [int]$os.ProductType -ne 1 -and $Estado -eq 'aprobado') {
+    $archivoAcc = Join-Path $Carpeta 'accesos.ultimo'
+    $ultimoAcc = $null
+    if (Test-Path $archivoAcc) { $ultimoAcc = (Get-Content $archivoAcc -Raw).Trim() }
+    if ($ultimoAcc -match '^\d+$') { $condAcc = 'EventRecordID &gt; ' + $ultimoAcc } else { $condAcc = 'TimeCreated[timediff(@SystemTime) &lt;= 604800000]' }
+    $ltOk = (@('2', '10', '11') | ForEach-Object { "Data[@Name='LogonType']='" + $_ + "'" }) -join ' or '
+    $ltFallo = (@('2', '3', '10') | ForEach-Object { "Data[@Name='LogonType']='" + $_ + "'" }) -join ' or '
+    $xmlAcc = '<QueryList><Query Id="0" Path="Security">' +
+      '<Select Path="Security">*[System[(EventID=4624 or EventID=4634) and ' + $condAcc + '] and EventData[' + $ltOk + ']]</Select>' +
+      '<Select Path="Security">*[System[(EventID=4625) and ' + $condAcc + '] and EventData[' + $ltFallo + ']]</Select>' +
+      '<Select Path="Security">*[System[(EventID=4647) and ' + $condAcc + ']]</Select>' +
+      '</Query></QueryList>'
+    $evsAcc = @()
+    try { $evsAcc = @(Get-WinEvent -FilterXml ([xml]$xmlAcc) -Oldest -MaxEvents 1500) }
+    catch { if ($_.FullyQualifiedErrorId -notmatch 'NoMatchingEventsFound' -and $_.Exception.Message -notmatch 'No events|No se encontraron') { throw } }
+    $sistema = @('SYSTEM', 'ANONYMOUS LOGON', 'LOCAL SERVICE', 'NETWORK SERVICE', '-', '')
+    $accesos = New-Object System.Collections.ArrayList
+    $maxAcc = $ultimoAcc
+    foreach ($e in ($evsAcc | Sort-Object RecordId)) {
+      if (-not $maxAcc -or [int64]$e.RecordId -gt [int64]$maxAcc) { $maxAcc = [string]$e.RecordId }
+      $d = @{}
+      try { foreach ($n in ([xml]$e.ToXml()).Event.EventData.Data) { $d[[string]$n.Name] = [string]$n.'#text' } } catch { continue }
+      $u = [string]$d['TargetUserName']
+      if ($sistema -contains $u.ToUpper() -or $u -match '\$$' -or $u -match '^(DWM-|UMFD-)') { continue }
+      $id = [int]$e.Id
+      # Un administrador por RDP genera dos inicios enlazados (token completo y filtrado): se guarda uno solo
+      if ($id -eq 4624 -and $d['TargetLinkedLogonId'] -and $d['TargetLinkedLogonId'] -ne '0x0' -and $d['ElevatedToken'] -eq '%%1843') { continue }
+      $tipoAcc = 'fin'
+      if ($id -eq 4624) { $tipoAcc = 'inicio' } elseif ($id -eq 4625) { $tipoAcc = 'fallo' }
+      $ipAcc = $d['IpAddress']
+      if ($ipAcc) { $ipAcc = ($ipAcc -replace '^::ffff:', ''); if ($ipAcc -in @('-', '::1', '127.0.0.1')) { $ipAcc = $null } }
+      $motivoAcc = $null
+      if ($id -eq 4625) { $motivoAcc = $d['SubStatus']; if (-not $motivoAcc -or $motivoAcc -eq '0x0') { $motivoAcc = $d['Status'] } }
+      $lt = $null
+      if ($d['LogonType'] -match '^\d+$') { $lt = [int]$d['LogonType'] }
+      $origenAcc = $d['WorkstationName']
+      if ($origenAcc -eq '-') { $origenAcc = $null }
+      [void]$accesos.Add([ordered]@{
+        record_id = [int64]$e.RecordId; fecha = $e.TimeCreated.ToUniversalTime().ToString('o'); tipo = $tipoAcc
+        usuario = $u; dominio = $d['TargetDomainName']; logon_type = $lt; ip = $ipAcc; origen = $origenAcc
+        logon_id = $d['TargetLogonId']; motivo = $motivoAcc
+      })
+    }
+    if ($accesos.Count -gt 0) {
+      $jsonAcc = ConvertTo-Json -InputObject ([ordered]@{ eventos = $accesos }) -Depth 4 -Compress
+      $cuerpoAcc = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
+                   ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_secreto":' + (ConvertTo-Json ([string]$Secreto)) + ',"p_datos":' + $jsonAcc + '}'
+      Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/srv_reportar_accesos') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoAcc)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 60 | Out-Null
+    }
+    if ($maxAcc) { Set-Content -Path $archivoAcc -Value $maxAcc }
+    Set-Content -Path (Join-Path $Carpeta 'ultimos-accesos.txt') -Value ('OK ' + (Get-Date).ToString('s') + ' ' + $accesos.Count + ' eventos de acceso')
+  }
+}
+catch {
+  $dAcc = $_.Exception.Message
+  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $dAcc = $dAcc + ' | ' + $_.ErrorDetails.Message }
+  Set-Content -Path (Join-Path $Carpeta 'ultimos-accesos.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + ($dAcc -replace '\s+', ' '))
 }
 `;
 
