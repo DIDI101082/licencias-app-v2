@@ -86,6 +86,9 @@ export default function Ubicacion() {
   const [ahora, setAhora] = useState(Date.now());
   const [filtro, setFiltro] = useState<Tipo | null>(null);
   const [verRedes, setVerRedes] = useState(false);
+  const [texto, setTexto] = useState("");
+  const [red, setRed] = useState("");
+  const [pagina, setPagina] = useState(1);
   // Antena UniFi de cada equipo (si está conectado el puente de UniFi)
   const [uni, setUni] = useState<{ actualizado: string | null; dispositivos: { dispositivo_id: string; zona: string; antena: string | null; ssid: string | null }[];
     zonas: { zona: string; con_agente: number; otros: number; invitados: number }[] } | null>(null);
@@ -119,7 +122,6 @@ export default function Ubicacion() {
   const tipoDe = (d: any): Tipo | "desconocido" => (d.ubicacion_tipo as Tipo) ?? "desconocido";
   const cuenta = (t: Tipo) => conectados.filter((d) => tipoDe(d) === t).length;
   const sinDatos = conectados.filter((d) => !d.ubicacion_tipo).length;
-  const filas = filtro ? conectados.filter((d) => tipoDe(d) === filtro) : conectados;
 
   // Oficina por sede y piso/red
   const porRed = useMemo(() => {
@@ -150,7 +152,29 @@ export default function Ubicacion() {
   const uniFresco = !!uni?.actualizado && ahora - Date.parse(uni.actualizado) < 30 * 60000;
   const zonaDe = useMemo(() => new Map((uniFresco ? uni?.dispositivos ?? [] : []).map((x) => [x.dispositivo_id, x])), [uni, uniFresco]);
   const zonas = uniFresco ? uni?.zonas ?? [] : [];
+  useEffect(() => { setPagina(1); }, [filtro, red, texto]);
   const hayHistorial = dias.some((d) => d.oficina + d.casa > 0);
+
+  // Red o piso de cada equipo, tal como se muestra en la columna "Red"
+  const redDe = (d: any) => d.ubicacion_red ?? (tipoDe(d) === "remoto" ? "Red de su casa" : "Sin datos");
+  const redes = useMemo(() => {
+    const m = new Map<string, number>();
+    conectados.filter((d) => !filtro || tipoDe(d) === filtro).forEach((d) => m.set(redDe(d), (m.get(redDe(d)) ?? 0) + 1));
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0], "es", { numeric: true }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conectados, filtro]);
+  const filas = conectados.filter((d) => {
+    if (filtro && tipoDe(d) !== filtro) return false;
+    if (red && redDe(d) !== red) return false;
+    const q = texto.trim().toLowerCase();
+    return !q || [d.hostname, d.usuario, d.ip, d.ssid, d.ubicacion_red, d.ubicacion_sede, d.inv_equipos?.codigo, zonaDe.get(d.id)?.zona]
+      .some((v) => v && String(v).toLowerCase().includes(q));
+  });
+  // Paginación de a 50; al cambiar un filtro se vuelve a la primera página
+  const POR_PAGINA = 50;
+  const paginas = Math.max(1, Math.ceil(filas.length / POR_PAGINA));
+  const paginaActual = Math.min(pagina, paginas);
+  const visibles = filas.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA);
 
   return (
     <div className="space-y-6">
@@ -253,11 +277,26 @@ export default function Ubicacion() {
         </div>
       </div>
 
+      <div className="flex gap-3 flex-wrap">
+        <input type="search" className="input flex-1 min-w-[14rem]" placeholder="Buscar por equipo, usuario, IP, red o WiFi…"
+          value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Buscar" />
+        <select className="input w-auto" value={red} onChange={(e) => setRed(e.target.value)} aria-label="Red o piso">
+          <option value="">Todas las redes y pisos</option>
+          {red && !redes.some(([r]) => r === red) && <option value={red}>{red} (0)</option>}
+          {redes.map(([r, n]) => <option key={r} value={r}>{r} ({n})</option>)}
+        </select>
+        {(texto || red || filtro) && (
+          <button className="text-sm text-ink/50 hover:text-ink hover:underline" onClick={() => { setTexto(""); setRed(""); setFiltro(null); }}>
+            Limpiar filtros
+          </button>
+        )}
+      </div>
+
       <div className="card overflow-x-auto">
         <table className="data w-full">
           <thead><tr><th>Equipo</th><th>Ubicación</th><th>Red</th><th>IP</th><th>Último reporte</th></tr></thead>
           <tbody>
-            {filas.map((d) => {
+            {visibles.map((d) => {
               const t = tipoDe(d);
               const ipVpn = (d.redes ?? []).find((r: any) => /^192\.168\.51\./.test(r.ip))?.ip;
               const ipPrincipal = (d.redes ?? []).find((r: any) => r.gateway)?.ip ?? d.ip;
@@ -283,11 +322,31 @@ export default function Ubicacion() {
               );
             })}
             {filas.length === 0 && (
-              <tr><td colSpan={5} className="text-center text-ink/40 py-10">{filtro ? "Ningún equipo en esta situación ahora." : "No hay equipos conectados en este momento."}</td></tr>
+              <tr><td colSpan={5} className="text-center text-ink/40 py-10">
+                {texto || red ? "Ningún equipo coincide con el filtro." : filtro ? "Ningún equipo en esta situación ahora." : "No hay equipos conectados en este momento."}
+              </td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {filas.length > POR_PAGINA && (
+        <nav aria-label="Páginas de equipos" className="flex items-center justify-between gap-3 flex-wrap text-sm">
+          <span className="text-ink/60">
+            Mostrando {(paginaActual - 1) * POR_PAGINA + 1}–{Math.min(paginaActual * POR_PAGINA, filas.length)} de {filas.length} equipos
+          </span>
+          <div className="flex items-center gap-1">
+            <button className="btn-secondary px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed" disabled={paginaActual === 1} onClick={() => setPagina(paginaActual - 1)}>Anterior</button>
+            {Array.from({ length: paginas }, (_, i) => i + 1).map((n) => (
+              <button key={n} onClick={() => setPagina(n)} aria-current={n === paginaActual ? "page" : undefined}
+                className={`min-w-[2.25rem] px-2 py-1.5 rounded-lg tabular-nums transition-colors ${n === paginaActual ? "bg-brand-600 text-white font-medium" : "text-ink/60 hover:bg-line/[0.06] hover:text-ink"}`}>
+                {n}
+              </button>
+            ))}
+            <button className="btn-secondary px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed" disabled={paginaActual === paginas} onClick={() => setPagina(paginaActual + 1)}>Siguiente</button>
+          </div>
+        </nav>
+      )}
       <p className="text-xs text-ink/50">
         Registrar desde dónde trabaja cada persona es información sobre el personal: conviene que el esquema esté informado a los empleados y
         validado con RRHH.
