@@ -45,3 +45,21 @@ export function guardarDiseno(d: Diseno) {
 
 // Igual que el tema: se aplica antes de dibujar, para que el menú no salte al cargar
 export const SCRIPT_MENU = `(function(){try{if(localStorage.getItem("${CLAVE_MENU}")==="lateral")document.documentElement.classList.add("menu-lateral")}catch(e){}})()`;
+
+// Ancho del contenido: centrado (predeterminado) o completo, usando todo el ancho de la pantalla.
+export type Ancho = "normal" | "completo";
+const CLAVE_ANCHO = "accusys-ancho";
+
+export function anchoGuardado(): Ancho {
+  try { return localStorage.getItem(CLAVE_ANCHO) === "completo" ? "completo" : "normal"; } catch { return "normal"; }
+}
+
+export function guardarAncho(a: Ancho) {
+  try {
+    if (a === "normal") localStorage.removeItem(CLAVE_ANCHO);
+    else localStorage.setItem(CLAVE_ANCHO, a);
+  } catch {}
+  document.documentElement.classList.toggle("ancho-completo", a === "completo");
+}
+
+export const SCRIPT_ANCHO = `(function(){try{if(localStorage.getItem("${CLAVE_ANCHO}")==="completo")document.documentElement.classList.add("ancho-completo")}catch(e){}})()`;

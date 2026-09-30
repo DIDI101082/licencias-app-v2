@@ -157,3 +157,6 @@ html.dark .marca:not(.claro *) { filter: brightness(0) invert(1); }
   .nav-lateral { display: none !important; }
   html.menu-lateral body { padding-left: 0; }
 }
+
+/* Ancho completo (preferencia de cada usuario, se elige en el menú de la cuenta) */
+html.ancho-completo .contenedor-ancho { max-width: none; }

@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Mark from "./Mark";
 import { temasVisibles, ubicar, type PaginasGrupo } from "@/lib/menu";
-import { type Tema, type Diseno, temaGuardado, guardarTema, aplicarTema, disenoGuardado, guardarDiseno } from "@/lib/tema";
+import { type Tema, type Diseno, type Ancho, temaGuardado, guardarTema, aplicarTema, disenoGuardado, guardarDiseno, anchoGuardado, guardarAncho } from "@/lib/tema";
 import Buscador from "./Buscador";
 
 const rolLabel: Record<string, string> = {
@@ -56,7 +56,7 @@ export default function Nav({ nombre, rol, modulos: permitidos, paginas }: { nom
     <>
       {/* Diseño 1: solapas arriba */}
       <header className="nav-superior border-b border-line/[0.06] bg-surface print:hidden">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 pt-4 flex flex-wrap md:flex-nowrap items-center gap-x-3 sm:gap-x-5 gap-y-2">
+        <div className="contenedor-ancho mx-auto max-w-7xl px-4 sm:px-6 pt-4 flex flex-wrap md:flex-nowrap items-center gap-x-3 sm:gap-x-5 gap-y-2">
           <Link href={solapas[0]?.inicio ?? "/"} className="flex items-end gap-1.5 shrink-0" aria-label="Accusys Cyber, inicio">
             <Mark className="h-6" />
             <span className="font-display font-extrabold text-lg text-brand-600 leading-none tracking-tight">Cyber</span>
@@ -70,7 +70,7 @@ export default function Nav({ nombre, rol, modulos: permitidos, paginas }: { nom
         {/* Páginas del tema activo */}
         {activo && (
           <nav className="bg-canvas border-t border-line/[0.06]" aria-label={`Páginas de ${activo.label}`}>
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 py-2 flex gap-1 overflow-x-auto">
+            <div className="contenedor-ancho mx-auto max-w-7xl px-4 sm:px-6 py-2 flex gap-1 overflow-x-auto">
               {activo.paginas.map((l) => (
                 <Link key={l.href} href={l.href} aria-current={esActual(l.href) ? "page" : undefined}
                   className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
@@ -249,6 +249,7 @@ function MenuUsuario({ nombre, rol, esAdmin, enUsuarios, onSalir, arriba = false
           )}
           <SelectorTema />
           <SelectorDiseno />
+          <SelectorAncho />
           <button role="menuitem" onClick={onSalir} className="w-full text-left px-3 py-2 rounded-md text-sm text-red-600 hover:bg-red-50">
             Cerrar sesión
           </button>
@@ -339,6 +340,27 @@ function SelectorDiseno() {
         ))}
       </div>
       <div className="text-[11px] text-ink/40 mt-1">El menú lateral se usa en pantallas anchas.</div>
+    </div>
+  );
+}
+
+// Contenido centrado o a todo el ancho de la pantalla (se recuerda en este navegador)
+function SelectorAncho() {
+  const [a, setA] = useState<Ancho>("normal");
+  useEffect(() => { setA(anchoGuardado()); }, []);
+  const opciones: [Ancho, string][] = [["normal", "Centrado"], ["completo", "Ancho completo"]];
+  return (
+    <div className="px-3 py-2 border-b border-line/[0.06] mb-1">
+      <div className="text-xs text-ink/50 mb-1.5">Ancho de la pantalla</div>
+      <div role="radiogroup" aria-label="Ancho del contenido" className="grid grid-cols-2 gap-1 rounded-lg bg-line/[0.05] p-0.5">
+        {opciones.map(([k, texto]) => (
+          <button key={k} role="radio" aria-checked={a === k}
+            onClick={() => { setA(k); guardarAncho(k); }}
+            className={`rounded-md py-1 text-xs font-medium transition-colors ${a === k ? "bg-surface text-ink shadow-sm" : "text-ink/55 hover:text-ink"}`}>
+            {texto}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
