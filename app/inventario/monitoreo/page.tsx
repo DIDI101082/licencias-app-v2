@@ -9,6 +9,7 @@ import { textoUbicacion, ATRIBUCION_GEO } from "@/lib/geo";
 import { conectado, hace, discoCritico, encendidoDesde, MINUTOS_CONECTADO, tipoEquipo, tipoDeducido, TIPOS_EQUIPO, type Disco, type TipoEquipo } from "@/lib/monitoreo";
 import { claseCodigo } from "@/lib/inventario";
 import EquiposParaAsignar from "@/components/EquiposParaAsignar";
+import EquiposSinAgente from "@/components/EquiposSinAgente";
 
 type Dispositivo = Record<string, any> & { discos: Disco[]; ultimo_reporte: string };
 
@@ -238,6 +239,8 @@ export default function Monitoreo() {
       )}
 
       {esAdmin && <EquiposParaAsignar dispositivos={lista} ahora={ahora} crearEnInventario={crearEnInventario} alCambiar={cargar} />}
+
+      {esAdmin && <EquiposSinAgente />}
 
       {esAdmin && bloqueados.length > 0 && (
         <details className="card p-4">
