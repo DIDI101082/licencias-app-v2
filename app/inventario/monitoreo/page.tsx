@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
@@ -11,6 +11,9 @@ import { claseCodigo } from "@/lib/inventario";
 import EquiposParaAsignar from "@/components/EquiposParaAsignar";
 
 type Dispositivo = Record<string, any> & { discos: Disco[]; ultimo_reporte: string };
+
+// Equipos por página en la tabla
+const POR_PAGINA = 50;
 
 // Solo las columnas que usa esta pantalla (sin datos pesados de seguridad ni el hash de la clave del agente)
 const COLUMNAS = [
@@ -32,6 +35,8 @@ export default function Monitoreo() {
   const [tipo, setTipo] = useState<TipoEquipo | "todos">("todos");
   const [texto, setTexto] = useState("");
   const [abierto, setAbierto] = useState<string | null>(null);
+  const [pagina, setPagina] = useState(1);
+  const tablaRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   const cargar = useCallback(() =>
@@ -113,6 +118,17 @@ export default function Monitoreo() {
     return !q || [d.hostname, d.usuario, d.ip, d.numero_serie, d.modelo, d.so_nombre, d.inv_equipos?.codigo]
       .some((v) => v && String(v).toLowerCase().includes(q));
   });
+
+  // Paginación: al cambiar el filtro, el tipo o la búsqueda se vuelve a la primera página
+  useEffect(() => { setPagina(1); }, [filtro, tipo, texto]);
+  const paginas = Math.max(1, Math.ceil(filtrados.length / POR_PAGINA));
+  const paginaActual = Math.min(pagina, paginas);
+  const visibles = filtrados.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA);
+  function irAPagina(n: number) {
+    setPagina(n);
+    setAbierto(null);
+    tablaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   // Devuelve el id del equipo creado (o null si no se pudo)
   async function crearEnInventario(d: Dispositivo): Promise<string | null> {
@@ -247,13 +263,13 @@ export default function Monitoreo() {
       <input type="search" className="input" placeholder="Buscar por equipo, usuario, IP, serie, modelo o código IT…"
         value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Buscar" />
 
-      <div className="card overflow-x-auto">
+      <div ref={tablaRef} className="card overflow-x-auto scroll-mt-4">
         <table className="data w-full">
           <thead>
             <tr><th>Equipo</th><th>Inventario</th><th>Sistema</th><th>RAM</th><th>Discos</th><th>Último reporte</th></tr>
           </thead>
           <tbody>
-            {filtrados.map((d) => {
+            {visibles.map((d) => {
               const on = conectado(d.ultimo_reporte, ahora);
               const ramUso = d.ram_total_gb ? Math.round(((d.ram_total_gb - d.ram_libre_gb) / d.ram_total_gb) * 100) : null;
               return (
@@ -373,6 +389,28 @@ export default function Monitoreo() {
           </tbody>
         </table>
       </div>
+
+      {filtrados.length > POR_PAGINA && (
+        <nav aria-label="Páginas de equipos" className="flex items-center justify-between gap-3 flex-wrap text-sm">
+          <span className="text-ink/60">
+            Mostrando {(paginaActual - 1) * POR_PAGINA + 1}–{Math.min(paginaActual * POR_PAGINA, filtrados.length)} de {filtrados.length} equipos
+          </span>
+          <div className="flex items-center gap-1">
+            <button className="btn-secondary px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed" disabled={paginaActual === 1} onClick={() => irAPagina(paginaActual - 1)}>
+              Anterior
+            </button>
+            {Array.from({ length: paginas }, (_, i) => i + 1).map((n) => (
+              <button key={n} onClick={() => irAPagina(n)} aria-current={n === paginaActual ? "page" : undefined}
+                className={`min-w-[2.25rem] px-2 py-1.5 rounded-lg tabular-nums transition-colors ${n === paginaActual ? "bg-brand-600 text-white font-medium" : "text-ink/60 hover:bg-line/[0.06] hover:text-ink"}`}>
+                {n}
+              </button>
+            ))}
+            <button className="btn-secondary px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed" disabled={paginaActual === paginas} onClick={() => irAPagina(paginaActual + 1)}>
+              Siguiente
+            </button>
+          </div>
+        </nav>
+      )}
     </div>
   );
 }
