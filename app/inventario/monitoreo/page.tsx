@@ -12,6 +12,17 @@ import EquiposParaAsignar from "@/components/EquiposParaAsignar";
 
 type Dispositivo = Record<string, any> & { discos: Disco[]; ultimo_reporte: string };
 
+// Solo las columnas que usa esta pantalla (sin datos pesados de seguridad ni el hash de la clave del agente)
+const COLUMNAS = [
+  "id", "hostname", "usuario", "dominio", "ip", "mac", "ip_publica", "ip_registro", "numero_serie", "fabricante", "modelo",
+  "tipo", "so_nombre", "so_version", "so_build", "so_arquitectura", "procesador", "nucleos", "ram_total_gb", "ram_libre_gb",
+  "discos", "almacenamiento", "arranque", "bateria_pct", "antivirus_activo", "av_productos", "agente_version", "apps_cantidad",
+  "geo_ciudad", "geo_region", "geo_pais", "geo_pais_codigo", "geo_isp",
+  "estado_registro", "asignacion_omitida", "equipo_id", "primer_reporte", "ultimo_reporte",
+  "inv_equipos(id, codigo, estado, empleado_id)", "inv_codigos_instalacion(descripcion)",
+].join(", ");
+const CAMPOS = new Set(COLUMNAS.split(", "));
+
 export default function Monitoreo() {
   const { esAdmin } = usePerfil();
   const [todos, setTodos] = useState<Dispositivo[]>([]);
@@ -24,8 +35,8 @@ export default function Monitoreo() {
   const [error, setError] = useState<string | null>(null);
 
   const cargar = useCallback(() =>
-    createClient().from("inv_dispositivos").select("*, inv_equipos(id, codigo, estado, empleado_id), inv_codigos_instalacion(descripcion)").order("hostname")
-      .then(({ data }) => { setTodos((data ?? []) as Dispositivo[]); setCargando(false); }), []);
+    createClient().from("inv_dispositivos").select(COLUMNAS).order("hostname")
+      .then(({ data }) => { setTodos((data ?? []) as unknown as Dispositivo[]); setCargando(false); }), []);
 
   useEffect(() => {
     const sb = createClient();
@@ -44,7 +55,8 @@ export default function Monitoreo() {
         setTodos((prev) => {
           const actual = prev.find((d) => d.id === nuevo.id);
           if (!actual || actual.equipo_id !== nuevo.equipo_id) { recargarLuego(); return prev; }
-          return prev.map((d) => (d.id === nuevo.id ? { ...d, ...nuevo } : d));
+          const cambios = Object.fromEntries(Object.entries(nuevo).filter(([k]) => CAMPOS.has(k)));
+          return prev.map((d) => (d.id === nuevo.id ? { ...d, ...cambios } : d));
         });
       })
       .subscribe();
