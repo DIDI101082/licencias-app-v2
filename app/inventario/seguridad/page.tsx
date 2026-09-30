@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/FiltroColumna";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
@@ -87,7 +88,12 @@ export default function Seguridad() {
   const cuenta = (k: Control) => conDatos.filter((d) => d.ev[k].nivel === "problema" || d.ev[k].nivel === "aviso").length;
   const filas = filtro ? conDatos.filter((d) => ["problema", "aviso"].includes(d.ev[filtro].nivel)) : conDatos;
   const problemas = (d: any) => CONTROLES.filter((c) => d.ev[c.k].nivel === "problema").length;
-  const ordenadas = [...filas].sort((a, b) => problemas(b) - problemas(a) || String(a.hostname).localeCompare(b.hostname));
+  // Filtros por columna (tipo Excel): en cada control se filtra por su resultado (OK, atención, problema…)
+  const fc = useFiltrosColumna(filas, {
+    equipo: (d) => d.hostname,
+    ...Object.fromEntries(CONTROLES.map((c) => [c.k, (d: any) => ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta])),
+  });
+  const ordenadas = [...fc.filtradas].sort((a, b) => problemas(b) - problemas(a) || String(a.hostname).localeCompare(b.hostname));
 
   function exportar() {
     const cab = ["Equipo", "Código IT", "Usuario", ...CONTROLES.map((c) => c.titulo), "Último parche", "Admins locales", "Actualizado"];
@@ -143,10 +149,15 @@ export default function Seguridad() {
         </p>
       )}
 
+      <FiltrosActivos ctl={fc} total={filas.length} />
+
       <div className="card overflow-x-auto">
         <table className="data w-full">
           <thead>
-            <tr><th>Equipo</th>{CONTROLES.map((c) => <th key={c.k}>{c.titulo}</th>)}</tr>
+            <tr>
+              <ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro>
+              {CONTROLES.map((c) => <ThFiltro key={c.k} ctl={fc} col={c.k}>{c.titulo}</ThFiltro>)}
+            </tr>
           </thead>
           <tbody>
             {ordenadas.map((d) => {

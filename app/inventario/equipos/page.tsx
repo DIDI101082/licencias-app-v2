@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { ESTADOS, CONDICIONES, dinero, fecha, claseCodigo } from "@/lib/inventario";
 import { usePerfil } from "@/components/PerfilContext";
 import AbrirEnCelular from "@/components/AbrirEnCelular";
+import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/FiltroColumna";
 
 type Equipo = Record<string, any>;
 
@@ -72,6 +73,18 @@ function Listado() {
     );
   }, [equipos, texto, estado, grupo, categoria, ubicacion, area]);
 
+  // Filtros por columna (tipo Excel), sobre lo que ya dejaron el buscador y los desplegables
+  const fc = useFiltrosColumna(filtrados, {
+    codigo: (e) => e.codigo,
+    equipo: (e) => [e.marca, e.modelo].filter(Boolean).join(" "),
+    serie: (e) => e.numero_serie,
+    estado: (e) => ESTADOS[e.estado] ?? e.estado,
+    asignado: (e) => e.empleado,
+    ubicacion: (e) => e.ubicacion,
+    compra: (e) => (e.fecha_compra ? String(e.fecha_compra).slice(0, 4) : null),
+  });
+  const lista = fc.filtradas;
+
   const sel = "input w-auto";
 
   return (
@@ -79,10 +92,10 @@ function Listado() {
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-display text-2xl text-ink">Equipos</h1>
-          <p className="text-ink/60 text-sm mt-1">{cargando ? "Cargando…" : `${filtrados.length} de ${equipos.length} equipos`}</p>
+          <p className="text-ink/60 text-sm mt-1">{cargando ? "Cargando…" : `${lista.length} de ${equipos.length} equipos`}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button className="btn-secondary" onClick={() => exportarCSV(filtrados)} disabled={!filtrados.length}>
+          <button className="btn-secondary" onClick={() => exportarCSV(lista)} disabled={!lista.length}>
             Exportar a Excel
           </button>
           {puedeEditar && <AbrirEnCelular />}
@@ -116,16 +129,20 @@ function Listado() {
         </select>
       </div>
 
+      <FiltrosActivos ctl={fc} total={filtrados.length} />
+
       <div className="card overflow-x-auto">
         <table className="data w-full">
           <thead>
             <tr>
-              <th>Código</th><th>Equipo</th><th>N° de serie</th><th>Estado</th>
-              <th>Asignado a</th><th>Ubicación</th><th>Compra</th>
+              <ThFiltro ctl={fc} col="codigo">Código</ThFiltro><ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro>
+              <ThFiltro ctl={fc} col="serie">N° de serie</ThFiltro><ThFiltro ctl={fc} col="estado">Estado</ThFiltro>
+              <ThFiltro ctl={fc} col="asignado">Asignado a</ThFiltro><ThFiltro ctl={fc} col="ubicacion">Ubicación</ThFiltro>
+              <ThFiltro ctl={fc} col="compra">Compra</ThFiltro>
             </tr>
           </thead>
           <tbody>
-            {filtrados.map((e) => (
+            {lista.map((e) => (
               <tr key={e.id} className="hover:bg-line/[0.015]">
                 <td><Link href={`/inventario/equipos/${e.id}`} className={claseCodigo(e.codigo)}>{e.codigo}</Link></td>
                 <td>
@@ -140,7 +157,7 @@ function Listado() {
                 <td>{fecha(e.fecha_compra)}<div className="text-ink/50 text-xs">{dinero(e.costo, e.moneda)}</div></td>
               </tr>
             ))}
-            {!cargando && filtrados.length === 0 && (
+            {!cargando && lista.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center text-ink/40 py-8">
                   {equipos.length === 0 ? "No hay equipos cargados. Empezá con “Cargar equipo”." : "Ningún equipo coincide con los filtros."}

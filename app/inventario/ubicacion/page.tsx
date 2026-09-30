@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { conectado, hace } from "@/lib/monitoreo";
 import { claseCodigo } from "@/lib/inventario";
+import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/FiltroColumna";
 
 type Tipo = "oficina" | "vpn" | "remoto" | "invitados";
 
@@ -152,7 +153,6 @@ export default function Ubicacion() {
   const uniFresco = !!uni?.actualizado && ahora - Date.parse(uni.actualizado) < 30 * 60000;
   const zonaDe = useMemo(() => new Map((uniFresco ? uni?.dispositivos ?? [] : []).map((x) => [x.dispositivo_id, x])), [uni, uniFresco]);
   const zonas = uniFresco ? uni?.zonas ?? [] : [];
-  useEffect(() => { setPagina(1); }, [filtro, red, texto]);
   const hayHistorial = dias.some((d) => d.oficina + d.casa > 0);
 
   // Red o piso de cada equipo, tal como se muestra en la columna "Red"
@@ -170,11 +170,22 @@ export default function Ubicacion() {
     return !q || [d.hostname, d.usuario, d.ip, d.ssid, d.ubicacion_red, d.ubicacion_sede, d.inv_equipos?.codigo, zonaDe.get(d.id)?.zona]
       .some((v) => v && String(v).toLowerCase().includes(q));
   });
+  // Filtros por columna (tipo Excel)
+  const ipDe = (d: any) => (d.redes ?? []).find((r: any) => r.gateway)?.ip ?? d.ip;
+  const fc = useFiltrosColumna(filas, {
+    equipo: (d) => d.hostname,
+    ubicacion: (d) => (tipoDe(d) === "oficina" ? d.ubicacion_sede : TIPOS[tipoDe(d)].titulo),
+    red: (d) => [zonaDe.get(d.id)?.zona, redDe(d)].filter(Boolean) as string[],
+    ip: (d) => ipDe(d),
+    reporte: (d) => hace(d.ultimo_reporte, ahora),
+  });
+  const enTabla = fc.filtradas;
+  useEffect(() => { setPagina(1); }, [filtro, red, texto, fc.filtros]);
   // Paginación de a 50; al cambiar un filtro se vuelve a la primera página
   const POR_PAGINA = 50;
-  const paginas = Math.max(1, Math.ceil(filas.length / POR_PAGINA));
+  const paginas = Math.max(1, Math.ceil(enTabla.length / POR_PAGINA));
   const paginaActual = Math.min(pagina, paginas);
-  const visibles = filas.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA);
+  const visibles = enTabla.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA);
 
   return (
     <div className="space-y-6">
@@ -292,9 +303,17 @@ export default function Ubicacion() {
         )}
       </div>
 
+      <FiltrosActivos ctl={fc} total={filas.length} />
+
       <div className="card overflow-x-auto">
         <table className="data w-full">
-          <thead><tr><th>Equipo</th><th>Ubicación</th><th>Red</th><th>IP</th><th>Último reporte</th></tr></thead>
+          <thead>
+            <tr>
+              <ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro><ThFiltro ctl={fc} col="ubicacion">Ubicación</ThFiltro>
+              <ThFiltro ctl={fc} col="red">Red</ThFiltro><ThFiltro ctl={fc} col="ip">IP</ThFiltro>
+              <ThFiltro ctl={fc} col="reporte">Último reporte</ThFiltro>
+            </tr>
+          </thead>
           <tbody>
             {visibles.map((d) => {
               const t = tipoDe(d);
@@ -321,19 +340,19 @@ export default function Ubicacion() {
                 </tr>
               );
             })}
-            {filas.length === 0 && (
+            {enTabla.length === 0 && (
               <tr><td colSpan={5} className="text-center text-ink/40 py-10">
-                {texto || red ? "Ningún equipo coincide con el filtro." : filtro ? "Ningún equipo en esta situación ahora." : "No hay equipos conectados en este momento."}
+                {texto || red || fc.activos ? "Ningún equipo coincide con el filtro." : filtro ? "Ningún equipo en esta situación ahora." : "No hay equipos conectados en este momento."}
               </td></tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {filas.length > POR_PAGINA && (
+      {enTabla.length > POR_PAGINA && (
         <nav aria-label="Páginas de equipos" className="flex items-center justify-between gap-3 flex-wrap text-sm">
           <span className="text-ink/60">
-            Mostrando {(paginaActual - 1) * POR_PAGINA + 1}–{Math.min(paginaActual * POR_PAGINA, filas.length)} de {filas.length} equipos
+            Mostrando {(paginaActual - 1) * POR_PAGINA + 1}–{Math.min(paginaActual * POR_PAGINA, enTabla.length)} de {enTabla.length} equipos
           </span>
           <div className="flex items-center gap-1">
             <button className="btn-secondary px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed" disabled={paginaActual === 1} onClick={() => setPagina(paginaActual - 1)}>Anterior</button>

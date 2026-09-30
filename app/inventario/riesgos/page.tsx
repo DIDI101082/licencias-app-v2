@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/FiltroColumna";
 import { usePerfil } from "@/components/PerfilContext";
 import { fecha, claseCodigo } from "@/lib/inventario";
 import { hace } from "@/lib/monitoreo";
@@ -196,7 +197,15 @@ function Sistemas() {
 
   const filas = useMemo(() => disp.map((d) => ({ ...d, sp: soporteWindows(d.so_nombre, d.so_version, d.so_build) })), [disp]);
   const orden = { problema: 0, aviso: 1, sin_datos: 2, ok: 3 } as const;
-  const visibles = filas.filter((d) => !filtro || d.sp.nivel === filtro).sort((a, b) => orden[a.sp.nivel as keyof typeof orden] - orden[b.sp.nivel as keyof typeof orden]);
+  const porTarjeta = filas.filter((d) => !filtro || d.sp.nivel === filtro);
+  // Filtros por columna (tipo Excel)
+  const fc = useFiltrosColumna(porTarjeta, {
+    equipo: (d) => d.hostname,
+    sistema: (d) => d.so_nombre?.replace("Microsoft ", ""),
+    soporte: (d) => d.sp.texto,
+    accion: (d) => d.sp.accion,
+  });
+  const visibles = [...fc.filtradas].sort((a, b) => orden[a.sp.nivel as keyof typeof orden] - orden[b.sp.nivel as keyof typeof orden]);
   const n = (k: string) => filas.filter((d) => d.sp.nivel === k).length;
   const clase: Record<string, string> = {
     problema: "bg-red-50 text-red-600", aviso: "bg-amber-500/10 text-amber-700", ok: "bg-emerald-50 text-emerald-700", sin_datos: "bg-line/[0.05] text-ink/50",
@@ -209,9 +218,15 @@ function Sistemas() {
         <Tarjeta titulo={`El soporte vence en ${DIAS_AVISO_SOPORTE} días`} n={n("aviso")} activa={filtro === "aviso"} onClick={() => setFiltro(filtro === "aviso" ? null : "aviso")} />
         <Tarjeta titulo="Con soporte" n={n("ok")} peligro={false} />
       </div>
+      <FiltrosActivos ctl={fc} total={porTarjeta.length} />
       <div className="card overflow-x-auto">
         <table className="data w-full">
-          <thead><tr><th>Equipo</th><th>Sistema</th><th>Soporte</th><th>Qué hacer</th></tr></thead>
+          <thead>
+            <tr>
+              <ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro><ThFiltro ctl={fc} col="sistema">Sistema</ThFiltro>
+              <ThFiltro ctl={fc} col="soporte">Soporte</ThFiltro><ThFiltro ctl={fc} col="accion">Qué hacer</ThFiltro>
+            </tr>
+          </thead>
           <tbody>
             {visibles.map((d) => (
               <tr key={d.id}>

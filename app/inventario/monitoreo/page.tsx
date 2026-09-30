@@ -10,6 +10,7 @@ import { conectado, hace, discoCritico, encendidoDesde, MINUTOS_CONECTADO, tipoE
 import { claseCodigo } from "@/lib/inventario";
 import EquiposParaAsignar from "@/components/EquiposParaAsignar";
 import EquiposSinAgente from "@/components/EquiposSinAgente";
+import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/FiltroColumna";
 
 type Dispositivo = Record<string, any> & { discos: Disco[]; ultimo_reporte: string };
 
@@ -120,11 +121,22 @@ export default function Monitoreo() {
       .some((v) => v && String(v).toLowerCase().includes(q));
   });
 
-  // Paginación: al cambiar el filtro, el tipo o la búsqueda se vuelve a la primera página
-  useEffect(() => { setPagina(1); }, [filtro, tipo, texto]);
-  const paginas = Math.max(1, Math.ceil(filtrados.length / POR_PAGINA));
+  // Filtros por columna (tipo Excel), sobre lo que ya dejaron las tarjetas, la solapa y el buscador
+  const fc = useFiltrosColumna(filtrados, {
+    equipo: (d) => d.hostname,
+    inventario: (d) => d.inv_equipos?.codigo ?? "Sin cargar en inventario",
+    sistema: (d) => d.so_nombre?.replace("Microsoft ", ""),
+    ram: (d) => (d.ram_total_gb ? `${Math.round(d.ram_total_gb)} GB` : null),
+    discos: (d) => (discoCritico(d.discos) ? "Disco casi lleno" : "Espacio OK"),
+    reporte: (d) => (conectado(d.ultimo_reporte, ahora) ? "Conectado" : "Desconectado"),
+  });
+  const enTabla = fc.filtradas;
+
+  // Paginación: al cambiar cualquier filtro se vuelve a la primera página
+  useEffect(() => { setPagina(1); }, [filtro, tipo, texto, fc.filtros]);
+  const paginas = Math.max(1, Math.ceil(enTabla.length / POR_PAGINA));
   const paginaActual = Math.min(pagina, paginas);
-  const visibles = filtrados.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA);
+  const visibles = enTabla.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA);
   function irAPagina(n: number) {
     setPagina(n);
     setAbierto(null);
@@ -266,10 +278,16 @@ export default function Monitoreo() {
       <input type="search" className="input" placeholder="Buscar por equipo, usuario, IP, serie, modelo o código IT…"
         value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Buscar" />
 
+      <FiltrosActivos ctl={fc} total={filtrados.length} />
+
       <div ref={tablaRef} className="card overflow-x-auto scroll-mt-4">
         <table className="data w-full">
           <thead>
-            <tr><th>Equipo</th><th>Inventario</th><th>Sistema</th><th>RAM</th><th>Discos</th><th>Último reporte</th></tr>
+            <tr>
+              <ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro><ThFiltro ctl={fc} col="inventario">Inventario</ThFiltro>
+              <ThFiltro ctl={fc} col="sistema">Sistema</ThFiltro><ThFiltro ctl={fc} col="ram">RAM</ThFiltro>
+              <ThFiltro ctl={fc} col="discos">Discos</ThFiltro><ThFiltro ctl={fc} col="reporte">Último reporte</ThFiltro>
+            </tr>
           </thead>
           <tbody>
             {visibles.map((d) => {
@@ -376,7 +394,7 @@ export default function Monitoreo() {
                 </Fragment>
               );
             })}
-            {!cargando && filtrados.length === 0 && (
+            {!cargando && enTabla.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center text-ink/40 py-10">
                   {lista.length === 0
@@ -393,10 +411,10 @@ export default function Monitoreo() {
         </table>
       </div>
 
-      {filtrados.length > POR_PAGINA && (
+      {enTabla.length > POR_PAGINA && (
         <nav aria-label="Páginas de equipos" className="flex items-center justify-between gap-3 flex-wrap text-sm">
           <span className="text-ink/60">
-            Mostrando {(paginaActual - 1) * POR_PAGINA + 1}–{Math.min(paginaActual * POR_PAGINA, filtrados.length)} de {filtrados.length} equipos
+            Mostrando {(paginaActual - 1) * POR_PAGINA + 1}–{Math.min(paginaActual * POR_PAGINA, enTabla.length)} de {enTabla.length} equipos
           </span>
           <div className="flex items-center gap-1">
             <button className="btn-secondary px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed" disabled={paginaActual === 1} onClick={() => irAPagina(paginaActual - 1)}>

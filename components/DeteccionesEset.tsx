@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/FiltroColumna";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 
@@ -64,7 +65,16 @@ export default function DeteccionesEset() {
   const pendientes = dets.filter((d) => !d.resuelta && !d.revisada && (info || !menor(d)));
   const ult30 = dets.filter((d) => new Date(d.fecha).getTime() > hace30 && (info || !menor(d)));
   const equipos30 = new Set(ult30.map((d) => d.equipo_nombre)).size;
-  const filas = filtro === "pendientes" ? pendientes : filtro === "30dias" ? ult30 : dets.filter((d) => info || !menor(d));
+  const base = filtro === "pendientes" ? pendientes : filtro === "30dias" ? ult30 : dets.filter((d) => info || !menor(d));
+  // Filtros por columna (tipo Excel)
+  const fc = useFiltrosColumna(base, {
+    fecha: (d) => (d.fecha ? new Date(d.fecha).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" }) : null),
+    equipo: (d) => d.equipo_nombre,
+    deteccion: (d) => [SEV[d.severidad ?? ""]?.texto ?? d.severidad, d.categoria ? CATEGORIA[d.categoria] ?? d.categoria : null].filter(Boolean) as string[],
+    estado: (d) => (d.resuelta ? "Resuelta por ESET" : d.revisada ? "Revisada" : "Sin resolver"),
+    objeto: (d) => (d.proceso ? d.proceso.split("\\").pop() : null),
+  });
+  const filas = fc.filtradas;
 
   async function revisar(d: Det, v: boolean) {
     const { error } = await createClient().rpc("eset_marcar_revisada", { p_uuid: d.uuid, p_revisada: v });
@@ -119,9 +129,17 @@ export default function DeteccionesEset() {
         </div>
       </div>
 
+      <FiltrosActivos ctl={fc} total={base.length} />
+
       <div className="card overflow-x-auto">
         <table className="data w-full">
-          <thead><tr><th>Fecha</th><th>Equipo</th><th>Detección</th><th>Estado</th><th>Objeto</th>{puedeEditar && <th></th>}</tr></thead>
+          <thead>
+            <tr>
+              <ThFiltro ctl={fc} col="fecha">Fecha</ThFiltro><ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro>
+              <ThFiltro ctl={fc} col="deteccion">Detección</ThFiltro><ThFiltro ctl={fc} col="estado">Estado</ThFiltro>
+              <ThFiltro ctl={fc} col="objeto">Objeto</ThFiltro>{puedeEditar && <th></th>}
+            </tr>
+          </thead>
           <tbody>
             {filas.map((d) => {
               const sev = SEV[d.severidad ?? ""] ?? { texto: d.severidad ?? "—", clase: "bg-line/[0.05] text-ink/60" };
