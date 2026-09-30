@@ -6,6 +6,10 @@
     {
       "path": "/api/programado",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/entra/auto",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

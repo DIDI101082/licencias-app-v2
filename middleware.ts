@@ -34,7 +34,8 @@ export async function middleware(request: NextRequest) {
   // Descarga del instalador del agente con código de instalación (la usa ESET PROTECT, sin sesión)
   const isInstalador = request.nextUrl.pathname === "/api/agente/instalar";
   // Tarea diaria de Vercel (se autentica con CRON_SECRET dentro de la ruta)
-  const isProgramado = request.nextUrl.pathname === "/api/programado";
+  const isProgramado = request.nextUrl.pathname === "/api/programado"
+    || request.nextUrl.pathname === "/api/entra/auto";   // sincronización automática con Entra ID (idem)
 
   if (!user && !isLoginPage && !isAuthCallback && !isInstalador && !isProgramado) {
     const url = request.nextUrl.clone();

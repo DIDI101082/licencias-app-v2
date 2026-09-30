@@ -1,6 +1,7 @@
 // Solo servidor: lee los usuarios de Entra ID con Microsoft Graph.
 // Requiere una app registrada en Entra con el permiso de aplicación User.Read.All
 // y estas variables en Vercel: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET.
+// Para saber quién hizo cada alta o baja (sincronización automática), sumar también AuditLog.Read.All.
 // Opcional: ENTRA_DOMINIOS=accusys.com.ar (separados por coma) para tomar solo esos dominios.
 import "server-only";
 import type { EmpleadoFuente } from "./empleados-sync";

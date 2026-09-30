@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import EmpleadosExcel, { exportarEmpleados } from "@/components/EmpleadosExcel";
 import EntraSync from "@/components/EntraSync";
+import EntraAuto from "@/components/EntraAuto";
 import { createClient } from "@/lib/supabase/client";
 import { claseCodigo } from "@/lib/inventario";
 
@@ -221,6 +222,7 @@ export default function EmpleadosClient({
 
       {esAdmin && panel === "excel" && <EmpleadosExcel empleados={empleados as any} />}
       {esAdmin && panel === "entra" && <EntraSync ultima={ultimaSyncEntra} />}
+      {esAdmin && panel === "entra" && <EntraAuto />}
 
       {mostrarForm && (
         <form onSubmit={guardar} className="card p-5 grid md:grid-cols-2 gap-4">
