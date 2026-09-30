@@ -26,3 +26,22 @@ export function guardarTema(t: Tema) {
 
 // Se ejecuta en el <head> antes de dibujar la página, para que no parpadee en blanco
 export const SCRIPT_TEMA = `(function(){try{var t=localStorage.getItem("${CLAVE}");var o=t==="oscuro"||(t!=="claro"&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(o)document.documentElement.classList.add("dark")}catch(e){}})()`;
+
+// Diseño del menú: solapas arriba (predeterminado) o menú lateral. También se guarda por navegador.
+export type Diseno = "solapas" | "lateral";
+const CLAVE_MENU = "accusys-menu";
+
+export function disenoGuardado(): Diseno {
+  try { return localStorage.getItem(CLAVE_MENU) === "lateral" ? "lateral" : "solapas"; } catch { return "solapas"; }
+}
+
+export function guardarDiseno(d: Diseno) {
+  try {
+    if (d === "solapas") localStorage.removeItem(CLAVE_MENU);
+    else localStorage.setItem(CLAVE_MENU, d);
+  } catch {}
+  document.documentElement.classList.toggle("menu-lateral", d === "lateral");
+}
+
+// Igual que el tema: se aplica antes de dibujar, para que el menú no salte al cargar
+export const SCRIPT_MENU = `(function(){try{if(localStorage.getItem("${CLAVE_MENU}")==="lateral")document.documentElement.classList.add("menu-lateral")}catch(e){}})()`;

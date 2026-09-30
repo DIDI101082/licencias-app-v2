@@ -143,3 +143,17 @@ html.dark .shadow-sm:not(.claro *) { box-shadow: 0 1px 2px rgb(0 0 0 / 0.5); }
 /* Logo: en oscuro se muestra en blanco (en actas e impresión, original) */
 html.dark .marca:not(.claro *) { filter: brightness(0) invert(1); }
 @media print { html.dark .marca { filter: none; } }
+
+/* ---------- Menú: solapas arriba o menú lateral (preferencia de cada usuario) ----------
+   Se dibujan los dos y se muestra uno según la clase de <html> (se pone antes de pintar la página).
+   En pantallas de menos de 1024 px se usan siempre las solapas, que se deslizan de costado. */
+.nav-lateral { display: none; }
+@media (min-width: 1024px) {
+  html.menu-lateral .nav-superior { display: none; }
+  html.menu-lateral .nav-lateral { display: flex; }
+  html.menu-lateral body { padding-left: 16rem; }
+}
+@media print {
+  .nav-lateral { display: none !important; }
+  html.menu-lateral body { padding-left: 0; }
+}

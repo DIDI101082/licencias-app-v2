@@ -19,9 +19,9 @@ export default function GuardiaModulo({ modulos, paginas, children }: { modulos:
   const permitido = moduloOk && paginaOk;
   const inicio = (m: Modulo) => { const s = MENU.find((x) => x.id === m); return s ? inicioPermitido(paginas, s) : INICIO_MODULO[m]; };
 
-  // Al entrar a la página de inicio sin acceso a Licencias, ir a la primera solapa habilitada
+  // Al entrar a Inicio (o al panel de licencias) sin acceso, ir a la primera solapa habilitada
   useEffect(() => {
-    if (!permitido && pathname === "/" && modulos.length) router.replace(inicio(modulos[0]));
+    if (!permitido && (pathname === "/" || pathname === "/inicio") && modulos.length) router.replace(inicio(modulos[0]));
   }, [permitido, pathname, modulos, router]);
 
   if (permitido) return <>{children}</>;
@@ -36,7 +36,7 @@ export default function GuardiaModulo({ modulos, paginas, children }: { modulos:
       </div>
     );
   }
-  if (pathname === "/" && modulos.length) return null;
+  if ((pathname === "/" || pathname === "/inicio") && modulos.length) return null;
   if (moduloOk && !paginaOk && modulo) {
     return (
       <div className="card p-6 max-w-md">

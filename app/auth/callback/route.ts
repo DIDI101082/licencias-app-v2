@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       // ?ingreso=azure: la app registra el ingreso desde el navegador (con la IP real del usuario)
-      return NextResponse.redirect(`${origin}/?ingreso=azure`);
+      return NextResponse.redirect(`${origin}/inicio?ingreso=azure`);
     }
   }
 
