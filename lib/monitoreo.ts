@@ -43,7 +43,10 @@ export const TIPOS_EQUIPO: Record<TipoEquipo, { uno: string; varios: string }> =
 };
 
 // Si un administrador lo fijó a mano, se usa ese. Si no, se deduce:
-// sistema de servidor (Windows Server) o Linux → servidor; con batería → notebook; si no → PC de escritorio.
+// máquina virtual, hostname de servidor (VSRV/SRV), sistema de servidor (Windows Server) o Linux → servidor;
+// con batería → notebook; si no → PC de escritorio.
+const HW_VIRTUAL = /vmware|virtual ?machine|virtualbox|hyper-v|kvm|qemu|xen|proxmox|parallels/i;
+const HOST_SERVIDOR = /^v?srv[-_]/i;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function tipoEquipo(d: { [k: string]: any }): TipoEquipo {
   if (d.tipo === "notebook" || d.tipo === "pc" || d.tipo === "servidor" || d.tipo === "otro") return d.tipo;
@@ -53,6 +56,7 @@ export function tipoEquipo(d: { [k: string]: any }): TipoEquipo {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function tipoDeducido(d: { [k: string]: any }): TipoEquipo {
   const so: string = d.so_nombre ?? "";
+  if (HW_VIRTUAL.test(`${d.fabricante ?? ""} ${d.modelo ?? ""}`) || HOST_SERVIDOR.test(d.hostname ?? "")) return "servidor";
   if (/server/i.test(so) || (so !== "" && !/windows|mac ?os|darwin/i.test(so))) return "servidor";
   return d.bateria_pct != null ? "notebook" : "pc";
 }

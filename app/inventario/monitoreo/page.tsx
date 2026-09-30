@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
@@ -8,6 +8,7 @@ import BarraDisco from "@/components/BarraDisco";
 import { textoUbicacion, ATRIBUCION_GEO } from "@/lib/geo";
 import { conectado, hace, discoCritico, encendidoDesde, MINUTOS_CONECTADO, tipoEquipo, tipoDeducido, TIPOS_EQUIPO, type Disco, type TipoEquipo } from "@/lib/monitoreo";
 import { claseCodigo } from "@/lib/inventario";
+import EquiposParaAsignar from "@/components/EquiposParaAsignar";
 
 type Dispositivo = Record<string, any> & { discos: Disco[]; ultimo_reporte: string };
 
@@ -22,11 +23,12 @@ export default function Monitoreo() {
   const [abierto, setAbierto] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const cargar = useCallback(() =>
+    createClient().from("inv_dispositivos").select("*, inv_equipos(id, codigo, estado, empleado_id), inv_codigos_instalacion(descripcion)").order("hostname")
+      .then(({ data }) => { setTodos((data ?? []) as Dispositivo[]); setCargando(false); }), []);
+
   useEffect(() => {
     const sb = createClient();
-    const cargar = () =>
-      sb.from("inv_dispositivos").select("*, inv_equipos(id, codigo), inv_codigos_instalacion(descripcion)").order("hostname")
-        .then(({ data }) => { setTodos((data ?? []) as Dispositivo[]); setCargando(false); });
     cargar();
 
     // Cada reporte nuevo de un agente llega acá sin recargar la página
@@ -36,7 +38,7 @@ export default function Monitoreo() {
       .subscribe();
     const reloj = setInterval(() => setAhora(Date.now()), 30000);
     return () => { sb.removeChannel(canal); clearInterval(reloj); };
-  }, []);
+  }, [cargar]);
 
   // Solo los equipos aprobados cuentan; los pendientes y bloqueados se muestran aparte (solo admin)
   const lista = useMemo(() => todos.filter((d) => d.estado_registro === "aprobado"), [todos]);
@@ -88,13 +90,17 @@ export default function Monitoreo() {
       .some((v) => v && String(v).toLowerCase().includes(q));
   });
 
-  async function crearEnInventario(d: Dispositivo) {
+  // Devuelve el id del equipo creado (o null si no se pudo)
+  async function crearEnInventario(d: Dispositivo): Promise<string | null> {
     setError(null);
     const sb = createClient();
     const t = tipoEquipo(d);
     const categoria = t === "servidor" ? "Servidor" : t === "notebook" ? "Notebook" : "PC de escritorio";
     const { data: cat } = await sb.from("inv_categorias").select("id").eq("nombre", categoria).maybeSingle();
-    if (!cat) return setError(`No existe la categoría “${categoria}”. Creala en Inventario IT → Categorías y ubicaciones y volvé a intentar.`);
+    if (!cat) {
+      setError(`No existe la categoría “${categoria}”. Creala en Inventario IT → Categorías y ubicaciones y volvé a intentar.`);
+      return null;
+    }
     const { data: eq, error } = await sb.from("inv_equipos").insert({
       categoria_id: cat.id, marca: d.fabricante, modelo: d.modelo, numero_serie: d.numero_serie,
       estado: "en_stock", hostname: d.hostname, ip: d.ip, mac: d.mac, procesador: d.procesador,
@@ -102,11 +108,13 @@ export default function Monitoreo() {
       sistema_operativo: d.so_nombre,
     }).select("id").single();
     if (error) {
-      return setError(error.code === "23505"
+      setError(error.code === "23505"
         ? `Ya hay un equipo con el N° de serie ${d.numero_serie}. Va a quedar vinculado solo en el próximo reporte.`
         : error.message);
+      return null;
     }
     await sb.from("inv_dispositivos").update({ equipo_id: eq.id }).eq("id", d.id);
+    return eq.id as string;
   }
 
   async function quitar(d: Dispositivo) {
@@ -188,6 +196,8 @@ export default function Monitoreo() {
           </ul>
         </div>
       )}
+
+      {esAdmin && <EquiposParaAsignar dispositivos={lista} ahora={ahora} crearEnInventario={crearEnInventario} alCambiar={cargar} />}
 
       {esAdmin && bloqueados.length > 0 && (
         <details className="card p-4">
