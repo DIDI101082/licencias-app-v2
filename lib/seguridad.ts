@@ -30,6 +30,27 @@ export function adminsExtra(admins: any[] | null, permitidos: string[]) {
   });
 }
 
+// ¿El usuario con sesión abierta en el equipo es administrador local de esa misma máquina?
+// Compara "DOMINIO\usuario" (o solo "usuario") contra la lista de administradores que informa el agente.
+export type UsuarioAdmin = "si" | "si_permitido" | "no" | "sin_sesion" | "sin_datos";
+export const TEXTO_USUARIO_ADMIN: Record<UsuarioAdmin, string> = {
+  si: "Sí", si_permitido: "Sí (permitido)", no: "No", sin_sesion: "Sin sesión", sin_datos: "Sin datos",
+};
+const corto = (n: string) => (n.split("\\").pop() ?? n).split("@")[0].trim().toLowerCase();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function usuarioEsAdmin(d: any, permitidos: string[]): UsuarioAdmin {
+  if (!d.seguridad_actualizado || !Array.isArray(d.admins_locales)) return "sin_datos";
+  if (!d.usuario) return "sin_sesion";
+  const u = String(d.usuario).toLowerCase();
+  const admin = d.admins_locales.find((a: any) => {
+    if (a.integrado || !a.nombre) return false;
+    const n = String(a.nombre).toLowerCase();
+    return n === u || corto(n) === corto(u);
+  });
+  if (!admin) return "no";
+  return adminsExtra([admin], permitidos).length ? "si" : "si_permitido";
+}
+
 export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado> {
   const sin: Resultado = { nivel: "sin_datos", texto: "Sin datos" };
   if (!d.seguridad_actualizado) {

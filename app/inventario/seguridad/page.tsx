@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { conectado, hace } from "@/lib/monitoreo";
 import { fecha } from "@/lib/inventario";
-import { CONTROLES, ESTILO, evaluar, adminsExtra, DIAS_MAX_SIN_PARCHES, type Control, type Resultado } from "@/lib/seguridad";
+import { CONTROLES, ESTILO, evaluar, adminsExtra, usuarioEsAdmin, TEXTO_USUARIO_ADMIN, DIAS_MAX_SIN_PARCHES, type Control, type Resultado } from "@/lib/seguridad";
 
 function Celda({ r }: { r: Resultado }) {
   const e = ESTILO[r.nivel];
@@ -80,7 +80,7 @@ export default function Seguridad() {
   }, []);
 
   const conDatos = useMemo(
-    () => lista.filter((d) => d.seguridad_actualizado).map((d) => ({ ...d, ev: evaluar(d, permitidos) })),
+    () => lista.filter((d) => d.seguridad_actualizado).map((d) => ({ ...d, ev: evaluar(d, permitidos), ua: usuarioEsAdmin(d, permitidos) })),
     [lista, permitidos]
   );
   const sinDatos = lista.length - conDatos.length;
@@ -91,14 +91,15 @@ export default function Seguridad() {
   // Filtros por columna (tipo Excel): en cada control se filtra por su resultado (OK, atención, problema…)
   const fc = useFiltrosColumna(filas, {
     equipo: (d) => d.hostname,
+    usuarioadmin: (d) => TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
     ...Object.fromEntries(CONTROLES.map((c) => [c.k, (d: any) => ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta])),
   });
   const ordenadas = [...fc.filtradas].sort((a, b) => problemas(b) - problemas(a) || String(a.hostname).localeCompare(b.hostname));
 
   function exportar() {
-    const cab = ["Equipo", "Código IT", "Usuario", ...CONTROLES.map((c) => c.titulo), "Último parche", "Admins locales", "Actualizado"];
+    const cab = ["Equipo", "Código IT", "Usuario", "Usuario es admin", ...CONTROLES.map((c) => c.titulo), "Último parche", "Admins locales", "Actualizado"];
     const filasCsv = ordenadas.map((d) => [
-      d.hostname, d.inv_equipos?.codigo ?? "", d.usuario ?? "",
+      d.hostname, d.inv_equipos?.codigo ?? "", d.usuario ?? "", TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
       ...CONTROLES.map((c) => `${ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta}: ${d.ev[c.k].texto}`),
       d.ultimo_parche_titulo ?? "", (d.admins_locales ?? []).map((a: any) => a.nombre).join(" | "),
       new Date(d.seguridad_actualizado).toLocaleString("es-AR"),
@@ -139,6 +140,18 @@ export default function Seguridad() {
             </button>
           );
         })}
+        {(() => {
+          // Personas que son administradoras de su propia notebook (sin contar las cuentas permitidas)
+          const n = conDatos.filter((d) => d.ua === "si").length;
+          const activa = fc.filtros.usuarioadmin?.size === 1 && fc.filtros.usuarioadmin.has(TEXTO_USUARIO_ADMIN.si);
+          return (
+            <button onClick={() => fc.fijar("usuarioadmin", activa ? null : new Set([TEXTO_USUARIO_ADMIN.si]))} aria-pressed={activa}
+              className={`card p-5 text-left transition-colors ${activa ? "border-brand-500 ring-2 ring-brand-500/20" : "hover:border-brand-300"}`}>
+              <div className="text-xs text-ink/50 font-medium">El usuario es admin de su equipo</div>
+              <div className={`font-display text-3xl mt-1 ${n ? "text-red-600" : "text-emerald-600"}`}>{n}</div>
+            </button>
+          );
+        })()}
       </div>
 
       {sinDatos > 0 && (
@@ -156,6 +169,7 @@ export default function Seguridad() {
           <thead>
             <tr>
               <ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro>
+              <ThFiltro ctl={fc} col="usuarioadmin">Usuario es admin</ThFiltro>
               {CONTROLES.map((c) => <ThFiltro key={c.k} ctl={fc} col={c.k}>{c.titulo}</ThFiltro>)}
             </tr>
           </thead>
@@ -173,11 +187,17 @@ export default function Seguridad() {
                       </div>
                       <div className="text-xs text-ink/50 pl-[18px]">{d.usuario ?? "Sin sesión"}</div>
                     </td>
+                    <td className="whitespace-nowrap">
+                      {d.ua === "si" ? <span className="pill bg-red-50 text-red-600">Sí</span>
+                        : d.ua === "si_permitido" ? <span className="pill bg-line/[0.05] text-ink/60" title="Es una cuenta de la lista de admins permitidos">Sí (permitido)</span>
+                        : d.ua === "no" ? <span className="text-sm text-emerald-700">No</span>
+                        : <span className="text-sm text-ink/40">{TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN]}</span>}
+                    </td>
                     {CONTROLES.map((c) => <td key={c.k}><Celda r={d.ev[c.k]} /></td>)}
                   </tr>
                   {abierto === d.id && (
                     <tr>
-                      <td colSpan={CONTROLES.length + 1} className="bg-canvas">
+                      <td colSpan={CONTROLES.length + 2} className="bg-canvas">
                         <div className="grid md:grid-cols-3 gap-5 text-sm py-1">
                           <div>
                             {d.cifrado_producto && (
@@ -248,7 +268,7 @@ export default function Seguridad() {
               );
             })}
             {!cargando && ordenadas.length === 0 && (
-              <tr><td colSpan={CONTROLES.length + 1} className="text-center text-ink/40 py-10">
+              <tr><td colSpan={CONTROLES.length + 2} className="text-center text-ink/40 py-10">
                 {filtro ? "Ningún equipo tiene este problema." : "Todavía ningún equipo informó datos de seguridad."}
               </td></tr>
             )}
