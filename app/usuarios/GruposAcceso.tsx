@@ -113,7 +113,7 @@ export default function GruposAcceso({ grupos }: { grupos: Grupo[] }) {
       </div>
       {error && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
       <div className="overflow-x-auto">
-        <table className="data w-full">
+        <table className="data w-full" data-sin-filtros>
           <thead>
             <tr>
               <th>Grupo</th>

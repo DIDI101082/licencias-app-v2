@@ -306,7 +306,7 @@ export default function Ubicacion() {
       <FiltrosActivos ctl={fc} total={filas.length} />
 
       <div className="card overflow-x-auto">
-        <table className="data w-full">
+        <table className="data w-full" data-paginada>
           <thead>
             <tr>
               <ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro><ThFiltro ctl={fc} col="ubicacion">Ubicación</ThFiltro>

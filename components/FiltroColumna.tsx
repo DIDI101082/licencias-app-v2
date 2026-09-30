@@ -39,7 +39,7 @@ export function useFiltrosColumna<T>(filas: T[], columnas: Record<string, Extrac
 // ------------------------------------------------------------------
 // Encabezado de columna con el botón de filtro
 // ------------------------------------------------------------------
-function IconoFiltro({ lleno }: { lleno: boolean }) {
+export function IconoFiltro({ lleno }: { lleno: boolean }) {
   return (
     <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" className="shrink-0">
       <path d="M2 3h12l-4.5 5.5V13l-3 1.5V8.5L2 3z" fill={lleno ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
@@ -79,7 +79,7 @@ export function ThFiltro<T>({
 // ------------------------------------------------------------------
 const ANCHO = 280;
 
-function PanelFiltro({
+export function PanelFiltro({
   titulo, ancla, opciones, elegidos, onAplicar, onCerrar,
 }: {
   titulo: string; ancla: HTMLElement; opciones: { valor: string; n: number }[]; elegidos: Set<string> | null;

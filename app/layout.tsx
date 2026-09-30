@@ -6,6 +6,7 @@ import Nav from "@/components/Nav";
 import { PerfilProvider } from "@/components/PerfilContext";
 import GuardiaModulo from "@/components/GuardiaModulo";
 import RegistrarIngreso from "@/components/RegistrarIngreso";
+import TablasMejoradas from "@/components/TablasMejoradas";
 import { SCRIPT_TEMA, SCRIPT_MENU, SCRIPT_ANCHO } from "@/lib/tema";
 
 const display = Plus_Jakarta_Sans({
@@ -35,6 +36,7 @@ export default async function RootLayout({
       <body className={`${display.variable} ${body.variable} font-sans`}>
         <PerfilProvider perfil={perfil}>
           {perfil && <RegistrarIngreso />}
+          {perfil && <TablasMejoradas />}
           {perfil && <Nav nombre={perfil.nombre} rol={perfil.rol} modulos={perfil.modulos ?? []} paginas={perfil.paginas} />}
           <main className="contenedor-ancho mx-auto max-w-6xl px-6 py-8 print:p-0 print:max-w-none">
             {perfil ? <GuardiaModulo modulos={perfil.modulos ?? []} paginas={perfil.paginas}>{children}</GuardiaModulo> : children}

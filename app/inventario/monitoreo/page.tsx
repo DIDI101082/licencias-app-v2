@@ -281,7 +281,7 @@ export default function Monitoreo() {
       <FiltrosActivos ctl={fc} total={filtrados.length} />
 
       <div ref={tablaRef} className="card overflow-x-auto scroll-mt-4">
-        <table className="data w-full">
+        <table className="data w-full" data-paginada>
           <thead>
             <tr>
               <ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro><ThFiltro ctl={fc} col="inventario">Inventario</ThFiltro>

@@ -160,3 +160,10 @@ html.dark .marca:not(.claro *) { filter: brightness(0) invert(1); }
 
 /* Ancho completo (preferencia de cada usuario, se elige en el menú de la cuenta) */
 html.ancho-completo .contenedor-ancho { max-width: none; }
+
+/* Filtros y páginas automáticos de las tablas (components/TablasMejoradas.tsx) */
+tr[data-mt-oculta] { display: none; }
+@media print {
+  /* Al imprimir se ve la tabla entera, no solo la página actual (los filtros sí se respetan) */
+  tr[data-mt-oculta="pagina"] { display: table-row; }
+}
