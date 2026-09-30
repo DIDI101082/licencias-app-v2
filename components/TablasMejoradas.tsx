@@ -7,12 +7,15 @@
 //   * agrega un embudo en cada encabezado con texto, que abre el mismo panel de filtros
 //     que usan Monitoreo, Equipos, etc. (valores de la columna, buscador, tildes);
 //   * si la tabla tiene más de 50 filas, la divide en páginas;
+//   * agrega un botón "Columnas" en el último encabezado visible para ocultar y mostrar columnas
+//     (la elección se guarda en el navegador, por pantalla y por tabla);
 //   * se vuelve a acomodar solo cuando la pantalla cambia las filas (datos en vivo, pestañas).
 //
 // No toca los datos ni el código de cada pantalla: solo oculta filas con un atributo.
 //   * data-sin-filtros en la tabla  → se deja como está (matrices de permisos, documentos para imprimir).
 //   * data-paginada en la tabla     → la pantalla ya pagina por su cuenta; solo se agregan filtros si no los tiene.
 //   * Tablas con filtros propios (ThFiltro) → se respetan y solo se paginan.
+//   * data-sin-columnas en la tabla → no se ofrece elegir columnas.
 // ------------------------------------------------------------------
 
 import { useEffect } from "react";
@@ -20,11 +23,13 @@ import { usePathname } from "next/navigation";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { PanelFiltro } from "@/components/FiltroColumna";
+import { PanelColumnas } from "@/components/PanelColumnas";
 import { VACIO, valoresDisponibles } from "@/lib/filtros-columna";
 
 const POR_PAGINA = 50;
 const MIN_FILAS_FILTRO = 5;       // con menos filas no vale la pena filtrar
 const MARCA = "data-mt";           // todo lo que agrega este componente lleva esta marca
+const MIN_COLUMNAS = 3;            // con menos columnas con título no se ofrece elegir
 
 // Etiquetas que cortan el "valor principal" de una celda: "Daniel Creta<div>ÁREA</div>" → "Daniel Creta"
 const BLOQUES = new Set(["DIV", "P", "UL", "OL", "LI", "BR", "TABLE", "DETAILS", "DL", "SECTION"]);
@@ -62,6 +67,15 @@ export function valorCelda(td: HTMLTableCellElement): string {
 
 type Fila = { tr: HTMLTableRowElement; anexas: HTMLTableRowElement[]; valores: string[] };
 
+const ICONO_COLUMNAS = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6 3v10M10 3v10" stroke="currentColor" stroke-width="1.4"/></svg>`;
+
+function leerOcultas(clave: string): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(clave) ?? "[]")); } catch { return new Set(); }
+}
+function guardarOcultas(clave: string, s: Set<string>) {
+  try { if (s.size) localStorage.setItem(clave, JSON.stringify(Array.from(s))); else localStorage.removeItem(clave); } catch { /* sin almacenamiento */ }
+}
+
 function iconoSvg(lleno: boolean) {
   return `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 3h12l-4.5 5.5V13l-3 1.5V8.5L2 3z" fill="${lleno ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
 }
@@ -77,8 +91,78 @@ class TablaMejorada {
   raizPie: Root | null = null;
   panel: { raiz: Root; div: HTMLDivElement } | null = null;
   firmaCabecera = "";
+  ruta: string;
+  ocultas = new Set<string>();
+  botonCols: HTMLButtonElement | null = null;
 
-  constructor(t: HTMLTableElement) { this.tabla = t; }
+  constructor(t: HTMLTableElement, ruta: string) { this.tabla = t; this.ruta = ruta; }
+
+  get claveColumnas() { return `mt-columnas:${this.ruta}:${this.firmaCabecera}`; }
+
+  // Columnas que se pueden ocultar: con título único. Solo en tablas de una fila de encabezado sin celdas combinadas.
+  elegibles(ths: HTMLTableCellElement[]): string[] {
+    if (this.tabla.hasAttribute("data-sin-columnas")) return [];
+    if ((this.tabla.tHead?.rows.length ?? 0) !== 1 || ths.some((th) => (th.colSpan || 1) > 1)) return [];
+    const cuenta = new Map<string, number>();
+    this.columnas.forEach((c) => c && cuenta.set(c, (cuenta.get(c) ?? 0) + 1));
+    const lista = this.columnas.filter((c) => c && cuenta.get(c) === 1);
+    return lista.length >= MIN_COLUMNAS ? lista : [];
+  }
+
+  aplicarColumnas(ths: HTMLTableCellElement[], elegibles: string[]) {
+    const ocultar = ths.map((_, i) => elegibles.includes(this.columnas[i]) && this.ocultas.has(this.columnas[i]));
+    const marcar = (el: Element | undefined, si: boolean) => {
+      if (!el) return;
+      if (si) { if (!el.hasAttribute("data-mt-col-oculta")) el.setAttribute("data-mt-col-oculta", ""); }
+      else if (el.hasAttribute("data-mt-col-oculta")) el.removeAttribute("data-mt-col-oculta");
+    };
+    ths.forEach((th, i) => marcar(th, ocultar[i]));
+    const filas = [
+      ...this.filas.map((f) => f.tr),
+      ...Array.from(this.tabla.tFoot?.rows ?? []),
+    ];
+    filas.forEach((tr) => {
+      if (tr.cells.length !== ths.length) return;   // filas con celdas combinadas: se dejan como están
+      Array.from(tr.cells).forEach((td, i) => marcar(td, ocultar[i]));
+    });
+
+    // Botón "Columnas" en el último encabezado visible
+    if (!elegibles.length) { this.botonCols?.remove(); this.botonCols = null; return; }
+    const destino = [...ths].reverse().find((th, j) => !ocultar[ths.length - 1 - j]);
+    if (!destino) return;
+    if (!this.botonCols) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute(MARCA, "");
+      b.setAttribute("data-mt-cols", "");
+      b.setAttribute("aria-haspopup", "dialog");
+      b.addEventListener("click", (e) => { e.stopPropagation(); this.abrirColumnas(b); });
+      b.innerHTML = ICONO_COLUMNAS;
+      this.botonCols = b;
+    }
+    const b = this.botonCols;
+    const hay = this.ocultas.size > 0;
+    const cls = `ml-2 align-middle rounded p-1 -m-1 transition-colors print:hidden float-right ${hay ? "text-brand-600" : "text-ink/35 hover:text-ink/70"}`;
+    if (b.className !== cls) b.className = cls;
+    const etiqueta = hay ? `Elegir columnas (${this.ocultas.size} ocultas)` : "Elegir columnas";
+    if (b.getAttribute("aria-label") !== etiqueta) { b.setAttribute("aria-label", etiqueta); b.title = etiqueta; }
+    if (b.parentElement !== destino) destino.appendChild(b);
+  }
+
+  abrirColumnas(ancla: HTMLButtonElement) {
+    if (this.panel) { this.cerrarPanel(); return; }
+    const elegibles = this.elegibles(this.cabeceras());
+    const div = document.createElement("div");
+    div.setAttribute(MARCA, "");
+    document.body.appendChild(div);
+    const raiz = createRoot(div);
+    this.panel = { raiz, div };
+    flushSync(() => raiz.render(
+      <PanelColumnas columnas={elegibles} ocultas={this.ocultas} ancla={ancla}
+        onCambiar={(s) => { this.ocultas = s; guardarOcultas(this.claveColumnas, s); this.actualizar(); }}
+        onCerrar={() => this.cerrarPanel()} />,
+    ));
+  }
 
   get conFiltrosPropios() { return !!this.tabla.querySelector('thead button[aria-label^="Filtrar"]:not([data-mt])'); }
   get paginaPropia() { return this.tabla.hasAttribute("data-paginada"); }
@@ -125,13 +209,16 @@ class TablaMejorada {
     const ths = this.cabeceras();
     this.columnas = ths.map((th) => (th.textContent ?? "").replace(/\s+/g, " ").trim());
     const firma = this.columnas.join("|");
-    if (firma !== this.firmaCabecera) { this.filtros.clear(); this.pagina = 1; this.firmaCabecera = firma; }
+    if (firma !== this.firmaCabecera) {
+      this.filtros.clear(); this.pagina = 1; this.firmaCabecera = firma;
+      this.ocultas = leerOcultas(this.claveColumnas);
+    }
     this.leerFilas();
 
     // Embudos en los encabezados
     const usarFiltros = !this.conFiltrosPropios && this.filas.length >= MIN_FILAS_FILTRO;
     ths.forEach((th, i) => {
-      let b = th.querySelector(`button[${MARCA}]`) as HTMLButtonElement | null;
+      let b = th.querySelector(`button[${MARCA}]:not([data-mt-cols])`) as HTMLButtonElement | null;
       if (!usarFiltros || !this.filtrable(i)) {
         if (b && !this.filtros.has(i)) b.remove();
         if (!b || !this.filtros.has(i)) return;
@@ -143,7 +230,7 @@ class TablaMejorada {
         b.setAttribute("aria-haspopup", "dialog");
         b.className = "ml-1.5 align-middle rounded p-1 -m-1 transition-colors print:hidden";
         b.addEventListener("click", (e) => { e.stopPropagation(); this.abrirPanel(i, b!); });
-        th.appendChild(b);
+        th.insertBefore(b, th.querySelector("button[data-mt-cols]"));
       }
       const activo = this.filtros.has(i);
       b.className = `ml-1.5 align-middle rounded p-1 -m-1 transition-colors print:hidden ${activo ? "text-brand-600" : "text-ink/35 hover:text-ink/70"}`;
@@ -168,11 +255,16 @@ class TablaMejorada {
       });
     });
 
-    this.dibujarPie({ total: this.filas.length, visibles: visibles.length, paginar, paginas });
+    // Columnas ocultas
+    const elegibles = this.elegibles(ths);
+    this.aplicarColumnas(ths, elegibles);
+    const ocultasAhora = elegibles.filter((c) => this.ocultas.has(c)).length;
+
+    this.dibujarPie({ total: this.filas.length, visibles: visibles.length, paginar, paginas, ocultas: ocultasAhora });
   }
 
-  dibujarPie(d: { total: number; visibles: number; paginar: boolean; paginas: number }) {
-    const hace = d.paginar || this.filtros.size > 0;
+  dibujarPie(d: { total: number; visibles: number; paginar: boolean; paginas: number; ocultas: number }) {
+    const hace = d.paginar || this.filtros.size > 0 || d.ocultas > 0;
     if (!hace) { this.quitarPie(); return; }
     const envoltura = (this.tabla.closest(".overflow-x-auto, .card") as HTMLElement | null) ?? this.tabla;
     if (!this.pie || !this.pie.isConnected || this.pie.previousElementSibling !== envoltura) {
@@ -194,6 +286,15 @@ class TablaMejorada {
               {" · "}{this.filtros.size === 1 ? "1 filtro de columna" : `${this.filtros.size} filtros de columna`}{" · "}
               <button type="button" className="text-brand-600 hover:underline" onClick={() => { this.filtros.clear(); this.pagina = 1; this.actualizar(); }}>
                 Quitar filtros
+              </button>
+            </>
+          )}
+          {d.ocultas > 0 && (
+            <>
+              {" · "}{d.ocultas === 1 ? "1 columna oculta" : `${d.ocultas} columnas ocultas`}{" · "}
+              <button type="button" className="text-brand-600 hover:underline"
+                onClick={() => { this.ocultas = new Set(); guardarOcultas(this.claveColumnas, this.ocultas); this.actualizar(); }}>
+                Mostrar todas
               </button>
             </>
           )}
@@ -261,7 +362,9 @@ class TablaMejorada {
     this.cerrarPanel();
     this.quitarPie();
     this.botones.forEach((b) => b.remove());
+    this.botonCols?.remove();
     this.filas.forEach((f) => [f.tr, ...f.anexas].forEach((tr) => tr.removeAttribute("data-mt-oculta")));
+    this.tabla.querySelectorAll("[data-mt-col-oculta]").forEach((el) => el.removeAttribute("data-mt-col-oculta"));
   }
 }
 
@@ -281,7 +384,7 @@ export default function TablasMejoradas() {
       main.querySelectorAll<HTMLTableElement>("table.data").forEach((t) => {
         if (t.hasAttribute("data-sin-filtros")) return;
         let m = tablas.get(t);
-        if (!m) { m = new TablaMejorada(t); tablas.set(t, m); }
+        if (!m) { m = new TablaMejorada(t, ruta); tablas.set(t, m); }
         m.actualizar();
       });
     };

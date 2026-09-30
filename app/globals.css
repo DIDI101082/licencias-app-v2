@@ -163,6 +163,7 @@ html.ancho-completo .contenedor-ancho { max-width: none; }
 
 /* Filtros y páginas automáticos de las tablas (components/TablasMejoradas.tsx) */
 tr[data-mt-oculta] { display: none; }
+[data-mt-col-oculta] { display: none; }   /* columnas que el usuario eligió ocultar */
 @media print {
   /* Al imprimir se ve la tabla entera, no solo la página actual (los filtros sí se respetan) */
   tr[data-mt-oculta="pagina"] { display: table-row; }
