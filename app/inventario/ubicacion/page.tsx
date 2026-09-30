@@ -101,14 +101,17 @@ export default function Ubicacion() {
     const desde = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
     sb.from("inv_ubicacion_diaria").select("dispositivo_id, fecha, tipo").gte("fecha", desde)
       .then(({ data }) => setHistorial(data ?? []));
+    // Los agentes reportan seguido: se agrupan los cambios y se recarga como mucho una vez cada 30 segundos
+    let pendiente: ReturnType<typeof setTimeout> | undefined;
+    const recargarLuego = () => { if (!pendiente) pendiente = setTimeout(() => { pendiente = undefined; cargar(); }, 30000); };
     const canal = sb.channel("inv-ubicacion")
-      .on("postgres_changes", { event: "*", schema: "public", table: "inv_dispositivos" }, () => cargar())
+      .on("postgres_changes", { event: "*", schema: "public", table: "inv_dispositivos" }, () => recargarLuego())
       .subscribe();
     const cargarUni = () => sb.rpc("unifi_ubicacion").then(({ data, error }) => setUni(error ? null : data));
     cargarUni();
     const uniIntervalo = setInterval(cargarUni, 120000);
     const reloj = setInterval(() => setAhora(Date.now()), 30000);
-    return () => { sb.removeChannel(canal); clearInterval(reloj); clearInterval(uniIntervalo); };
+    return () => { sb.removeChannel(canal); clearInterval(reloj); clearInterval(uniIntervalo); clearTimeout(pendiente); };
   }, []);
 
   const conectados = disp.filter((d) => conectado(d.ultimo_reporte, ahora));

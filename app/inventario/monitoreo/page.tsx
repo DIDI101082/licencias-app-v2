@@ -31,13 +31,25 @@ export default function Monitoreo() {
     const sb = createClient();
     cargar();
 
-    // Cada reporte nuevo de un agente llega acá sin recargar la página
+    // Cada reporte de un agente llega acá sin recargar la página. Para no volver a traer
+    // todos los equipos con cada reporte, se actualiza solo la fila que cambió; la lista
+    // completa se recarga (agrupada) solo si aparece o se quita un equipo o cambia su vínculo al inventario.
+    let pendiente: ReturnType<typeof setTimeout> | undefined;
+    const recargarLuego = () => { clearTimeout(pendiente); pendiente = setTimeout(cargar, 2000); };
     const canal = sb
       .channel("inv-dispositivos")
-      .on("postgres_changes", { event: "*", schema: "public", table: "inv_dispositivos" }, () => cargar())
+      .on("postgres_changes", { event: "*", schema: "public", table: "inv_dispositivos" }, (p) => {
+        const nuevo = p.new as Dispositivo | undefined;
+        if (p.eventType !== "UPDATE" || !nuevo?.id) return recargarLuego();
+        setTodos((prev) => {
+          const actual = prev.find((d) => d.id === nuevo.id);
+          if (!actual || actual.equipo_id !== nuevo.equipo_id) { recargarLuego(); return prev; }
+          return prev.map((d) => (d.id === nuevo.id ? { ...d, ...nuevo } : d));
+        });
+      })
       .subscribe();
     const reloj = setInterval(() => setAhora(Date.now()), 30000);
-    return () => { sb.removeChannel(canal); clearInterval(reloj); };
+    return () => { sb.removeChannel(canal); clearInterval(reloj); clearTimeout(pendiente); };
   }, [cargar]);
 
   // Solo los equipos aprobados cuentan; los pendientes y bloqueados se muestran aparte (solo admin)
