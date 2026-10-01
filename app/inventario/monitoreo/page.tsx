@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
+import { exportarExcel } from "@/lib/excel";
 import { textoUbicacion, ATRIBUCION_GEO } from "@/lib/geo";
 import { conectado, hace, discoCritico, usoDisco, encendidoDesde, MINUTOS_CONECTADO, tipoEquipo, tipoDeducido, TIPOS_EQUIPO, type Disco, type TipoEquipo } from "@/lib/monitoreo";
 import { claseCodigo } from "@/lib/inventario";
@@ -28,13 +29,9 @@ const COLUMNAS = [
 ].join(", ");
 const CAMPOS = new Set(COLUMNAS.split(", "));
 
-// Exporta a CSV (se abre en Excel) exactamente lo que se ve en la tabla: solapa, tarjeta, buscador y filtros de columna.
+// Exporta a Excel (con filtro en cada columna) exactamente lo que se ve en la tabla: solapa, tarjeta, buscador y filtros de columna.
 // Incluye todas las páginas, no solo la visible.
-function exportarCSV(filas: Dispositivo[], ahora: number) {
-  const esc = (v: any) => {
-    const s = v == null ? "" : String(v);
-    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
+function exportarEquipos(filas: Dispositivo[], ahora: number) {
   const fecha = (v: string | null) => (v ? new Date(v).toLocaleString("es-AR") : "");
   const cab = [
     "Equipo", "Tipo", "Estado", "Usuario", "Dominio", "IP", "IP pública", "MAC", "Código inventario", "Fabricante", "Modelo",
@@ -42,7 +39,7 @@ function exportarCSV(filas: Dispositivo[], ahora: number) {
     "Disco casi lleno", "Antivirus", "Versión agente", "Aplicaciones", "Ubicación", "Último reporte", "Reporta desde",
   ];
   const cuerpo = filas.map((d) => {
-    const ramUso = d.ram_total_gb ? Math.round(((d.ram_total_gb - d.ram_libre_gb) / d.ram_total_gb) * 100) : "";
+    const ramUso = d.ram_total_gb ? Math.round(((d.ram_total_gb - d.ram_libre_gb) / d.ram_total_gb) * 100) : null;
     const discos = (d.discos ?? []).map((x) => `${x.unidad} ${x.libre_gb} GB libres de ${x.total_gb} (${usoDisco(x)}%)`).join(" | ");
     const av = Array.isArray(d.av_productos)
       ? d.av_productos.filter((p: any) => p.activo).map((p: any) => p.nombre).join(", ") || "Sin antivirus activo"
@@ -51,15 +48,12 @@ function exportarCSV(filas: Dispositivo[], ahora: number) {
       d.hostname, TIPOS_EQUIPO[tipoEquipo(d)].uno, conectado(d.ultimo_reporte, ahora) ? "Conectado" : "Desconectado",
       d.usuario, d.dominio, d.ip, d.ip_publica, d.mac, d.inv_equipos?.codigo ?? "Sin cargar", d.fabricante, d.modelo,
       d.numero_serie, d.so_nombre?.replace("Microsoft ", ""), d.so_version, d.so_build, d.procesador, d.nucleos,
-      d.ram_total_gb, ramUso, discos, discoCritico(d.discos) ? "Sí" : "No", av, d.agente_version, d.apps_cantidad,
-      textoUbicacion(d) ?? "", fecha(d.ultimo_reporte), fecha(d.primer_reporte),
-    ].map(esc).join(";");
+      d.ram_total_gb != null ? Number(d.ram_total_gb) : null, ramUso, discos, discoCritico(d.discos) ? "Sí" : "No", av,
+      d.agente_version, d.apps_cantidad, textoUbicacion(d) ?? "", fecha(d.ultimo_reporte), fecha(d.primer_reporte),
+    ];
   });
-  const blob = new Blob(["\uFEFF" + [cab.join(";"), ...cuerpo].join("\n")], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `monitoreo-equipos-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
+  exportarExcel(`monitoreo-equipos-${new Date().toISOString().slice(0, 10)}`, cab, cuerpo,
+    { Usuario: 34, Procesador: 40, Discos: 40, Antivirus: 30, Ubicación: 30, "Último reporte": 20, "Reporta desde": 20 });
 }
 
 export default function Monitoreo() {
@@ -226,7 +220,7 @@ export default function Monitoreo() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button className="btn-secondary" onClick={() => exportarCSV(enTabla, ahora)} disabled={!enTabla.length}
+          <button className="btn-secondary" onClick={() => exportarEquipos(enTabla, ahora)} disabled={!enTabla.length}
             title="Exporta todos los equipos que coinciden con los filtros actuales (todas las páginas)">
             Exportar a Excel
           </button>

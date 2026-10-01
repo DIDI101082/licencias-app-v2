@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { conectado, hace, discoCritico, usoDisco, type Disco } from "@/lib/monitoreo";
 import BarraDisco from "@/components/BarraDisco";
+import { exportarExcel } from "@/lib/excel";
 import { fecha } from "@/lib/inventario";
 import { CONTROLES, ESTILO, evaluar, adminsExtra, usuarioEsAdmin, TEXTO_USUARIO_ADMIN, DIAS_MAX_SIN_PARCHES, type Control, type Resultado } from "@/lib/seguridad";
 
@@ -105,21 +106,21 @@ export default function Seguridad() {
   });
   const ordenadas = [...fc.filtradas].sort((a, b) => problemas(b) - problemas(a) || String(a.hostname).localeCompare(b.hostname));
 
+  // Excel con filtro en cada columna: cada control va en dos columnas (resultado y detalle) para poder filtrar por resultado
   function exportar() {
-    const cab = ["Equipo", "Código IT", "Usuario", "Usuario es admin", ...CONTROLES.map((c) => c.titulo), "Memoria RAM", "RAM en uso (%)", "Discos", "Disco casi lleno", "Último parche", "Admins locales", "Actualizado"];
-    const filasCsv = ordenadas.map((d) => [
+    const cab = ["Equipo", "Código IT", "Usuario", "Usuario es admin",
+      ...CONTROLES.flatMap((c) => [c.titulo, `${c.titulo} (detalle)`]),
+      "Memoria RAM (GB)", "RAM en uso (%)", "Discos", "Disco casi lleno", "Último parche", "Admins locales", "Actualizado"];
+    const filas = ordenadas.map((d) => [
       d.hostname, d.inv_equipos?.codigo ?? "", d.usuario ?? "", TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
-      ...CONTROLES.map((c) => `${ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta}: ${d.ev[c.k].texto}`),
-      textoRam(d), ramUso(d) ?? "", textoDiscos(d), d.discos?.length ? (discoCritico(d.discos) ? "Sí" : "No") : "",
+      ...CONTROLES.flatMap((c) => [ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta, d.ev[c.k].texto]),
+      d.ram_total_gb ? Math.round(d.ram_total_gb) : null, ramUso(d), textoDiscos(d),
+      d.discos?.length ? (discoCritico(d.discos) ? "Sí" : "No") : "",
       d.ultimo_parche_titulo ?? "", (d.admins_locales ?? []).map((a: any) => a.nombre).join(" | "),
       new Date(d.seguridad_actualizado).toLocaleString("es-AR"),
     ]);
-    const esc = (v: any) => { const s = String(v ?? ""); return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const texto = [cab, ...filasCsv].map((f) => f.map(esc).join(";")).join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob(["\uFEFF" + texto], { type: "text/csv;charset=utf-8" }));
-    a.download = `seguridad-equipos-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
+    exportarExcel(`seguridad-equipos-${new Date().toISOString().slice(0, 10)}`, cab, filas,
+      { Equipo: 14, Usuario: 34, Discos: 40, "Último parche": 50, "Admins locales": 60, Actualizado: 20 });
   }
 
   return (
