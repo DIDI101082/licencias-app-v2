@@ -5,7 +5,8 @@ import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/Filtro
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
-import { conectado, hace } from "@/lib/monitoreo";
+import { conectado, hace, discoCritico, usoDisco, type Disco } from "@/lib/monitoreo";
+import BarraDisco from "@/components/BarraDisco";
 import { fecha } from "@/lib/inventario";
 import { CONTROLES, ESTILO, evaluar, adminsExtra, usuarioEsAdmin, TEXTO_USUARIO_ADMIN, DIAS_MAX_SIN_PARCHES, type Control, type Resultado } from "@/lib/seguridad";
 
@@ -19,6 +20,12 @@ function Celda({ r }: { r: Resultado }) {
     </span>
   );
 }
+
+// Memoria y discos: mismos datos que Monitoreo, para ver todo el estado del equipo en una sola tabla
+const ramUso = (d: any) => (d.ram_total_gb ? Math.round(((d.ram_total_gb - d.ram_libre_gb) / d.ram_total_gb) * 100) : null);
+const textoRam = (d: any) => (d.ram_total_gb ? `${Math.round(d.ram_total_gb)} GB` : "Sin datos");
+const textoDiscos = (d: any) =>
+  ((d.discos ?? []) as Disco[]).map((x) => `${x.unidad} ${x.libre_gb} GB libres de ${x.total_gb} (${usoDisco(x)}%)`).join(" | ");
 
 function AdminsPermitidos({ lista, onCambio }: { lista: string[]; onCambio: (l: string[]) => void }) {
   const [nuevo, setNuevo] = useState("");
@@ -93,14 +100,17 @@ export default function Seguridad() {
     equipo: (d) => d.hostname,
     usuarioadmin: (d) => TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
     ...Object.fromEntries(CONTROLES.map((c) => [c.k, (d: any) => ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta])),
+    memoria: (d) => textoRam(d),
+    discos: (d) => (!d.discos?.length ? "Sin datos" : discoCritico(d.discos) ? "Disco casi lleno" : "Espacio OK"),
   });
   const ordenadas = [...fc.filtradas].sort((a, b) => problemas(b) - problemas(a) || String(a.hostname).localeCompare(b.hostname));
 
   function exportar() {
-    const cab = ["Equipo", "Código IT", "Usuario", "Usuario es admin", ...CONTROLES.map((c) => c.titulo), "Último parche", "Admins locales", "Actualizado"];
+    const cab = ["Equipo", "Código IT", "Usuario", "Usuario es admin", ...CONTROLES.map((c) => c.titulo), "Memoria RAM", "RAM en uso (%)", "Discos", "Disco casi lleno", "Último parche", "Admins locales", "Actualizado"];
     const filasCsv = ordenadas.map((d) => [
       d.hostname, d.inv_equipos?.codigo ?? "", d.usuario ?? "", TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
       ...CONTROLES.map((c) => `${ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta}: ${d.ev[c.k].texto}`),
+      textoRam(d), ramUso(d) ?? "", textoDiscos(d), d.discos?.length ? (discoCritico(d.discos) ? "Sí" : "No") : "",
       d.ultimo_parche_titulo ?? "", (d.admins_locales ?? []).map((a: any) => a.nombre).join(" | "),
       new Date(d.seguridad_actualizado).toLocaleString("es-AR"),
     ]);
@@ -171,6 +181,8 @@ export default function Seguridad() {
               <ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro>
               <ThFiltro ctl={fc} col="usuarioadmin">Usuario es admin</ThFiltro>
               {CONTROLES.map((c) => <ThFiltro key={c.k} ctl={fc} col={c.k}>{c.titulo}</ThFiltro>)}
+              <ThFiltro ctl={fc} col="memoria">Memoria</ThFiltro>
+              <ThFiltro ctl={fc} col="discos">Discos</ThFiltro>
             </tr>
           </thead>
           <tbody>
@@ -194,10 +206,21 @@ export default function Seguridad() {
                         : <span className="text-sm text-ink/40">{TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN]}</span>}
                     </td>
                     {CONTROLES.map((c) => <td key={c.k}><Celda r={d.ev[c.k]} /></td>)}
+                    <td className="whitespace-nowrap text-sm">
+                      {d.ram_total_gb ? <>
+                        {Math.round(d.ram_total_gb)} GB
+                        {ramUso(d) != null && <div className={`text-xs ${ramUso(d)! >= 90 ? "text-red-600" : "text-ink/50"}`}>{ramUso(d)}% en uso</div>}
+                      </> : <span className="text-ink/40">Sin datos</span>}
+                    </td>
+                    <td>
+                      {d.discos?.length
+                        ? <div className="space-y-1.5">{(d.discos as Disco[]).map((x) => <BarraDisco key={x.unidad} d={x} />)}</div>
+                        : <span className="text-sm text-ink/40">Sin datos</span>}
+                    </td>
                   </tr>
                   {abierto === d.id && (
                     <tr>
-                      <td colSpan={CONTROLES.length + 2} className="bg-canvas">
+                      <td colSpan={CONTROLES.length + 4} className="bg-canvas">
                         <div className="grid md:grid-cols-3 gap-5 text-sm py-1">
                           <div>
                             {d.cifrado_producto && (
@@ -268,7 +291,7 @@ export default function Seguridad() {
               );
             })}
             {!cargando && ordenadas.length === 0 && (
-              <tr><td colSpan={CONTROLES.length + 2} className="text-center text-ink/40 py-10">
+              <tr><td colSpan={CONTROLES.length + 4} className="text-center text-ink/40 py-10">
                 {filtro ? "Ningún equipo tiene este problema." : "Todavía ningún equipo informó datos de seguridad."}
               </td></tr>
             )}
