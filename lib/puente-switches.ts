@@ -18,6 +18,8 @@ using System.Text;
 public static class SnmpAccusys {
   public static int Timeout = 2500;
   public static int Reintentos = 2;
+  // 1 = SNMP v2c (predeterminado, GETBULK); 0 = SNMP v1 (GETNEXT, para equipos chicos que no hablan v2c)
+  public static int Version = 1;
   static int idPedido = new Random().Next(1, 1000000);
 
   public class Vb { public string Oid; public int Tipo; public byte[] Valor; }
@@ -82,7 +84,7 @@ public static class SnmpAccusys {
     List<byte> pdu = new List<byte>();
     pdu.AddRange(Entero(id)); pdu.AddRange(Entero(a)); pdu.AddRange(Entero(b)); pdu.AddRange(Tlv(0x30, vbs.ToArray()));
     List<byte> msg = new List<byte>();
-    msg.AddRange(Entero(1)); msg.AddRange(Tlv(0x04, Encoding.ASCII.GetBytes(com))); msg.AddRange(Tlv(tag, pdu.ToArray()));
+    msg.AddRange(Entero(Version)); msg.AddRange(Tlv(0x04, Encoding.ASCII.GetBytes(com))); msg.AddRange(Tlv(tag, pdu.ToArray()));
     return Tlv(0x30, msg.ToArray());
   }
   static void Cabecera(byte[] d, ref int p, out byte tag, out int len) {
@@ -159,6 +161,7 @@ public static class SnmpAccusys {
     return Pedir(host, puerto, com, 0xA0, 0, 0, oids);
   }
   public static List<Vb> Walk(string host, int puerto, string com, string raiz, int limite) {
+    if (Version == 0) return WalkV1(host, puerto, com, raiz, limite);
     List<Vb> r = new List<Vb>();
     string sig = raiz;
     string pref = raiz + ".";
@@ -175,6 +178,23 @@ public static class SnmpAccusys {
       string ult = res[res.Count - 1].Oid;
       if (ult == sig) break;
       sig = ult;
+    }
+    return r;
+  }
+  // SNMP v1 no tiene GETBULK: se recorre de a un valor con GETNEXT. El fin de la rama llega como error noSuchName.
+  static List<Vb> WalkV1(string host, int puerto, string com, string raiz, int limite) {
+    List<Vb> r = new List<Vb>();
+    string sig = raiz;
+    string pref = raiz + ".";
+    while (r.Count < limite) {
+      List<Vb> res;
+      try { res = Pedir(host, puerto, com, 0xA1, 0, 0, new string[] { sig }); }
+      catch (Exception e) { if (e.Message.StartsWith("El equipo respondio con error SNMP")) break; throw; }
+      if (res.Count == 0) break;
+      Vb v = res[0];
+      if (!v.Oid.StartsWith(pref) || v.Oid == sig) break;
+      if (v.Tipo != 0x80 && v.Tipo != 0x81 && v.Tipo != 0x82) r.Add(v);
+      sig = v.Oid;
     }
     return r;
   }
