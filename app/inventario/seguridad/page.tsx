@@ -8,6 +8,7 @@ import { usePerfil } from "@/components/PerfilContext";
 import { conectado, hace, discoCritico, usoDisco, type Disco } from "@/lib/monitoreo";
 import BarraDisco from "@/components/BarraDisco";
 import { exportarExcel } from "@/lib/excel";
+import { soporteWindows } from "@/lib/riesgos";
 import { fecha } from "@/lib/inventario";
 import { CONTROLES, ESTILO, evaluar, adminsExtra, usuarioEsAdmin, TEXTO_USUARIO_ADMIN, DIAS_MAX_SIN_PARCHES, type Control, type Resultado } from "@/lib/seguridad";
 
@@ -24,6 +25,11 @@ function Celda({ r }: { r: Resultado }) {
 
 // Memoria y discos: mismos datos que Monitoreo, para ver todo el estado del equipo en una sola tabla
 const ramUso = (d: any) => (d.ram_total_gb ? Math.round(((d.ram_total_gb - d.ram_libre_gb) / d.ram_total_gb) * 100) : null);
+const textoSistema = (d: any) => (d.so_nombre ? String(d.so_nombre).replace("Microsoft ", "") : "Sin datos");
+const detalleSistema = (d: any) => [d.so_version, d.so_build && `build ${d.so_build}`].filter(Boolean).join(" · ");
+// Fin de soporte de Microsoft, con la misma tabla que usa Riesgos
+const soporte = (d: any) => soporteWindows(d.so_nombre, d.so_version, d.so_build);
+const fechaSoporte = (f: string | null) => (f ? new Date(f + "T12:00:00").toLocaleDateString("es-AR") : "");
 const textoRam = (d: any) => (d.ram_total_gb ? `${Math.round(d.ram_total_gb)} GB` : "Sin datos");
 const textoDiscos = (d: any) =>
   ((d.discos ?? []) as Disco[]).map((x) => `${x.unidad} ${x.libre_gb} GB libres de ${x.total_gb} (${usoDisco(x)}%)`).join(" | ");
@@ -101,6 +107,8 @@ export default function Seguridad() {
     equipo: (d) => d.hostname,
     usuarioadmin: (d) => TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
     ...Object.fromEntries(CONTROLES.map((c) => [c.k, (d: any) => ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta])),
+    sistema: (d) => textoSistema(d),
+    soporte: (d) => soporte(d).texto.startsWith("Vence") ? "Por vencer" : soporte(d).texto,
     memoria: (d) => textoRam(d),
     discos: (d) => (!d.discos?.length ? "Sin datos" : discoCritico(d.discos) ? "Disco casi lleno" : "Espacio OK"),
   });
@@ -108,11 +116,11 @@ export default function Seguridad() {
 
   // Excel con filtro en cada columna: cada control va en dos columnas (resultado y detalle) para poder filtrar por resultado
   function exportar() {
-    const cab = ["Equipo", "Código IT", "Usuario", "Usuario es admin",
+    const cab = ["Equipo", "Código IT", "Usuario", "Sistema operativo", "Versión", "Build", "Soporte", "Fin de soporte", "Usuario es admin",
       ...CONTROLES.flatMap((c) => [c.titulo, `${c.titulo} (detalle)`]),
       "Memoria RAM (GB)", "RAM en uso (%)", "Discos", "Disco casi lleno", "Último parche", "Admins locales", "Actualizado"];
     const filas = ordenadas.map((d) => [
-      d.hostname, d.inv_equipos?.codigo ?? "", d.usuario ?? "", TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
+      d.hostname, d.inv_equipos?.codigo ?? "", d.usuario ?? "", textoSistema(d), d.so_version ?? "", d.so_build ?? "", soporte(d).texto, fechaSoporte(soporte(d).fin), TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
       ...CONTROLES.flatMap((c) => [ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta, d.ev[c.k].texto]),
       d.ram_total_gb ? Math.round(d.ram_total_gb) : null, ramUso(d), textoDiscos(d),
       d.discos?.length ? (discoCritico(d.discos) ? "Sí" : "No") : "",
@@ -120,7 +128,7 @@ export default function Seguridad() {
       new Date(d.seguridad_actualizado).toLocaleString("es-AR"),
     ]);
     exportarExcel(`seguridad-equipos-${new Date().toISOString().slice(0, 10)}`, cab, filas,
-      { Equipo: 14, Usuario: 34, Discos: 40, "Último parche": 50, "Admins locales": 60, Actualizado: 20 });
+      { Equipo: 14, Usuario: 34, "Sistema operativo": 26, Discos: 40, "Último parche": 50, "Admins locales": 60, Actualizado: 20 });
   }
 
   return (
@@ -180,6 +188,8 @@ export default function Seguridad() {
           <thead>
             <tr>
               <ThFiltro ctl={fc} col="equipo">Equipo</ThFiltro>
+              <ThFiltro ctl={fc} col="sistema">Sistema</ThFiltro>
+              <ThFiltro ctl={fc} col="soporte">Soporte</ThFiltro>
               <ThFiltro ctl={fc} col="usuarioadmin">Usuario es admin</ThFiltro>
               {CONTROLES.map((c) => <ThFiltro key={c.k} ctl={fc} col={c.k}>{c.titulo}</ThFiltro>)}
               <ThFiltro ctl={fc} col="memoria">Memoria</ThFiltro>
@@ -199,6 +209,21 @@ export default function Seguridad() {
                         <button className="font-medium text-ink hover:underline text-left" aria-expanded={abierto === d.id}>{d.hostname}</button>
                       </div>
                       <div className="text-xs text-ink/50 pl-[18px]">{d.usuario ?? "Sin sesión"}</div>
+                    </td>
+                    <td className="text-sm">
+                      {d.so_nombre ? <>
+                        <div className="text-ink/80">{textoSistema(d)}</div>
+                        {detalleSistema(d) && <div className="text-xs text-ink/50 whitespace-nowrap">{detalleSistema(d)}</div>}
+                      </> : <span className="text-ink/40">Sin datos</span>}
+                    </td>
+                    <td>
+                      {(() => {
+                        const s = soporte(d);
+                        return <>
+                          <Celda r={{ nivel: s.nivel, texto: s.texto }} />
+                          {s.fin && <div className="text-xs text-ink/50 whitespace-nowrap pl-[14px]">{s.nivel === "problema" ? "Desde" : "Hasta"} el {fechaSoporte(s.fin)}</div>}
+                        </>;
+                      })()}
                     </td>
                     <td className="whitespace-nowrap">
                       {d.ua === "si" ? <span className="pill bg-red-50 text-red-600">Sí</span>
@@ -221,7 +246,7 @@ export default function Seguridad() {
                   </tr>
                   {abierto === d.id && (
                     <tr>
-                      <td colSpan={CONTROLES.length + 4} className="bg-canvas">
+                      <td colSpan={CONTROLES.length + 6} className="bg-canvas">
                         <div className="grid md:grid-cols-3 gap-5 text-sm py-1">
                           <div>
                             {d.cifrado_producto && (
@@ -292,7 +317,7 @@ export default function Seguridad() {
               );
             })}
             {!cargando && ordenadas.length === 0 && (
-              <tr><td colSpan={CONTROLES.length + 4} className="text-center text-ink/40 py-10">
+              <tr><td colSpan={CONTROLES.length + 6} className="text-center text-ink/40 py-10">
                 {filtro ? "Ningún equipo tiene este problema." : "Todavía ningún equipo informó datos de seguridad."}
               </td></tr>
             )}
