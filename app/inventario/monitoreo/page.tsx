@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
 import { textoUbicacion, ATRIBUCION_GEO } from "@/lib/geo";
-import { conectado, hace, discoCritico, encendidoDesde, MINUTOS_CONECTADO, tipoEquipo, tipoDeducido, TIPOS_EQUIPO, type Disco, type TipoEquipo } from "@/lib/monitoreo";
+import { conectado, hace, discoCritico, usoDisco, encendidoDesde, MINUTOS_CONECTADO, tipoEquipo, tipoDeducido, TIPOS_EQUIPO, type Disco, type TipoEquipo } from "@/lib/monitoreo";
 import { claseCodigo } from "@/lib/inventario";
 import EquiposParaAsignar from "@/components/EquiposParaAsignar";
 import EquiposSinAgente from "@/components/EquiposSinAgente";
@@ -27,6 +27,40 @@ const COLUMNAS = [
   "inv_equipos(id, codigo, estado, empleado_id)", "inv_codigos_instalacion(descripcion)",
 ].join(", ");
 const CAMPOS = new Set(COLUMNAS.split(", "));
+
+// Exporta a CSV (se abre en Excel) exactamente lo que se ve en la tabla: solapa, tarjeta, buscador y filtros de columna.
+// Incluye todas las páginas, no solo la visible.
+function exportarCSV(filas: Dispositivo[], ahora: number) {
+  const esc = (v: any) => {
+    const s = v == null ? "" : String(v);
+    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const fecha = (v: string | null) => (v ? new Date(v).toLocaleString("es-AR") : "");
+  const cab = [
+    "Equipo", "Tipo", "Estado", "Usuario", "Dominio", "IP", "IP pública", "MAC", "Código inventario", "Fabricante", "Modelo",
+    "N° de serie", "Sistema", "Versión", "Build", "Procesador", "Núcleos", "RAM (GB)", "RAM en uso (%)", "Discos",
+    "Disco casi lleno", "Antivirus", "Versión agente", "Aplicaciones", "Ubicación", "Último reporte", "Reporta desde",
+  ];
+  const cuerpo = filas.map((d) => {
+    const ramUso = d.ram_total_gb ? Math.round(((d.ram_total_gb - d.ram_libre_gb) / d.ram_total_gb) * 100) : "";
+    const discos = (d.discos ?? []).map((x) => `${x.unidad} ${x.libre_gb} GB libres de ${x.total_gb} (${usoDisco(x)}%)`).join(" | ");
+    const av = Array.isArray(d.av_productos)
+      ? d.av_productos.filter((p: any) => p.activo).map((p: any) => p.nombre).join(", ") || "Sin antivirus activo"
+      : d.antivirus_activo == null ? "" : d.antivirus_activo ? "Activo" : "Desactivado";
+    return [
+      d.hostname, TIPOS_EQUIPO[tipoEquipo(d)].uno, conectado(d.ultimo_reporte, ahora) ? "Conectado" : "Desconectado",
+      d.usuario, d.dominio, d.ip, d.ip_publica, d.mac, d.inv_equipos?.codigo ?? "Sin cargar", d.fabricante, d.modelo,
+      d.numero_serie, d.so_nombre?.replace("Microsoft ", ""), d.so_version, d.so_build, d.procesador, d.nucleos,
+      d.ram_total_gb, ramUso, discos, discoCritico(d.discos) ? "Sí" : "No", av, d.agente_version, d.apps_cantidad,
+      textoUbicacion(d) ?? "", fecha(d.ultimo_reporte), fecha(d.primer_reporte),
+    ].map(esc).join(";");
+  });
+  const blob = new Blob(["\uFEFF" + [cab.join(";"), ...cuerpo].join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `monitoreo-equipos-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
 
 export default function Monitoreo() {
   const { esAdmin } = usePerfil();
@@ -191,7 +225,13 @@ export default function Monitoreo() {
             Datos que envía el agente instalado en cada equipo. Se considera conectado si reportó en los últimos {MINUTOS_CONECTADO} minutos.
           </p>
         </div>
-        {esAdmin && <Link href="/inventario/monitoreo/agente" className="btn-secondary">Instalar agente</Link>}
+        <div className="flex gap-2">
+          <button className="btn-secondary" onClick={() => exportarCSV(enTabla, ahora)} disabled={!enTabla.length}
+            title="Exporta todos los equipos que coinciden con los filtros actuales (todas las páginas)">
+            Exportar a Excel
+          </button>
+          {esAdmin && <Link href="/inventario/monitoreo/agente" className="btn-secondary">Instalar agente</Link>}
+        </div>
       </div>
 
       <div role="tablist" aria-label="Tipo de equipo" className="flex flex-wrap gap-1 rounded-xl bg-line/[0.05] p-1 w-fit max-w-full">
