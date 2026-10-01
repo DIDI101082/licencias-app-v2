@@ -58,6 +58,7 @@ export const TEMAS: Tema[] = [
     { href: "/red", label: "Mapas de PRTG" },
     { href: "/red/switches", label: "Switches" },
     { href: "/servidores/grupo-electrogeno", label: "Grupo electrógeno" },
+    { href: "/servidores/ups", label: "UPS" },
   ], admin: [{ href: "/servidores/configuracion", label: "Configuración de servidores" }] },
   { id: "oficina", label: "Oficina", titulo: "Oficina y home office", paginas: [
     { href: "/inventario/ubicacion", label: "Dónde están los equipos" },

@@ -9,7 +9,7 @@ import { envolverEnCmd } from "./agente";
 export const PUENTE_SWITCHES_VERSION = "1.1";
 
 // Cliente SNMP v2c mínimo (GET y GETBULK). Compatible con Windows PowerShell 5.1.
-const CLIENTE_SNMP = String.raw`using System;
+export const CLIENTE_SNMP = String.raw`using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
