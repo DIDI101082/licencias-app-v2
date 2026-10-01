@@ -34,6 +34,10 @@ const textoRam = (d: any) => (d.ram_total_gb ? `${Math.round(d.ram_total_gb)} GB
 const textoDiscos = (d: any) =>
   ((d.discos ?? []) as Disco[]).map((x) => `${x.unidad} ${x.libre_gb} GB libres de ${x.total_gb} (${usoDisco(x)}%)`).join(" | ");
 
+// Asignación del equipo a una persona en el inventario
+const ASIGNACION = { asignado: "Asignado", sin_asignar: "Sin asignar", sin_inventario: "Sin cargar en inventario" } as const;
+const SIN_ASIGNAR = [ASIGNACION.sin_asignar, ASIGNACION.sin_inventario];
+
 function AdminsPermitidos({ lista, onCambio }: { lista: string[]; onCambio: (l: string[]) => void }) {
   const [nuevo, setNuevo] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -80,22 +84,30 @@ export default function Seguridad() {
   const [filtro, setFiltro] = useState<Control | null>(null);
   const [abierto, setAbierto] = useState<string | null>(null);
   const [verConfig, setVerConfig] = useState(false);
+  // Equipo del inventario → persona asignada (de la misma vista que usa Inventario IT)
+  const [asignados, setAsignados] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     const sb = createClient();
     Promise.all([
       sb.from("inv_dispositivos").select("*, inv_equipos(id, codigo)").eq("estado_registro", "aprobado").order("hostname"),
       sb.rpc("inv_admins_permitidos"),
-    ]).then(([d, p]) => {
+      sb.from("inv_v_equipos").select("id, empleado"),
+    ]).then(([d, p, q]) => {
       setLista(d.data ?? []);
       setPermitidos((p.data as string[]) ?? []);
+      setAsignados(Object.fromEntries(((q.data ?? []) as { id: string; empleado: string | null }[]).map((e) => [e.id, e.empleado])));
       setCargando(false);
     });
   }, []);
 
   const conDatos = useMemo(
-    () => lista.filter((d) => d.seguridad_actualizado).map((d) => ({ ...d, ev: evaluar(d, permitidos), ua: usuarioEsAdmin(d, permitidos) })),
-    [lista, permitidos]
+    () => lista.filter((d) => d.seguridad_actualizado).map((d) => ({
+      ...d, ev: evaluar(d, permitidos), ua: usuarioEsAdmin(d, permitidos),
+      asignado: d.inv_equipos ? asignados[d.inv_equipos.id] ?? null : null,
+      asignacion: !d.inv_equipos ? ASIGNACION.sin_inventario : asignados[d.inv_equipos.id] ? ASIGNACION.asignado : ASIGNACION.sin_asignar,
+    })),
+    [lista, permitidos, asignados]
   );
   const sinDatos = lista.length - conDatos.length;
 
@@ -108,6 +120,7 @@ export default function Seguridad() {
     usuarioadmin: (d) => TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
     ...Object.fromEntries(CONTROLES.map((c) => [c.k, (d: any) => ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta])),
     sistema: (d) => textoSistema(d),
+    asignacion: (d) => d.asignacion,
     soporte: (d) => soporte(d).texto.startsWith("Vence") ? "Por vencer" : soporte(d).texto,
     memoria: (d) => textoRam(d),
     discos: (d) => (!d.discos?.length ? "Sin datos" : discoCritico(d.discos) ? "Disco casi lleno" : "Espacio OK"),
@@ -116,11 +129,11 @@ export default function Seguridad() {
 
   // Excel con filtro en cada columna: cada control va en dos columnas (resultado y detalle) para poder filtrar por resultado
   function exportar() {
-    const cab = ["Equipo", "Código IT", "Usuario", "Sistema operativo", "Versión", "Build", "Soporte", "Fin de soporte", "Usuario es admin",
+    const cab = ["Equipo", "Código IT", "Usuario", "Asignado a", "Sistema operativo", "Versión", "Build", "Soporte", "Fin de soporte", "Usuario es admin",
       ...CONTROLES.flatMap((c) => [c.titulo, `${c.titulo} (detalle)`]),
       "Memoria RAM (GB)", "RAM en uso (%)", "Discos", "Disco casi lleno", "Último parche", "Admins locales", "Actualizado"];
     const filas = ordenadas.map((d) => [
-      d.hostname, d.inv_equipos?.codigo ?? "", d.usuario ?? "", textoSistema(d), d.so_version ?? "", d.so_build ?? "", soporte(d).texto, fechaSoporte(soporte(d).fin), TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
+      d.hostname, d.inv_equipos?.codigo ?? "", d.usuario ?? "", d.asignado ?? d.asignacion, textoSistema(d), d.so_version ?? "", d.so_build ?? "", soporte(d).texto, fechaSoporte(soporte(d).fin), TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
       ...CONTROLES.flatMap((c) => [ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta, d.ev[c.k].texto]),
       d.ram_total_gb ? Math.round(d.ram_total_gb) : null, ramUso(d), textoDiscos(d),
       d.discos?.length ? (discoCritico(d.discos) ? "Sí" : "No") : "",
@@ -128,7 +141,7 @@ export default function Seguridad() {
       new Date(d.seguridad_actualizado).toLocaleString("es-AR"),
     ]);
     exportarExcel(`seguridad-equipos-${new Date().toISOString().slice(0, 10)}`, cab, filas,
-      { Equipo: 14, Usuario: 34, "Sistema operativo": 26, Discos: 40, "Último parche": 50, "Admins locales": 60, Actualizado: 20 });
+      { Equipo: 14, Usuario: 34, "Asignado a": 28, "Sistema operativo": 26, Discos: 40, "Último parche": 50, "Admins locales": 60, Actualizado: 20 });
   }
 
   return (
@@ -148,7 +161,7 @@ export default function Seguridad() {
 
       {verConfig && esAdmin && <AdminsPermitidos lista={permitidos} onCambio={setPermitidos} />}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {CONTROLES.map((c) => {
           const n = cuenta(c.k);
           return (
@@ -168,6 +181,21 @@ export default function Seguridad() {
               className={`card p-5 text-left transition-colors ${activa ? "border-brand-500 ring-2 ring-brand-500/20" : "hover:border-brand-300"}`}>
               <div className="text-xs text-ink/50 font-medium">El usuario es admin de su equipo</div>
               <div className={`font-display text-3xl mt-1 ${n ? "text-red-600" : "text-emerald-600"}`}>{n}</div>
+            </button>
+          );
+        })()}
+        {(() => {
+          // Equipos sin una persona asignada en el inventario (o que ni siquiera están cargados)
+          const sinInv = conDatos.filter((d) => d.asignacion === ASIGNACION.sin_inventario).length;
+          const n = conDatos.filter((d) => d.asignacion !== ASIGNACION.asignado).length;
+          const f = fc.filtros.asignacion;
+          const activa = !!f && f.size === SIN_ASIGNAR.length && SIN_ASIGNAR.every((v) => f.has(v));
+          return (
+            <button onClick={() => fc.fijar("asignacion", activa ? null : new Set(SIN_ASIGNAR))} aria-pressed={activa}
+              className={`card p-5 text-left transition-colors ${activa ? "border-brand-500 ring-2 ring-brand-500/20" : "hover:border-brand-300"}`}>
+              <div className="text-xs text-ink/50 font-medium">Sin asignar a una persona</div>
+              <div className={`font-display text-3xl mt-1 ${n ? "text-amber-600" : "text-emerald-600"}`}>{n}</div>
+              {sinInv > 0 && <div className="text-xs text-ink/50 mt-1">{sinInv} sin cargar en inventario</div>}
             </button>
           );
         })()}
@@ -209,6 +237,10 @@ export default function Seguridad() {
                         <button className="font-medium text-ink hover:underline text-left" aria-expanded={abierto === d.id}>{d.hostname}</button>
                       </div>
                       <div className="text-xs text-ink/50 pl-[18px]">{d.usuario ?? "Sin sesión"}</div>
+                      <div className="text-xs pl-[18px]">
+                        {d.asignado ? <span className="text-ink/60">Asignado a {d.asignado}</span>
+                          : <span className="text-amber-700">{d.asignacion}</span>}
+                      </div>
                     </td>
                     <td className="text-sm">
                       {d.so_nombre ? <>
