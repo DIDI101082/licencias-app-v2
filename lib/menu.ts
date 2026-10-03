@@ -44,6 +44,7 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/superficie", label: "Superficie expuesta" },
     { href: "/inventario/correo", label: "Correo y dominio" },
     { href: "/inventario/securescore", label: "Secure Score" },
+    { href: "/inventario/apps-entra", label: "Aplicaciones de Entra ID" },
     { href: "/red/fortigate", label: "FortiGate" },
     { href: "/inventario/wifi", label: "WiFi" },
   ] },
