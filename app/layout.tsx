@@ -6,6 +6,7 @@ import Nav from "@/components/Nav";
 import { PerfilProvider } from "@/components/PerfilContext";
 import GuardiaModulo from "@/components/GuardiaModulo";
 import RegistrarIngreso from "@/components/RegistrarIngreso";
+import CierreInactividad from "@/components/CierreInactividad";
 import TablasMejoradas from "@/components/TablasMejoradas";
 import { SCRIPT_TEMA, SCRIPT_MENU, SCRIPT_ANCHO } from "@/lib/tema";
 
@@ -35,6 +36,7 @@ export default async function RootLayout({
       </head>
       <body className={`${display.variable} ${body.variable} font-sans`}>
         <PerfilProvider perfil={perfil}>
+          {perfil && <CierreInactividad />}
           {perfil && <RegistrarIngreso />}
           {perfil && <TablasMejoradas />}
           {perfil && <Nav nombre={perfil.nombre} rol={perfil.rol} modulos={perfil.modulos ?? []} paginas={perfil.paginas} />}

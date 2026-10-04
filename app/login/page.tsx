@@ -8,9 +8,13 @@ import Mark from "@/components/Mark";
 export default function LoginPage() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
 
   // Si el regreso desde Microsoft falló, /auth/callback vuelve acá con ?error=auth
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("motivo") === "inactividad") {
+      setAviso("La sesión se cerró por inactividad. Ingresá de nuevo para continuar.");
+    }
     if (new URLSearchParams(window.location.search).get("error") === "auth") {
       setError("No se pudo completar el ingreso con Microsoft. Probá de nuevo; si sigue fallando, avisale a Ciberseguridad.");
     }
@@ -46,6 +50,8 @@ export default function LoginPage() {
 
         <h1 className="font-display font-bold text-xl text-center mt-8">Bienvenido</h1>
         <p className="text-sm text-white/70 text-center mt-1.5">Ingresá con tu cuenta de la empresa</p>
+
+        {aviso && <p className="mt-5 rounded-lg bg-white/15 px-3 py-2 text-sm text-center" role="status">{aviso}</p>}
 
         <div className="mt-6">
           <button type="button" onClick={entrarConMicrosoft} disabled={cargando}

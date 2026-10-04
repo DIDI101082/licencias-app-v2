@@ -39,6 +39,7 @@ export default function Nav({ nombre, rol, modulos: permitidos, paginas }: { nom
   async function salir() {
     // queda registrada la salida en Logs (si falla, se cierra la sesión igual)
     try { await supabase.rpc("registrar_ingreso", { p_accion: "logout" }); } catch {}
+    try { localStorage.removeItem("cyber-ultima-actividad"); } catch {}
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
