@@ -11,6 +11,7 @@ export type ConfigGrupo = {
   configurado: boolean; nombre: string; ultimo_reporte: string | null; version_puente: string | null; ip: string | null;
   alertas: boolean; alertar_en_marcha: boolean; combustible_minimo: number; bateria_minima: number;
   minutos_sin_reporte: number; litros_tanque: number | null;
+  kw_nominal?: number | null; consumo_lh?: number | null; consumo_medido?: { lh: number; horas: number } | null;
 };
 
 // Configuración (solo administradores): instalador del puente y alertas del grupo electrógeno.
@@ -26,6 +27,7 @@ export default function PuenteGrupo({ config, alCambiar }: { config: ConfigGrupo
     nombre: config.nombre, alertas: config.alertas, alertar_en_marcha: config.alertar_en_marcha,
     combustible_minimo: config.combustible_minimo, bateria_minima: config.bateria_minima,
     minutos_sin_reporte: config.minutos_sin_reporte, litros_tanque: config.litros_tanque?.toString() ?? "",
+    kw_nominal: config.kw_nominal?.toString() ?? "", consumo_lh: config.consumo_lh?.toString() ?? "",
   });
   const [avisoAl, setAvisoAl] = useState<{ ok: boolean; texto: string } | null>(null);
 
@@ -112,7 +114,15 @@ export default function PuenteGrupo({ config, alCambiar }: { config: ConfigGrupo
             <input className="input mt-1" value={al.nombre} onChange={(e) => setAl({ ...al, nombre: e.target.value })} /></label>
           <label className="block text-sm">Capacidad del tanque (litros, opcional)
             <input type="number" min={1} className="input mt-1" value={al.litros_tanque} onChange={(e) => setAl({ ...al, litros_tanque: e.target.value })} /></label>
+          <label className="block text-sm">Potencia nominal (kW, opcional)
+            <input type="number" min={1} step={0.1} className="input mt-1" placeholder="kVA de la chapa × 0,8" value={al.kw_nominal} onChange={(e) => setAl({ ...al, kw_nominal: e.target.value })} /></label>
+          <label className="block text-sm">Consumo (litros/hora al 75% de carga, opcional)
+            <input type="number" min={0.1} step={0.1} className="input mt-1" placeholder="De la ficha técnica" value={al.consumo_lh} onChange={(e) => setAl({ ...al, consumo_lh: e.target.value })} /></label>
         </div>
+        <p className="text-xs text-ink/50 max-w-2xl">
+          La autonomía usa el consumo de la ficha técnica si lo cargás; si no, lo estima con la potencia nominal (unos 0,27 litros por kWh).
+          Cuando el grupo acumule al menos una hora de marcha, pasa a usar el consumo real medido por la caída del tanque.
+        </p>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={al.alertas} onChange={(e) => setAl({ ...al, alertas: e.target.checked })} />
           Enviar alertas: corte de luz, grupo fuera de automático, combustible bajo, batería baja y grupo sin respuesta

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import PuenteGrupo, { type ConfigGrupo } from "@/components/PuenteGrupo";
 import { hace } from "@/lib/monitoreo";
+import { PUENTE_GRUPO_VERSION } from "@/lib/puente-grupo";
 
 type Estado = {
   responde: boolean | null; ultimo_ok: string | null; ultimo_error: string | null; modo: number | null;
@@ -14,6 +15,10 @@ type Estado = {
   red_v1: number | null; red_v2: number | null; red_v3: number | null; kw: number | null;
   horas_motor: number | null; arranques: number | null; en_marcha: boolean | null; red_ok: boolean | null;
   en_marcha_desde: string | null; red_cortada_desde: string | null;
+  gen_a1?: number | null; gen_a2?: number | null; gen_a3?: number | null; carga_pct?: number | null; kva?: number | null;
+  fp?: number | null; kwh?: number | null; registros?: Record<string, number> | null; sin_leer?: string[] | null;
+  mantenimiento?: { t: string; horas: number | null; fecha: string | null }[] | null;
+  alarmas?: { n: number; nombre: string; tipo: number; clase: string }[] | null;
 };
 type Evento = { id: number; tipo: string; detalle: string | null; fecha: string };
 type Hora = { hora: string; combustible: number | null; bateria: number | null; en_marcha: boolean; sin_red: boolean };
@@ -27,7 +32,16 @@ const EVENTO: Record<string, { t: string; c: string }> = {
   modo: { t: "Cambio de modo", c: "bg-brand-50 text-brand-700" },
   sin_respuesta: { t: "Sin respuesta", c: "bg-red-50 text-red-600" },
   responde: { t: "Volvió a responder", c: "bg-emerald-50 text-emerald-700" },
+  alarma: { t: "Alarma del controlador", c: "bg-red-50 text-red-600" },
 };
+const MANT: Record<string, string> = { general: "Service del motor", aceite: "Aceite", aire: "Filtro de aire", combustible: "Filtro de combustible" };
+// Valores especiales de GenComm cuando un instrumento no tiene medición
+const SIN_MEDICION: Record<number, string> = {
+  65535: "No configurado", 65534: "Fuera de rango", 65533: "Fuera de rango", 65532: "Falla del sensor",
+  65531: "Dato inválido", 65530: "Presostato, sin medición", 65529: "Presostato, sin medición",
+};
+// Un diésel gasta en vacío cerca de un cuarto de lo que gasta a plena carga
+const factorCarga = (c: number) => 0.25 + 0.75 * Math.min(1.1, Math.max(0, c));
 
 const num = (v: number | null | undefined, dec = 0) => (v == null ? "—" : Number(v).toLocaleString("es-AR", { maximumFractionDigits: dec, minimumFractionDigits: dec }));
 const fechaHora = (v: string) => new Date(v).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -124,6 +138,24 @@ export default function GrupoElectrogeno() {
   const combBajo = e?.combustible_pct != null && e.combustible_pct < config.combustible_minimo;
   const litros = config.litros_tanque && e?.combustible_pct != null ? Math.round((config.litros_tanque * e.combustible_pct) / 100) : null;
 
+  // Autonomía: consumo real medido > consumo de la ficha técnica > estimación por potencia nominal
+  const cargaAhora = e?.en_marcha
+    ? (e.carga_pct != null && e.carga_pct > 0 ? e.carga_pct / 100 : e.kw != null && config.kw_nominal ? e.kw / config.kw_nominal : null)
+    : null;
+  const carga = cargaAhora ?? 0.75;
+  const consumo = config.consumo_medido?.lh
+    ? { lh: config.consumo_medido.lh, origen: `Consumo real medido en ${num(config.consumo_medido.horas, 1)} h de marcha` }
+    : config.consumo_lh
+      ? { lh: (config.consumo_lh * factorCarga(carga)) / factorCarga(0.75), origen: `Consumo de la ficha técnica, ${cargaAhora != null ? "con la carga actual" : "al 75% de carga"}` }
+      : config.kw_nominal
+        ? { lh: 0.27 * config.kw_nominal * factorCarga(carga), origen: `Estimado por potencia nominal, ${cargaAhora != null ? "con la carga actual" : "al 75% de carga"}` }
+        : null;
+  const litrosExactos = config.litros_tanque && e?.combustible_pct != null ? (config.litros_tanque * e.combustible_pct) / 100 : null;
+  const autonomia = consumo && litrosExactos != null ? litrosExactos / consumo.lh : null;
+  const aceite = e?.presion_aceite != null ? `${num(e.presion_aceite)} kPa` : SIN_MEDICION[Number(e?.registros?.["1024"])] ?? "—";
+  const puenteViejo = !!config.version_puente && config.version_puente !== PUENTE_GRUPO_VERSION;
+  const sinAlarmas = e?.sin_leer?.includes("39424") && e?.sin_leer?.includes("2048");
+
   const tarjetas = e && !sinDatos ? [
     e.en_marcha
       ? { t: "Grupo", v: "En marcha", s: `Hace ${duracion(e.en_marcha_desde, ahora)}${e.kw != null ? ` · ${num(e.kw, 1)} kW` : ""}`, c: "text-amber-600" }
@@ -132,7 +164,7 @@ export default function GrupoElectrogeno() {
       ? { t: "Red eléctrica", v: "Normal", s: `${num(e.red_v1, 1)} V · ${num(e.red_hz, 1)} Hz`, c: "text-emerald-600" }
       : { t: "Red eléctrica", v: "Cortada", s: `Hace ${duracion(e.red_cortada_desde, ahora)}`, c: "text-red-600" },
     { t: "Modo", v: e.modo != null ? MODOS[e.modo] ?? `Modo ${e.modo}` : "—", s: enAuto ? "Arranca solo ante un corte" : "Ante un corte NO arranca solo", c: enAuto ? "text-ink" : "text-red-600" },
-    { t: "Combustible", v: e.combustible_pct != null ? `${num(e.combustible_pct)}%` : "—", s: litros != null ? `Unos ${litros} L de ${config.litros_tanque}` : `Mínimo ${config.combustible_minimo}%`, c: combBajo ? "text-red-600" : "text-ink" },
+    { t: "Combustible", v: e.combustible_pct != null ? `${num(e.combustible_pct)}%` : "—", s: litros != null ? `Unos ${litros} L de ${config.litros_tanque}${autonomia != null ? ` · ${num(autonomia, 1)} h de autonomía` : ""}` : `Mínimo ${config.combustible_minimo}%`, c: combBajo ? "text-red-600" : "text-ink" },
   ] : [];
 
   return (
@@ -184,12 +216,14 @@ export default function GrupoElectrogeno() {
               <h2 className="font-medium text-ink mb-2">Generador</h2>
               <Dato t="L1" v={num(e!.gen_v1, 1)} u="V" /><Dato t="L2" v={num(e!.gen_v2, 1)} u="V" /><Dato t="L3" v={num(e!.gen_v3, 1)} u="V" />
               <Dato t="Frecuencia" v={num(e!.gen_hz, 1)} u="Hz" /><Dato t="Potencia" v={num(e!.kw, 1)} u="kW" />
+              <Dato t="Corriente L1 / L2 / L3" v={e!.gen_a1 == null ? "—" : `${num(e!.gen_a1, 1)} / ${num(e!.gen_a2, 1)} / ${num(e!.gen_a3, 1)}`} u="A" />
+              <Dato t="Carga" v={e!.carga_pct != null ? num(e!.carga_pct) : e!.kw != null && config.kw_nominal ? num((e!.kw / config.kw_nominal) * 100) : "—"} u="%" alerta={(e!.carga_pct ?? 0) > 90} />
             </div>
             <div className="card p-5">
               <h2 className="font-medium text-ink mb-2">Motor</h2>
               <Dato t="Velocidad" v={num(e!.rpm)} u="RPM" />
               <Dato t="Temperatura" v={num(e!.temp_refrigerante)} u="°C" />
-              <Dato t="Presión de aceite" v={num(e!.presion_aceite)} u="kPa" />
+              <Dato t="Presión de aceite" v={aceite} />
               <Dato t="Batería" v={num(e!.bateria_v, 1)} u="V" alerta={e!.bateria_v != null && !e!.en_marcha && e!.bateria_v < config.bateria_minima} />
               <Dato t="Alternador de carga" v={num(e!.alternador_v, 1)} u="V" />
             </div>
@@ -197,9 +231,68 @@ export default function GrupoElectrogeno() {
               <h2 className="font-medium text-ink mb-2">Acumulados</h2>
               <Dato t="Horas de motor" v={num(e!.horas_motor, 1)} u="h" />
               <Dato t="Arranques" v={num(e!.arranques)} />
+              <Dato t="Energía generada" v={num(e!.kwh, 1)} u="kWh" />
               <Dato t="Combustible" v={e!.combustible_pct != null ? `${num(e!.combustible_pct)}%` : "—"} alerta={combBajo} />
             </div>
           </div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="card p-5 lg:col-span-2">
+              <h2 className="font-medium text-ink mb-2">Alarmas del controlador</h2>
+              {e!.alarmas == null ? (
+                <p className="text-sm text-ink/50">
+                  {puenteViejo ? "Se ven al instalar la versión nueva del puente." : sinAlarmas ? "El controlador no informa las alarmas por Modbus." : "Todavía no se leyeron."}
+                </p>
+              ) : e!.alarmas.length === 0 ? (
+                <p className="text-sm text-emerald-600">Sin alarmas activas.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {e!.alarmas.map((a) => (
+                    <li key={a.n} className="flex items-center gap-2 text-sm">
+                      <span className={`pill ${a.tipo >= 3 ? "bg-red-600 text-white" : "bg-amber-500/15 text-amber-800"}`}>{a.clase}</span>
+                      <span className="text-ink">{a.nombre}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="card p-5">
+              <h2 className="font-medium text-ink mb-2">Mantenimiento</h2>
+              {e!.mantenimiento?.length ? e!.mantenimiento.map((m) => {
+                const vencido = (m.horas != null && m.horas < 0) || (m.fecha != null && new Date(m.fecha).getTime() < ahora);
+                const partes = [
+                  m.horas != null ? (m.horas < 0 ? `Vencido hace ${num(-m.horas)} h` : `Faltan ${num(m.horas)} h`) : null,
+                  m.fecha ? new Date(m.fecha).toLocaleDateString("es-AR") : null,
+                ].filter(Boolean);
+                return <Dato key={m.t} t={MANT[m.t] ?? m.t} v={partes.join(" · ")} alerta={vencido} />;
+              }) : (
+                <p className="text-sm text-ink/50">
+                  {puenteViejo ? "Se ve al instalar la versión nueva del puente." : "El controlador no tiene alarmas de mantenimiento configuradas."}
+                </p>
+              )}
+            </div>
+            <div className="card p-5">
+              <h2 className="font-medium text-ink mb-2">Autonomía estimada</h2>
+              {autonomia != null && consumo ? (
+                <>
+                  <div className="font-display text-2xl text-ink">{num(autonomia, 1)} h</div>
+                  <Dato t="Combustible" v={num(litrosExactos, 0)} u="L" />
+                  <Dato t="Consumo" v={num(consumo.lh, 1)} u="L/h" />
+                  <p className="text-xs text-ink/50 mt-2">{consumo.origen}.</p>
+                </>
+              ) : (
+                <p className="text-sm text-ink/50">
+                  {config.litros_tanque ? "Cargá la potencia nominal o el consumo del grupo en Configuración." : "Cargá la capacidad del tanque en Configuración."}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {puenteViejo && esAdmin && (
+            <p className="text-sm text-amber-800 bg-amber-500/10 rounded-md px-3 py-2">
+              El puente instalado es la versión {config.version_puente}. Para ver alarmas, % de carga y mantenimiento, generá e instalá la {PUENTE_GRUPO_VERSION} desde Configuración.
+            </p>
+          )}
 
           <div className="card p-5 space-y-2">
             <div className="flex items-baseline justify-between gap-3 flex-wrap">

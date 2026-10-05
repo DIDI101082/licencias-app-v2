@@ -7,7 +7,10 @@
 --     y los eventos: corte y vuelta de la red, arranque y parada del grupo, cambio de modo.
 --   * Alertas (arrancan apagadas): corte de red, grupo en marcha, grupo fuera de automático,
 --     combustible bajo, batería baja, grupo sin respuesta y puente sin reportar.
--- Ejecutar UNA VEZ en el SQL Editor (después de alertas.sql).
+--   * v1.1: corriente por fase, % de carga, kVA, energía generada (kWh), mantenimiento,
+--     alarmas activas del controlador y datos para estimar la autonomía.
+-- Ejecutar en el SQL Editor (después de alertas.sql). Se puede volver a ejecutar completo
+-- sin perder datos: así se aplican las actualizaciones.
 -- ==========================================================
 
 -- ----------------------------------------------------------
@@ -77,6 +80,24 @@ create table if not exists public.ge_eventos (
 );
 create index if not exists idx_ge_eventos_fecha on public.ge_eventos(fecha desc);
 
+-- v1.1: columnas nuevas (no tocan lo que ya está guardado)
+alter table public.ge_config
+  add column if not exists kw_nominal numeric check (kw_nominal between 1 and 10000),     -- potencia de chapa, en kW
+  add column if not exists consumo_lh numeric check (consumo_lh between 0.1 and 2000);    -- litros/hora al 75% de carga
+update public.ge_config set litros_tanque = 100 where id = 1 and litros_tanque is null;
+alter table public.ge_estado
+  add column if not exists gen_a1 numeric, add column if not exists gen_a2 numeric, add column if not exists gen_a3 numeric,
+  add column if not exists carga_pct numeric,       -- % de la potencia nominal configurada en el controlador
+  add column if not exists kva numeric,
+  add column if not exists fp numeric,              -- factor de potencia promedio
+  add column if not exists kwh numeric,             -- energía generada acumulada
+  add column if not exists mantenimiento jsonb,     -- [{t, horas, fecha}] según los contadores del controlador
+  add column if not exists alarmas jsonb,           -- [{n, nombre, tipo, clase}] activas; null = el puente no las leyó
+  add column if not exists sin_leer jsonb;          -- bloques opcionales que el controlador no respondió
+alter table public.ge_eventos drop constraint if exists ge_eventos_tipo_check;
+alter table public.ge_eventos add constraint ge_eventos_tipo_check
+  check (tipo in ('corte_red', 'vuelve_red', 'arranque', 'parada', 'modo', 'sin_respuesta', 'responde', 'alarma'));
+
 -- ----------------------------------------------------------
 -- Lectura de registros GenComm (página * 256 + desplazamiento)
 -- Valores fuera de rango (sensor ausente o sin medición) quedan en null.
@@ -104,6 +125,58 @@ returns numeric language sql immutable as $$
                       then (r ->> a::text)::numeric * 65536 + (r ->> (a + 1)::text)::numeric end as v) x
 $$;
 
+-- Mantenimiento: "tiempo hasta" (s32, segundos de marcha; negativo = vencido) y "fecha de" (u32, segundos desde 1970)
+create or replace function public.ge_mant(r jsonb, a int, t text)
+returns jsonb language plpgsql immutable as $$
+declare v_seg numeric := ge_s32(r, a); v_fecha numeric := ge_u32(r, a + 2);
+begin
+  if v_seg >= 2147483640 then v_seg := null; end if;
+  if v_fecha is null or v_fecha < 946684800 or v_fecha > 4102444800 then v_fecha := null; end if;
+  if v_seg = 0 and v_fecha is null then v_seg := null; end if;   -- contador sin configurar
+  if v_seg is null and v_fecha is null then return null; end if;
+  return jsonb_build_object('t', t, 'horas', round(v_seg / 3600, 1), 'fecha', to_timestamp(v_fecha));
+end $$;
+
+-- Nombres de las alarmas con nombre de GenComm (página 154). Si alguna no coincide con lo que muestra
+-- el DSE855, se corrige acá y se vuelve a ejecutar: no hace falta reinstalar el puente.
+create or replace function public.ge_alarma_nombre(n int)
+returns text language sql immutable as $$
+  select coalesce((array[
+    'Parada de emergencia', 'Baja presión de aceite', 'Alta temperatura de refrigerante', 'Baja temperatura de refrigerante',
+    'Baja velocidad', 'Sobrevelocidad', 'Baja frecuencia del generador', 'Alta frecuencia del generador',
+    'Baja tensión del generador', 'Alta tensión del generador', 'Batería baja', 'Batería alta',
+    'Falla del alternador de carga', 'Falla de arranque', 'Falla de parada', 'El generador no cerró',
+    'La red no cerró', 'Falla del sensor de presión de aceite', 'Pérdida del sensor de velocidad', 'Sensor de velocidad abierto',
+    'Sobrecorriente del generador', 'Calibración perdida', 'Bajo nivel de combustible', 'Aviso de la ECU (CAN)',
+    'Parada de la ECU (CAN)', 'Falla de datos de la ECU (CAN)', 'Bajo nivel de aceite', 'Alta temperatura (interruptor)',
+    'Bajo nivel de combustible (interruptor)', 'Falla del módulo de expansión', 'Sobrecarga (kW)', 'Corriente de secuencia negativa',
+    'Falla a tierra', 'Rotación de fases del generador', 'Falla de detección de tensión', 'Mantenimiento vencido',
+    'Frecuencia de carga', 'Tensión de carga'])[n], 'Alarma n.º ' || n)
+$$;
+
+-- Alarmas activas: cada registro trae 4 alarmas de 4 bits (2 aviso, 3 parada, 4 disparo eléctrico, 5 parada controlada)
+create or replace function public.ge_alarmas(r jsonb)
+returns jsonb language plpgsql immutable as $$
+declare v_base int; v_n int; v_txt text; v_t int; v_out jsonb := '[]'::jsonb;
+  v_clases text[] := array[null, 'Aviso', 'Parada', 'Disparo eléctrico', 'Parada controlada']::text[];
+begin
+  if (r ->> '39424') ~ '^\d+$' then v_base := 39424;
+  elsif (r ->> '2048') ~ '^\d+$' then v_base := 2048;
+  else return null; end if;
+  v_n := (r ->> v_base::text)::int;
+  if v_n >= 65530 then return null; end if;
+  for i in 1..least(v_n, 100) loop
+    v_txt := r ->> (v_base + 1 + (i - 1) / 4)::text;
+    continue when v_txt is null or v_txt !~ '^\d+$';
+    v_t := (v_txt::int >> (12 - 4 * ((i - 1) % 4))) & 15;
+    if v_t between 2 and 5 then
+      v_out := v_out || jsonb_build_object('n', i, 'tipo', v_t, 'clase', v_clases[v_t],
+        'nombre', case when v_base = 39424 then ge_alarma_nombre(i) else 'Alarma n.º ' || i end);
+    end if;
+  end loop;
+  return v_out;
+end $$;
+
 -- ----------------------------------------------------------
 -- El puente envía lo que leyó
 -- ----------------------------------------------------------
@@ -120,6 +193,8 @@ declare
   v_rhz numeric; v_r1 numeric; v_r2 numeric; v_r3 numeric;
   v_kw numeric; v_horas numeric; v_arr numeric;
   v_marcha boolean; v_red boolean;
+  v_a1 numeric; v_a2 numeric; v_a3 numeric; v_carga numeric; v_kva numeric; v_fp numeric; v_kwh numeric;
+  v_mant jsonb; v_alarmas jsonb; v_al jsonb; v_alarma_nueva boolean := false;
   v_modos text[] := array['Stop', 'Automático', 'Manual', 'Prueba con carga', 'Automático con restauración manual', 'Configuración', 'Prueba sin carga', 'Off'];
 begin
   select token_hash into v_hash from ge_config where id = 1;
@@ -162,6 +237,18 @@ begin
   v_kw     := round(ge_s32(r, 1536) / 1000, 1);
   v_horas  := round(ge_u32(r, 1798) / 3600, 1);
   v_arr    := ge_u32(r, 1808);
+  -- v1.1: corriente por fase (0,1 A), kVA, factor de potencia, % de carga, kWh (0,1 kWh), mantenimiento y alarmas
+  v_a1     := round(ge_u32(r, 1044) / 10, 1);
+  v_a2     := round(ge_u32(r, 1046) / 10, 1);
+  v_a3     := round(ge_u32(r, 1048) / 10, 1);
+  v_kva    := round(ge_u32(r, 1544) / 1000, 1);
+  v_fp     := round(ge_s16(r, 1557) / 100, 2);
+  v_carga  := round(ge_s16(r, 1558) / 10, 1);
+  v_kwh    := round(ge_u32(r, 1800) / 10, 1);
+  select jsonb_agg(x) into v_mant
+    from (values (ge_mant(r, 1794, 'general')), (ge_mant(r, 1840, 'aceite')), (ge_mant(r, 1844, 'aire')), (ge_mant(r, 1848, 'combustible'))) t(x)
+   where x is not null;
+  v_alarmas := ge_alarmas(r);
 
   v_marcha := coalesce(v_rpm, 0) > 300 or coalesce(v_ghz, 0) > 20;
   v_red    := coalesce(v_rhz, 0) > 40 and greatest(coalesce(v_r1, 0), coalesce(v_r2, 0), coalesce(v_r3, 0)) > 150;
@@ -182,7 +269,19 @@ begin
     insert into ge_eventos (tipo, detalle) values ('modo', coalesce(v_modos[v_ant.modo + 1], v_ant.modo::text) || ' → ' || coalesce(v_modos[v_modo + 1], v_modo::text));
   end if;
 
+  -- Alarmas del controlador que aparecieron desde el reporte anterior
+  if v_alarmas is not null then
+    for v_al in select x from jsonb_array_elements(v_alarmas) x
+                 where not exists (select 1 from jsonb_array_elements(coalesce(v_ant.alarmas, '[]'::jsonb)) y
+                                    where y ->> 'n' = x ->> 'n' and y ->> 'tipo' = x ->> 'tipo') loop
+      insert into ge_eventos (tipo, detalle) values ('alarma', (v_al ->> 'clase') || ': ' || (v_al ->> 'nombre'));
+      v_alarma_nueva := true;
+    end loop;
+  end if;
+
   update ge_estado set responde = true, ultimo_ok = v_ahora, ultimo_intento = v_ahora, ultimo_error = null, registros = r,
+    gen_a1 = v_a1, gen_a2 = v_a2, gen_a3 = v_a3, carga_pct = v_carga, kva = v_kva, fp = v_fp, kwh = v_kwh,
+    mantenimiento = v_mant, alarmas = v_alarmas, sin_leer = p_datos -> 'sin_leer',
     modo = v_modo, flags = v_flags, combustible_pct = v_comb, bateria_v = v_bat, alternador_v = v_alt, rpm = v_rpm,
     temp_refrigerante = v_temp, presion_aceite = v_aceite, gen_hz = v_ghz, gen_v1 = v_g1, gen_v2 = v_g2, gen_v3 = v_g3,
     red_hz = v_rhz, red_v1 = v_r1, red_v2 = v_r2, red_v3 = v_r3, kw = v_kw, horas_motor = v_horas, arranques = v_arr,
@@ -195,7 +294,7 @@ begin
   values (v_ahora, v_comb, v_bat, v_rpm, v_kw, v_red, v_marcha) on conflict (fecha) do nothing;
   -- Corte de luz o arranque: avisar ya, sin esperar la revisión de cada 10 minutos
   if (v_ant.red_ok is true and not v_red) or (v_ant.en_marcha is false and v_marcha)
-     or (v_ant.red_ok is false and v_red) then
+     or (v_ant.red_ok is false and v_red) or v_alarma_nueva then
     if to_regprocedure('public.alertas_evaluar(boolean)') is not null then
       begin
         perform alertas_evaluar(true);
@@ -223,6 +322,22 @@ $$;
 revoke execute on function public.ge_historial(int) from public, anon;
 grant execute on function public.ge_historial(int) to authenticated;
 
+-- Consumo real: caída del nivel de combustible mientras el grupo estuvo en marcha (últimos 180 días).
+-- Solo se informa cuando hay al menos 1 hora de marcha y 3% de caída, para que no sea ruido del sensor.
+create or replace function public.ge_consumo_medido()
+returns jsonb language sql stable security definer set search_path = public as $$
+  with l as (
+    select fecha, combustible_pct c, en_marcha m, lag(fecha) over w f0, lag(combustible_pct) over w c0, lag(en_marcha) over w m0
+      from ge_lecturas window w as (order by fecha)),
+  t as (
+    select sum(extract(epoch from fecha - f0)) / 3600 horas, sum(c0 - c) pct
+      from l where m and m0 and fecha - f0 < interval '15 minutes' and c is not null and c0 is not null and c0 - c > -2)
+  select case when t.horas >= 1 and t.pct >= 3 and g.litros_tanque is not null
+              then jsonb_build_object('lh', round(t.pct / 100 * g.litros_tanque / t.horas, 1), 'horas', round(t.horas, 1)) end
+    from t, ge_config g where g.id = 1
+$$;
+revoke all on function public.ge_consumo_medido() from public, anon, authenticated;
+
 -- ----------------------------------------------------------
 -- Configuración
 -- ----------------------------------------------------------
@@ -231,7 +346,8 @@ returns jsonb language sql stable security definer set search_path = public as $
   select case when puede_ver('servidores') then jsonb_build_object(
     'configurado', token_hash is not null, 'nombre', nombre, 'ultimo_reporte', ultimo_reporte, 'version_puente', version_puente,
     'ip', ip, 'alertas', alertas, 'alertar_en_marcha', alertar_en_marcha, 'combustible_minimo', combustible_minimo,
-    'bateria_minima', bateria_minima, 'minutos_sin_reporte', minutos_sin_reporte, 'litros_tanque', litros_tanque)
+    'bateria_minima', bateria_minima, 'minutos_sin_reporte', minutos_sin_reporte, 'litros_tanque', litros_tanque,
+    'kw_nominal', kw_nominal, 'consumo_lh', consumo_lh, 'consumo_medido', ge_consumo_medido())
   end from ge_config where id = 1
 $$;
 revoke execute on function public.ge_config_ver() from public, anon;
@@ -258,7 +374,9 @@ begin
     combustible_minimo = coalesce((p ->> 'combustible_minimo')::int, combustible_minimo),
     bateria_minima = coalesce((p ->> 'bateria_minima')::numeric, bateria_minima),
     minutos_sin_reporte = coalesce((p ->> 'minutos_sin_reporte')::int, minutos_sin_reporte),
-    litros_tanque = case when p ? 'litros_tanque' then nullif(p ->> 'litros_tanque', '')::int else litros_tanque end
+    litros_tanque = case when p ? 'litros_tanque' then nullif(p ->> 'litros_tanque', '')::int else litros_tanque end,
+    kw_nominal = case when p ? 'kw_nominal' then nullif(p ->> 'kw_nominal', '')::numeric else kw_nominal end,
+    consumo_lh = case when p ? 'consumo_lh' then nullif(p ->> 'consumo_lh', '')::numeric else consumo_lh end
   where id = 1;
 end $$;
 revoke execute on function public.ge_config_guardar(jsonb) from public, anon;
@@ -336,6 +454,21 @@ begin
       'Mínimo configurado ' || c.bateria_minima || ' V · revisar cargador y batería', '/servidores/grupo-electrogeno')
     on conflict do nothing;
   end if;
+
+  -- Alarmas activas en el controlador (parada o disparo: crítica; aviso: alta)
+  insert into _cond
+  select 'ge:alarma:' || (x ->> 'n'), 'grupo', case when (x ->> 'tipo')::int >= 3 then 'critica' else 'alta' end,
+         c.nombre || ': ' || (x ->> 'nombre'), 'Activa en el controlador · ' || (x ->> 'clase'), '/servidores/grupo-electrogeno'
+    from jsonb_array_elements(coalesce(e.alarmas, '[]'::jsonb)) x
+  on conflict do nothing;
+
+  -- Mantenimiento vencido según los contadores del controlador
+  insert into _cond
+  select 'ge:mant:' || (x ->> 't'), 'grupo', 'media', c.nombre || ': mantenimiento vencido (' || (x ->> 't') || ')',
+         'Según el contador de mantenimiento del controlador', '/servidores/grupo-electrogeno'
+    from jsonb_array_elements(coalesce(e.mantenimiento, '[]'::jsonb)) x
+   where (x ->> 'horas')::numeric < 0 or (x ->> 'fecha')::timestamptz < now()
+  on conflict do nothing;
 end $$;
 revoke all on function public.ge_condiciones_alertas() from public, anon, authenticated;
 

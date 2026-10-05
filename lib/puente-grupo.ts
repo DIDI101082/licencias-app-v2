@@ -6,7 +6,7 @@
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_GRUPO_VERSION = "1.0";
+export const PUENTE_GRUPO_VERSION = "1.1";
 
 const PUENTE = String.raw`# Puente grupo electrogeno -> Accusys Cyber: lee el DSE855 por Modbus TCP (solo lectura) y envia el estado
 $ErrorActionPreference = 'Stop'
@@ -20,7 +20,11 @@ $Version     = '__VERSION__'
 $Carpeta     = 'C:\ProgramData\AccusysPuenteGrupo'
 
 # Bloques GenComm: pagina 3 (modo y estado), 4 (motor, generador y red), 6 (potencia) y 7 (horas y arranques)
-$Bloques = @(@(1024, 42), @(768, 8), @(1536, 2), @(1798, 12))
+# Desde el quinto son opcionales (v1.1): resto de la pagina 6 (kVA, factor de potencia, % de carga),
+# mantenimiento (pagina 7) y alarmas (pagina 154, o la 8 en controladores viejos). Si el controlador
+# no los informa, el puente sigue y avisa a la app cuales no pudo leer.
+$Bloques = @(@(1024, 42), @(768, 8), @(1536, 2), @(1798, 12), @(1538, 22), @(1792, 6), @(1840, 12), @(39424, 26), @(2048, 26))
+$Basicos = 4
 
 function Leer-Exacto($s, $buf, $n) {
   $leido = 0
@@ -64,6 +68,7 @@ function Leer-Registros($unidad, $inicio, $cantidad) {
 $datos = [ordered]@{ version = $Version; ip = $Equipo; ok = $false }
 $registros = [ordered]@{}
 $avisos = New-Object System.Collections.ArrayList
+$sinLeer = New-Object System.Collections.ArrayList
 $unidadOk = $null
 try {
   # Busca el numero de unidad (slave ID) que responde, empezando por el que funciono la vez anterior
@@ -86,12 +91,17 @@ try {
   Set-Content -Path $archivoUnidad -Value $unidadOk
 
   for ($b = 1; $b -lt $Bloques.Count; $b++) {
+    if ($Bloques[$b][0] -eq 2048 -and $registros.Contains('39424')) { continue }
     try {
       $v = Leer-Registros $unidadOk $Bloques[$b][0] $Bloques[$b][1]
       for ($i = 0; $i -lt $v.Count; $i++) { $registros[[string]($Bloques[$b][0] + $i)] = $v[$i] }
-    } catch { [void]$avisos.Add([string]$Bloques[$b][0] + ': ' + $_.Exception.Message) }
+    } catch {
+      if ($b -lt $Basicos) { [void]$avisos.Add([string]$Bloques[$b][0] + ': ' + $_.Exception.Message) }
+      else { [void]$sinLeer.Add([string]$Bloques[$b][0]) }
+    }
   }
   $datos.ok = $true
+  $datos.sin_leer = $sinLeer
   $datos.registros = $registros
 } catch {
   $e = $_.Exception
