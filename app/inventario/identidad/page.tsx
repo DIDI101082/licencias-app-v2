@@ -2,21 +2,28 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ROLES_CRITICOS_LISTA } from "@/lib/identidad-roles";
+import { createClient } from "@/lib/supabase/client";
+import { usePerfil } from "@/components/PerfilContext";
+import { exportarExcel } from "@/lib/excel";
+import { hace as haceTiempo } from "@/lib/monitoreo";
 
 type Usuario = {
   id: string; nombre: string; upn: string; email: string | null; area: string | null; habilitado: boolean;
   invitado: boolean; estado_invitacion: string | null; creado: string | null; ultimo_ingreso: string | null;
   mfa: boolean | null; metodos: string[]; roles: string[]; inactivo: boolean;
+  nominal?: boolean | null;   // figura como empleado activo; null = falta ejecutar identidad-mfa.sql
 };
+type EventoMfa = { id: number; fecha: string; tipo: "desactivado" | "activado"; upn: string | null; nombre: string | null; nominal: boolean; admin: boolean; metodos: string[] };
+type Seguimiento = { alertar: boolean; ultima_ejecucion: string | null; ultimo_error: string | null; eventos: EventoMfa[] };
 type Resumen = {
   miembros: number; sin_mfa: number | null; inactivos: number | null; admins: number | null;
   admins_sin_mfa: number | null; invitados: number; invitados_pendientes: number;
 };
 type Respuesta = {
   configurado: boolean; error?: string; resumen?: Resumen; usuarios?: Usuario[]; avisos?: string[];
-  disponibles?: { ingresos: boolean; mfa: boolean; roles: boolean }; consultado?: string; dias?: number;
+  disponibles?: { ingresos: boolean; mfa: boolean; roles: boolean }; consultado?: string; dias?: number; seguimiento?: Seguimiento | null;
 };
-type Filtro = "sin_mfa" | "inactivos" | "admins" | "invitados" | "todos";
+type Filtro = "sin_mfa" | "sin_mfa_nominales" | "inactivos" | "admins" | "invitados" | "todos";
 
 const CRITICOS = new Set(ROLES_CRITICOS_LISTA);
 const fd = (f: string | null) => (f ? new Date(f).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" }) : "—");
@@ -35,6 +42,7 @@ export default function Identidad() {
   const [filtro, setFiltro] = useState<Filtro>("sin_mfa");
   const [dias, setDias] = useState(90);
   const [q, setQ] = useState("");
+  const { esAdmin } = usePerfil();
 
   const cargar = async (n = dias) => {
     setCargando(true);
@@ -51,6 +59,7 @@ export default function Identidad() {
       .filter((u) => {
         if (t && ![u.nombre, u.upn, u.area].some((v) => v?.toLowerCase().includes(t))) return false;
         if (filtro === "sin_mfa") return u.habilitado && !u.invitado && u.mfa === false;
+        if (filtro === "sin_mfa_nominales") return u.habilitado && !u.invitado && u.mfa === false && u.nominal === true;
         if (filtro === "inactivos") return u.habilitado && u.inactivo;
         if (filtro === "admins") return u.roles.length > 0;
         if (filtro === "invitados") return u.invitado;
@@ -60,6 +69,21 @@ export default function Identidad() {
   }, [usuarios, filtro, q]);
 
   const r = d?.resumen;
+  const seg = d?.seguimiento;
+  const conNominales = usuarios.some((u) => u.nominal != null);
+  const sinMfaNominales = usuarios.filter((u) => u.habilitado && !u.invitado && u.mfa === false && u.nominal === true).length;
+
+  const exportar = () => exportarExcel(`identidad_${filtro}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    ["Cuenta", "Usuario", "Área", "Nominal", "MFA", "Métodos", "Último ingreso", "Roles", "Estado"],
+    lista.map((u) => [u.nombre, u.upn, u.area ?? "", u.nominal == null ? "" : u.nominal ? "Sí" : "No", u.mfa == null ? "" : u.mfa ? "Sí" : "No",
+      u.metodos.map((m) => METODO[m] ?? m).join(", "), u.ultimo_ingreso ? fd(u.ultimo_ingreso) : "Nunca", u.roles.join(", "),
+      !u.habilitado ? "Deshabilitada" : u.invitado ? "Invitado" : "Activa"]),
+    { Cuenta: 30, Usuario: 34, Roles: 40, "Métodos": 30 });
+
+  const guardarAlertar = async (alertar: boolean) => {
+    await createClient().rpc("identidad_mfa_guardar", { p: { alertar } });
+    cargar();
+  };
   const tarjeta = (f: Filtro, titulo: string, valor: number | null | undefined, malo: boolean, sub?: string) => (
     <button onClick={() => setFiltro(f)}
       className={`card p-4 text-left transition ${filtro === f ? "ring-2 ring-brand-600" : "hover:ring-1 hover:ring-line/20"}`}>
@@ -108,7 +132,7 @@ export default function Identidad() {
 
       {r && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {tarjeta("sin_mfa", "Cuentas sin MFA", r.sin_mfa, true, r.sin_mfa != null ? `de ${r.miembros} cuentas activas` : "Requiere Entra ID P1")}
+          {tarjeta("sin_mfa", "Cuentas sin MFA", r.sin_mfa, true, r.sin_mfa != null ? `de ${r.miembros} cuentas activas${conNominales ? ` · ${sinMfaNominales} nominales` : ""}` : "Requiere Entra ID P1")}
           {tarjeta("inactivos", `Sin uso hace ${d?.dias}+ días`, r.inactivos, true, r.inactivos != null ? "habilitadas, conviene deshabilitar" : "Requiere Entra ID P1")}
           {tarjeta("admins", "Con rol de administrador", r.admins, false,
             r.admins_sin_mfa ? `${r.admins_sin_mfa} sin MFA` : r.admins != null ? "todos con MFA" : undefined)}
@@ -116,17 +140,67 @@ export default function Identidad() {
         </div>
       )}
 
+      {d?.configurado && !d.error && seg === null && esAdmin && (
+        <p className="text-sm text-ink/50">Para separar las cuentas nominales y registrar quién se queda sin MFA, ejecutá supabase/identidad-mfa.sql en Supabase.</p>
+      )}
+      {seg && (
+        <div className="card p-4 space-y-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-medium text-ink">Cambios de MFA</h2>
+            <span className="text-xs text-ink/50">
+              Se revisa cada 15 minutos.{seg.ultima_ejecucion ? ` Última revisión ${haceTiempo(seg.ultima_ejecucion)}.` : " Todavía no corrió la primera revisión."}
+            </span>
+          </div>
+          {seg.ultimo_error && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">La última revisión falló: {seg.ultimo_error}</p>}
+          {esAdmin && (
+            <label className="flex items-center gap-2 text-sm text-ink/70">
+              <input type="checkbox" checked={seg.alertar} onChange={(e) => guardarAlertar(e.target.checked)} />
+              Avisar por Teams cuando una cuenta nominal o con rol de administrador se queda sin MFA
+            </label>
+          )}
+          {seg.eventos.length === 0 ? (
+            <p className="text-sm text-ink/50">Sin cambios todavía. Acá va a aparecer cada cuenta que pierda o registre su segundo factor.</p>
+          ) : (
+            <div className="overflow-x-auto max-h-72 overflow-y-auto">
+              <table className="data w-full">
+                <thead><tr><th>Fecha</th><th>Cuenta</th><th>Cambio</th><th>Métodos</th></tr></thead>
+                <tbody>
+                  {seg.eventos.map((ev) => (
+                    <tr key={ev.id}>
+                      <td className="whitespace-nowrap tabular-nums text-sm">{new Date(ev.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                      <td>
+                        <div className="font-medium text-ink">{ev.nombre ?? ev.upn}</div>
+                        <div className="text-xs text-ink/50">{[ev.upn, ev.nominal ? "nominal" : "no nominal", ev.admin ? "administrador" : null].filter(Boolean).join(" · ")}</div>
+                      </td>
+                      <td>
+                        {ev.tipo === "desactivado"
+                          ? <span className="pill bg-red-600 text-white">Se quedó sin MFA</span>
+                          : <span className="pill bg-emerald-50 text-emerald-700">Registró MFA</span>}
+                      </td>
+                      <td className="text-sm text-ink/70">{ev.tipo === "desactivado" && ev.metodos.length ? "Tenía: " : ""}{ev.metodos.map((m) => METODO[m] ?? m).join(", ") || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {d?.configurado && !d.error && (
         <div className="card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 p-3 border-b border-line/[0.08]">
             <div className="flex gap-1 text-sm">
-              {([["sin_mfa", "Sin MFA"], ["inactivos", "Inactivas"], ["admins", "Administradores"], ["invitados", "Invitados"], ["todos", "Todas"]] as [Filtro, string][])
+              {([["sin_mfa", "Sin MFA"], ...(conNominales ? [["sin_mfa_nominales", `Sin MFA nominales (${sinMfaNominales})`]] : []), ["inactivos", "Inactivas"], ["admins", "Administradores"], ["invitados", "Invitados"], ["todos", "Todas"]] as [Filtro, string][])
                 .map(([k, t]) => (
                   <button key={k} onClick={() => setFiltro(k)}
                     className={`px-3 py-1 rounded-full ${filtro === k ? "bg-brand-600 text-white" : "text-ink/60 hover:bg-line/[0.05]"}`}>{t}</button>
                 ))}
             </div>
-            <input className="input w-60" placeholder="Buscar nombre, usuario o área" value={q} onChange={(e) => setQ(e.target.value)} />
+            <div className="flex items-center gap-2">
+              <input className="input w-60" placeholder="Buscar nombre, usuario o área" value={q} onChange={(e) => setQ(e.target.value)} />
+              {lista.length > 0 && <button className="btn-secondary" onClick={exportar}>Excel</button>}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="data w-full">
@@ -142,7 +216,7 @@ export default function Identidad() {
                     <tr key={u.id}>
                       <td>
                         <div className="font-medium text-ink">{u.nombre}</div>
-                        <div className="text-xs text-ink/50">{u.upn.replace("#EXT#", " (ext)")}</div>
+                        <div className="text-xs text-ink/50">{u.upn.replace("#EXT#", " (ext)")}{u.nominal === false && !u.invitado ? " · no nominal" : ""}</div>
                       </td>
                       <td className="text-sm text-ink/70">{u.area ?? "—"}</td>
                       <td className="text-sm">

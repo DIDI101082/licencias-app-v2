@@ -5,6 +5,7 @@ import { getPerfil } from "@/lib/supabase/server";
 import { entraConfigurado, leerUsuariosEntra } from "@/lib/entra";
 import { leerAuditoriaEntra } from "@/lib/entra-auditoria";
 import { leerLicenciasM365 } from "@/lib/entra-licencias";
+import { leerRegistroMfa } from "@/lib/identidad-mfa";
 import { calcularPlan, type EmpleadoActual } from "@/lib/empleados-sync";
 
 export const dynamic = "force-dynamic";
@@ -80,13 +81,32 @@ async function licencias(clave: string) {
   }
 }
 
+// Seguimiento de MFA: compara el registro de MFA con la lectura anterior para detectar quién se quedó sin segundo factor.
+async function mfa(clave: string) {
+  const sb = clienteAnonimo(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
+  try {
+    if (!entraConfigurado()) throw new Error("Faltan las variables de Entra ID en Vercel");
+    const usuarios = await leerRegistroMfa();
+    const { data, error } = await sb.rpc("identidad_mfa_auto_aplicar", { p_token: clave, p: { usuarios } });
+    if (error) {
+      if (/identidad_mfa_auto_aplicar/.test(error.message)) return { omitido: "Falta ejecutar supabase/identidad-mfa.sql" };
+      throw new Error(error.message);
+    }
+    return data;
+  } catch (e) {
+    await sb.rpc("identidad_mfa_auto_error", { p_token: clave, p_error: msj(e) });
+    return { error: msj(e) };
+  }
+}
+
 async function todo(clave: string) {
   let empleados: any, fallo = false;
   try { empleados = await ejecutar(clave); }
   catch (e) { empleados = { error: msj(e) }; fallo = true; }
   // Si falló la clave, no tiene sentido seguir
-  const m365 = fallo && /inválida/.test(empleados.error) ? undefined : await licencias(clave);
-  return { cuerpo: { ...empleados, licencias: m365 }, fallo };
+  if (fallo && /inválida/.test(empleados.error)) return { cuerpo: empleados, fallo };
+  const [m365, segundoFactor] = await Promise.all([licencias(clave), mfa(clave)]);
+  return { cuerpo: { ...empleados, licencias: m365, mfa: segundoFactor }, fallo };
 }
 
 // Vercel Cron: llega con "Authorization: Bearer <CRON_SECRET>"
