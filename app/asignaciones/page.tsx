@@ -17,7 +17,7 @@ export default async function AsignacionesPage() {
         "id, fecha_asignacion, fecha_liberacion, notas, licencias(id, nombre), empleados(id, nombre, apellido, area)"
       )
       .order("fecha_asignacion", { ascending: false }),
-    supabase.from("licencias").select("id, nombre, seats_totales").order("nombre"),
+    supabase.from("licencias").select("*").order("nombre"),
     supabase.from("empleados").select("id, nombre, apellido").eq("activo", true).order("apellido"),
     supabase.from("licencias_ocupacion").select("licencia_id, seats_libres"),
   ]);

@@ -13,7 +13,7 @@ type Asignacion = {
   empleados: { id: string; nombre: string; apellido: string; area: string } | null;
 };
 
-type Licencia = { id: string; nombre: string; seats_totales: number };
+type Licencia = { id: string; nombre: string; seats_totales: number; sku_id?: string | null };
 type Empleado = { id: string; nombre: string; apellido: string };
 type Ocupacion = { licencia_id: string; seats_libres: number };
 
@@ -36,6 +36,9 @@ export default function AsignacionesClient({
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
+
+  // Las licencias de Microsoft 365 se asignan y se liberan en Microsoft 365; acá solo se ven
+  const deM365 = new Set(licencias.filter((l) => l.sku_id).map((l) => l.id));
 
   function seatsLibres(licenciaId: string) {
     return ocupacion.find((o) => o.licencia_id === licenciaId)?.seats_libres ?? 0;
@@ -101,7 +104,7 @@ export default function AsignacionesClient({
               onChange={(e) => setForm({ ...form, licencia_id: e.target.value })}
             >
               <option value="">Seleccionar…</option>
-              {licencias.map((l) => (
+              {licencias.filter((l) => !l.sku_id).map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.nombre} ({seatsLibres(l.id)} libres)
                 </option>
@@ -196,7 +199,10 @@ export default function AsignacionesClient({
                   {a.empleados?.nombre} {a.empleados?.apellido}
                 </td>
                 <td className="text-ink/60">{a.empleados?.area}</td>
-                <td className="text-ink/60">{a.licencias?.nombre}</td>
+                <td className="text-ink/60">
+                  {a.licencias?.nombre}
+                  {a.licencias && deM365.has(a.licencias.id) && <span className="pill bg-brand-50 text-brand-700 ml-2">Microsoft 365</span>}
+                </td>
                 <td className="text-ink/60">
                   {new Date(a.fecha_asignacion).toLocaleDateString("es-AR")}
                 </td>
@@ -207,7 +213,7 @@ export default function AsignacionesClient({
                 </td>
                 {puedeEditar && (
                   <td className="text-right">
-                    {!a.fecha_liberacion && (
+                    {!a.fecha_liberacion && !(a.licencias && deM365.has(a.licencias.id)) && (
                       <button
                         className="text-red-600 hover:underline text-sm"
                         onClick={() => liberar(a)}

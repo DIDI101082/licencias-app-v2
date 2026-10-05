@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import LicenciasM365 from "@/components/LicenciasM365";
 
 type Licencia = {
   id: string;
@@ -15,6 +16,8 @@ type Licencia = {
   fecha_inicio: string | null;
   fecha_vencimiento: string | null;
   notas: string | null;
+  sku_id?: string | null;          // viene de Microsoft 365
+  m365_consumidas?: number | null;
 };
 
 type Ocupacion = {
@@ -194,6 +197,8 @@ export default function LicenciasClient({
               min="1"
               required
               className="input"
+              disabled={!!editando?.sku_id}
+              title={editando?.sku_id ? "La cantidad comprada la informa Microsoft 365" : undefined}
               value={form.seats_totales}
               onChange={(e) =>
                 setForm({ ...form, seats_totales: parseInt(e.target.value) || 1 })
@@ -266,7 +271,10 @@ export default function LicenciasClient({
               return (
                 <tr key={l.id}>
                   <td>
-                    <div className="font-medium text-ink">{l.nombre}</div>
+                    <div className="font-medium text-ink">
+                      {l.nombre}
+                      {l.sku_id && <span className="pill bg-brand-50 text-brand-700 ml-2">Microsoft 365</span>}
+                    </div>
                     {l.tipo && <div className="text-xs text-ink/40">{l.tipo}</div>}
                   </td>
                   <td className="text-ink/60">{l.proveedor}</td>
@@ -280,7 +288,10 @@ export default function LicenciasClient({
                     </span>
                   </td>
                   <td className="text-ink/60">
-                    {ocup?.seats_ocupados ?? 0} / {l.seats_totales}
+                    {l.sku_id && l.m365_consumidas != null ? l.m365_consumidas : ocup?.seats_ocupados ?? 0} / {l.seats_totales}
+                    {l.sku_id && l.m365_consumidas != null && l.m365_consumidas > (ocup?.seats_ocupados ?? 0) && (
+                      <span className="block text-xs text-ink/40">{l.m365_consumidas - (ocup?.seats_ocupados ?? 0)} en cuentas que no son empleados</span>
+                    )}
                   </td>
                   <td className="text-ink/60">
                     {l.fecha_vencimiento
@@ -295,12 +306,14 @@ export default function LicenciasClient({
                       >
                         Editar
                       </button>
-                      <button
-                        className="text-red-600 hover:underline text-sm"
-                        onClick={() => eliminar(l)}
-                      >
-                        Eliminar
-                      </button>
+                      {!l.sku_id && (
+                        <button
+                          className="text-red-600 hover:underline text-sm"
+                          onClick={() => eliminar(l)}
+                        >
+                          Eliminar
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
@@ -316,6 +329,8 @@ export default function LicenciasClient({
           </tbody>
         </table>
       </div>
+
+      <LicenciasM365 licencias={licencias} esAdmin={esRRHH} />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { createClient as clienteAnonimo } from "@supabase/supabase-js";
 import { getPerfil } from "@/lib/supabase/server";
 import { entraConfigurado, leerUsuariosEntra } from "@/lib/entra";
 import { leerAuditoriaEntra } from "@/lib/entra-auditoria";
+import { leerLicenciasM365 } from "@/lib/entra-licencias";
 import { calcularPlan, type EmpleadoActual } from "@/lib/empleados-sync";
 
 export const dynamic = "force-dynamic";
@@ -59,12 +60,41 @@ async function ejecutar(clave: string) {
   }
 }
 
+// Licencias de Microsoft 365: va después de los empleados (para vincular las altas nuevas) y nunca
+// hace fallar la sincronización de empleados. Tiene su propio interruptor en la pantalla Licencias.
+async function licencias(clave: string) {
+  const sb = clienteAnonimo(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
+  const { data: ini, error } = await sb.rpc("m365_auto_inicio", { p_token: clave });
+  if (error) return { omitido: /m365_auto_inicio/.test(error.message) ? "Falta ejecutar supabase/m365-licencias.sql" : msj(error) };
+  const c = ini as { automatica: boolean; incluir_gratuitas: boolean };
+  if (!c?.automatica) return { omitido: "La actualización automática de licencias está apagada" };
+  try {
+    if (!entraConfigurado()) throw new Error("Faltan las variables de Entra ID en Vercel");
+    const datos = await leerLicenciasM365({ incluirGratuitas: c.incluir_gratuitas });
+    const { data, error: e2 } = await sb.rpc("m365_auto_aplicar", { p_token: clave, p: datos });
+    if (e2) throw new Error(e2.message);
+    return data;
+  } catch (e) {
+    await sb.rpc("m365_auto_error", { p_token: clave, p_error: msj(e) });
+    return { error: msj(e) };
+  }
+}
+
+async function todo(clave: string) {
+  let empleados: any, fallo = false;
+  try { empleados = await ejecutar(clave); }
+  catch (e) { empleados = { error: msj(e) }; fallo = true; }
+  // Si falló la clave, no tiene sentido seguir
+  const m365 = fallo && /inválida/.test(empleados.error) ? undefined : await licencias(clave);
+  return { cuerpo: { ...empleados, licencias: m365 }, fallo };
+}
+
 // Vercel Cron: llega con "Authorization: Bearer <CRON_SECRET>"
 export async function GET(req: Request) {
   const clave = process.env.CRON_SECRET;
   if (!clave || !igual(req.headers.get("authorization") ?? "", `Bearer ${clave}`)) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  try { return NextResponse.json(await ejecutar(clave)); }
-  catch (e) { return NextResponse.json({ error: msj(e) }, { status: 500 }); }
+  const r = await todo(clave);
+  return NextResponse.json(r.cuerpo, { status: r.fallo ? 500 : 200 });
 }
 
 // "Sincronizar ahora" desde la app (solo administradores)
@@ -73,9 +103,7 @@ export async function POST() {
   if (perfil?.rol !== "administrador") return NextResponse.json({ error: "Solo los administradores pueden ejecutar la sincronización." }, { status: 403 });
   const clave = process.env.CRON_SECRET;
   if (!clave) return NextResponse.json({ error: "Falta cargar CRON_SECRET en Vercel (se genera en Seguridad → verificación diaria → Configurar)." }, { status: 400 });
-  try { return NextResponse.json(await ejecutar(clave)); }
-  catch (e) {
-    const m = msj(e);
-    return NextResponse.json({ error: /inválida/.test(m) ? "La clave CRON_SECRET de Vercel no coincide con la generada en la app." : m }, { status: 500 });
-  }
+  const r = await todo(clave);
+  if (r.fallo && /inválida/.test(r.cuerpo.error)) r.cuerpo.error = "La clave CRON_SECRET de Vercel no coincide con la generada en la app.";
+  return NextResponse.json(r.cuerpo, { status: r.fallo ? 500 : 200 });
 }
