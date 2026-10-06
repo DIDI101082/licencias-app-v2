@@ -58,6 +58,7 @@ export const TEMAS: Tema[] = [
     { href: "/servidores/backups", label: "Backups por servidor" },
     { href: "/red", label: "Mapas de PRTG" },
     { href: "/red/switches", label: "Switches" },
+    { href: "/red/dns", label: "DNS interno" },
     { href: "/servidores/grupo-electrogeno", label: "Grupo electrógeno" },
     { href: "/servidores/ups", label: "UPS" },
     { href: "/servidores/ambiente", label: "Temperatura y humedad" },
