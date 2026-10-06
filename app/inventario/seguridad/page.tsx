@@ -5,7 +5,7 @@ import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/Filtro
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
-import { conectado, hace, discoCritico, usoDisco, type Disco } from "@/lib/monitoreo";
+import { conectado, hace, discoCritico, usoDisco, tipoEquipo, TIPOS_EQUIPO, type Disco, type TipoEquipo } from "@/lib/monitoreo";
 import BarraDisco from "@/components/BarraDisco";
 import { exportarExcel } from "@/lib/excel";
 import { soporteWindows } from "@/lib/riesgos";
@@ -84,6 +84,8 @@ export default function Seguridad() {
   const [filtro, setFiltro] = useState<Control | null>(null);
   const [abierto, setAbierto] = useState<string | null>(null);
   const [verConfig, setVerConfig] = useState(false);
+  // Notebooks, PCs y servidores se ven por separado: los controles no significan lo mismo en un servidor que en una notebook
+  const [tipo, setTipo] = useState<TipoEquipo | "todos">("todos");
   // Equipo del inventario → persona asignada (de la misma vista que usa Inventario IT)
   const [asignados, setAsignados] = useState<Record<string, string | null>>({});
 
@@ -101,15 +103,21 @@ export default function Seguridad() {
     });
   }, []);
 
-  const conDatos = useMemo(
+  const todosConDatos = useMemo(
     () => lista.filter((d) => d.seguridad_actualizado).map((d) => ({
-      ...d, ev: evaluar(d, permitidos), ua: usuarioEsAdmin(d, permitidos),
+      ...d, te: tipoEquipo(d), ev: evaluar(d, permitidos), ua: usuarioEsAdmin(d, permitidos),
       asignado: d.inv_equipos ? asignados[d.inv_equipos.id] ?? null : null,
       asignacion: !d.inv_equipos ? ASIGNACION.sin_inventario : asignados[d.inv_equipos.id] ? ASIGNACION.asignado : ASIGNACION.sin_asignar,
     })),
     [lista, permitidos, asignados]
   );
-  const sinDatos = lista.length - conDatos.length;
+  const porTipo = useMemo(() => {
+    const n: Record<TipoEquipo, number> = { notebook: 0, pc: 0, servidor: 0, otro: 0 };
+    todosConDatos.forEach((d) => { n[d.te as TipoEquipo]++; });
+    return n;
+  }, [todosConDatos]);
+  const conDatos = useMemo(() => (tipo === "todos" ? todosConDatos : todosConDatos.filter((d) => d.te === tipo)), [todosConDatos, tipo]);
+  const sinDatos = lista.filter((d) => !d.seguridad_actualizado && (tipo === "todos" || tipoEquipo(d) === tipo)).length;
 
   const cuenta = (k: Control) => conDatos.filter((d) => d.ev[k].nivel === "problema" || d.ev[k].nivel === "aviso").length;
   const filas = filtro ? conDatos.filter((d) => ["problema", "aviso"].includes(d.ev[filtro].nivel)) : conDatos;
@@ -129,18 +137,18 @@ export default function Seguridad() {
 
   // Excel con filtro en cada columna: cada control va en dos columnas (resultado y detalle) para poder filtrar por resultado
   function exportar() {
-    const cab = ["Equipo", "Código IT", "Usuario", "Asignado a", "Sistema operativo", "Versión", "Build", "Soporte", "Fin de soporte", "Usuario es admin",
+    const cab = ["Equipo", "Tipo", "Código IT", "Usuario", "Asignado a", "Sistema operativo", "Versión", "Build", "Soporte", "Fin de soporte", "Usuario es admin",
       ...CONTROLES.flatMap((c) => [c.titulo, `${c.titulo} (detalle)`]),
       "Memoria RAM (GB)", "RAM en uso (%)", "Discos", "Disco casi lleno", "Último parche", "Admins locales", "Actualizado"];
     const filas = ordenadas.map((d) => [
-      d.hostname, d.inv_equipos?.codigo ?? "", d.usuario ?? "", d.asignado ?? d.asignacion, textoSistema(d), d.so_version ?? "", d.so_build ?? "", soporte(d).texto, fechaSoporte(soporte(d).fin), TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
+      d.hostname, TIPOS_EQUIPO[d.te as TipoEquipo].uno, d.inv_equipos?.codigo ?? "", d.usuario ?? "", d.asignado ?? d.asignacion, textoSistema(d), d.so_version ?? "", d.so_build ?? "", soporte(d).texto, fechaSoporte(soporte(d).fin), TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
       ...CONTROLES.flatMap((c) => [ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta, d.ev[c.k].texto]),
       d.ram_total_gb ? Math.round(d.ram_total_gb) : null, ramUso(d), textoDiscos(d),
       d.discos?.length ? (discoCritico(d.discos) ? "Sí" : "No") : "",
       d.ultimo_parche_titulo ?? "", (d.admins_locales ?? []).map((a: any) => a.nombre).join(" | "),
       new Date(d.seguridad_actualizado).toLocaleString("es-AR"),
     ]);
-    exportarExcel(`seguridad-equipos-${new Date().toISOString().slice(0, 10)}`, cab, filas,
+    exportarExcel(`seguridad-${tipo === "todos" ? "equipos" : TIPOS_EQUIPO[tipo].varios.toLowerCase().replace(/ /g, "-")}-${new Date().toISOString().slice(0, 10)}`, cab, filas,
       { Equipo: 14, Usuario: 34, "Asignado a": 28, "Sistema operativo": 26, Discos: 40, "Último parche": 50, "Admins locales": 60, Actualizado: 20 });
   }
 
@@ -160,6 +168,17 @@ export default function Seguridad() {
       </div>
 
       {verConfig && esAdmin && <AdminsPermitidos lista={permitidos} onCambio={setPermitidos} />}
+
+      <div role="tablist" aria-label="Tipo de equipo" className="flex flex-wrap gap-1 rounded-xl bg-line/[0.05] p-1 w-fit max-w-full">
+        {([["todos", "Todos", todosConDatos.length], ...(Object.keys(TIPOS_EQUIPO) as TipoEquipo[])
+            .filter((k) => k !== "otro" || porTipo.otro > 0)
+            .map((k) => [k, TIPOS_EQUIPO[k].varios, porTipo[k]] as const)] as const).map(([k, t, n]) => (
+          <button key={k} role="tab" aria-selected={tipo === k} onClick={() => { setTipo(k as TipoEquipo | "todos"); setAbierto(null); }}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${tipo === k ? "bg-surface text-ink shadow-sm" : "text-ink/55 hover:text-ink"}`}>
+            {t} <span className="tabular-nums text-ink/45">{n}</span>
+          </button>
+        ))}
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {CONTROLES.map((c) => {
@@ -235,6 +254,9 @@ export default function Seguridad() {
                         <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${conectado(d.ultimo_reporte) ? "bg-emerald-500" : "bg-line/20"}`}
                           title={conectado(d.ultimo_reporte) ? "Conectado" : "Desconectado"} />
                         <button className="font-medium text-ink hover:underline text-left" aria-expanded={abierto === d.id}>{d.hostname}</button>
+                        {tipo === "todos" && d.te !== "notebook" && (
+                          <span className={`pill ${d.te === "servidor" ? "bg-brand-50 text-brand-700" : "bg-line/[0.05] text-ink/55"}`}>{TIPOS_EQUIPO[d.te as TipoEquipo].uno}</span>
+                        )}
                       </div>
                       <div className="text-xs text-ink/50 pl-[18px]">{d.usuario ?? "Sin sesión"}</div>
                       <div className="text-xs pl-[18px]">
