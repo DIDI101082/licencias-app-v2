@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { conectado, hace, discoCritico, usoDisco, tipoEquipo, TIPOS_EQUIPO, type Disco, type TipoEquipo } from "@/lib/monitoreo";
 import BarraDisco from "@/components/BarraDisco";
+import ClavesBios from "@/components/ClavesBios";
 import { exportarExcel } from "@/lib/excel";
 import { soporteWindows } from "@/lib/riesgos";
 import { fecha } from "@/lib/inventario";
@@ -84,6 +85,7 @@ export default function Seguridad() {
   const [filtro, setFiltro] = useState<Control | null>(null);
   const [abierto, setAbierto] = useState<string | null>(null);
   const [verConfig, setVerConfig] = useState(false);
+  const [verBios, setVerBios] = useState(false);
   // Notebooks, PCs y servidores se ven por separado: los controles no significan lo mismo en un servidor que en una notebook
   const [tipo, setTipo] = useState<TipoEquipo | "todos">("todos");
   // Equipo del inventario → persona asignada (de la misma vista que usa Inventario IT)
@@ -162,11 +164,13 @@ export default function Seguridad() {
           </p>
         </div>
         <div className="flex gap-2">
+          {esAdmin && <button className="btn-secondary" onClick={() => setVerBios(!verBios)}>Claves de BIOS</button>}
           {esAdmin && <button className="btn-secondary" onClick={() => setVerConfig(!verConfig)}>Admins permitidos</button>}
           <button className="btn-secondary" onClick={exportar} disabled={!conDatos.length}>Exportar para auditoría</button>
         </div>
       </div>
 
+      {verBios && esAdmin && <ClavesBios />}
       {verConfig && esAdmin && <AdminsPermitidos lista={permitidos} onCambio={setPermitidos} />}
 
       <div role="tablist" aria-label="Tipo de equipo" className="flex flex-wrap gap-1 rounded-xl bg-line/[0.05] p-1 w-fit max-w-full">

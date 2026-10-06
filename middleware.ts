@@ -37,7 +37,10 @@ export async function middleware(request: NextRequest) {
   const isProgramado = request.nextUrl.pathname === "/api/programado"
     || request.nextUrl.pathname === "/api/entra/auto";   // sincronización automática con Entra ID (idem)
 
-  if (!user && !isLoginPage && !isAuthCallback && !isInstalador && !isProgramado) {
+  // Pedido de la clave de BIOS desde cada notebook (se autentica con la clave propia del agente dentro de la ruta)
+  const isBiosEquipo = request.nextUrl.pathname === "/api/bios/clave";
+
+  if (!user && !isLoginPage && !isAuthCallback && !isInstalador && !isProgramado && !isBiosEquipo) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
