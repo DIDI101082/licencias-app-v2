@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { claseCodigo } from "@/lib/inventario";
+import { exportarExcel } from "@/lib/excel";
 
 // Equipos que existen en Active Directory o en el Inventario IT pero no reportan con el agente.
 // Se comparan por nombre de equipo (hostname) y, para el inventario, también por vínculo o N° de serie.
@@ -25,6 +26,20 @@ const CATEGORIAS_CON_AGENTE = /notebook|laptop|pc|escritorio|desktop|workstation
 // "NWKS0001.accusys.local" o "nwks0001" → "NWKS0001"
 const clave = (n?: string | null) => (n ?? "").trim().split(".")[0].toUpperCase();
 
+// Tipo de equipo: por la categoría del inventario; si solo figura en AD, por el sistema operativo
+// (AD no distingue notebook de PC de escritorio: se informa como "puesto de trabajo").
+type TipoFaltante = "notebook" | "pc" | "servidor" | "puesto";
+const TIPO_TXT: Record<TipoFaltante, string> = {
+  notebook: "Notebook", pc: "PC de escritorio", servidor: "Servidor", puesto: "Puesto de trabajo (solo en AD)",
+};
+function tipoDe(f: Faltante): TipoFaltante {
+  const c = f.equipo?.categoria ?? "";
+  if (/notebook|laptop/i.test(c)) return "notebook";
+  if (/servidor|server/i.test(c)) return "servidor";
+  if (f.equipo) return "pc";
+  return /server/i.test(f.so ?? "") ? "servidor" : "puesto";
+}
+
 function haceDias(v: string | null) {
   if (!v) return "nunca";
   const d = Math.floor((Date.now() - new Date(v).getTime()) / 86400000);
@@ -37,6 +52,7 @@ export default function EquiposSinAgente() {
   const [hayAd, setHayAd] = useState(false);
   const [inv, setInv] = useState<Fila[]>([]);
   const [verInactivos, setVerInactivos] = useState(false);
+  const [tipo, setTipo] = useState<"" | "notebooks" | "servidor">("");
 
   useEffect(() => {
     const sb = createClient();
@@ -91,6 +107,24 @@ export default function EquiposSinAgente() {
 
   if (!disp) return null;
 
+  // "Notebooks" incluye los puestos que solo figuran en AD: pueden ser notebooks sin cargar en el inventario
+  const visibles = faltantes.filter((f) => {
+    const t = tipoDe(f);
+    return !tipo || (tipo === "servidor" ? t === "servidor" : t === "notebook" || t === "puesto");
+  });
+  const exportar = () =>
+    exportarExcel(
+      `equipos-sin-agente${tipo ? `-${tipo}` : ""}-${new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })}`,
+      ["Equipo", "Tipo", "Código de inventario", "En Active Directory", "En Inventario", "Sistema", "Último inicio de sesión (AD)", "Asignado a", "Estado en inventario"],
+      visibles.map((f) => [
+        f.nombre, TIPO_TXT[tipoDe(f)], f.equipo?.codigo ?? "", f.enAd ? "Sí" : "No", f.equipo ? "Sí" : "No",
+        f.so?.replace("Microsoft ", "") ?? "",
+        f.ultimoLogon ? new Date(f.ultimoLogon).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" }) : f.enAd ? "Nunca" : "",
+        f.equipo?.empleado ?? (f.equipo ? "Sin asignar" : ""), f.equipo?.estado ?? "",
+      ]),
+      { Equipo: 22, Tipo: 30, Sistema: 30, "Asignado a": 28 },
+    );
+
   return (
     <details className="card p-4">
       <summary className="cursor-pointer text-sm font-medium text-ink">
@@ -107,19 +141,32 @@ export default function EquiposSinAgente() {
             Incluir {inactivos} {inactivos === 1 ? "computadora" : "computadoras"} de AD sin actividad hace más de {DIAS_ACTIVO} días
           </label>
         )}
+        {faltantes.length > 0 && (
+          <div className="flex items-center gap-3 flex-wrap">
+            <select className="input w-auto" value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)} aria-label="Tipo de equipo">
+              <option value="">Todos los equipos ({faltantes.length})</option>
+              <option value="notebooks">Notebooks y puestos de trabajo</option>
+              <option value="servidor">Servidores</option>
+            </select>
+            <button className="btn-secondary" onClick={exportar} disabled={visibles.length === 0}>Exportar a Excel ({visibles.length})</button>
+          </div>
+        )}
         {faltantes.length === 0 ? (
           <p className="text-sm text-emerald-700">Todos los equipos conocidos tienen el agente instalado.</p>
+        ) : visibles.length === 0 ? (
+          <p className="text-sm text-ink/50">Ningún equipo de ese tipo sin el agente.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="data w-full">
-              <thead><tr><th>Equipo</th><th>Dónde figura</th><th>Sistema</th><th>Último inicio de sesión (AD)</th><th>Asignado a</th></tr></thead>
+              <thead><tr><th>Equipo</th><th>Tipo</th><th>Dónde figura</th><th>Sistema</th><th>Último inicio de sesión (AD)</th><th>Asignado a</th></tr></thead>
               <tbody>
-                {faltantes.map((f) => (
+                {visibles.map((f) => (
                   <tr key={f.nombre}>
                     <td>
                       <span className="font-medium text-ink">{f.nombre}</span>
                       {f.equipo && <Link href={`/inventario/equipos/${f.equipo.id}`} className={`${claseCodigo(f.equipo.codigo)} ml-2`}>{f.equipo.codigo}</Link>}
                     </td>
+                    <td className="text-ink/70 whitespace-nowrap">{TIPO_TXT[tipoDe(f)]}</td>
                     <td className="whitespace-nowrap">
                       {f.enAd && <span className="pill bg-line/[0.05] text-ink/60 mr-1">Active Directory</span>}
                       {f.equipo && <span className="pill bg-line/[0.05] text-ink/60">Inventario{f.equipo.categoria ? ` · ${f.equipo.categoria}` : ""}</span>}
