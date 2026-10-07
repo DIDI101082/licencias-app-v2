@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-type Cfg = { activa: boolean; sectores: string | null; ultima: string | null; total: number | null; error: string | null; url: string | null; con_token: boolean };
+type Cfg = { activa: boolean; generados: boolean; sectores: string | null; ultima: string | null; total: number | null; error: string | null; url: string | null; con_token: boolean };
 
 // Lectura del sistema de tickets: la base consulta cada 15 minutos un endpoint de solo lectura (HTTP GET)
 export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
@@ -12,6 +12,7 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
   const [sectores, setSectores] = useState("");
+  const [generados, setGenerados] = useState(true);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [falta, setFalta] = useState(false);
@@ -19,7 +20,7 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
   const cargar = async () => {
     const { data, error } = await createClient().rpc("tickets_lectura_ver");
     if (error) { setFalta(error.message.includes("tickets_lectura_ver")); return; }
-    setCfg(data as Cfg); setActiva((data as Cfg).activa); setSectores((data as Cfg).sectores ?? "");
+    setCfg(data as Cfg); setActiva((data as Cfg).activa); setSectores((data as Cfg).sectores ?? ""); setGenerados((data as Cfg).generados !== false);
   };
   useEffect(() => { cargar(); }, []);
 
@@ -92,10 +93,14 @@ https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&ti
         <input type="checkbox" checked={activa} onChange={(e) => setActiva(e.target.checked)} />
         Leer automáticamente cada 15 minutos
       </label>
+      <label className="flex items-center gap-2 text-sm text-ink/80">
+        <input type="checkbox" checked={generados} onChange={(e) => setGenerados(e.target.checked)} />
+        Leer también los tickets generados por el área (la misma dirección con <code className="text-xs">tipoBandeja=1</code>)
+      </label>
 
       <div className="flex items-center gap-3 flex-wrap">
         <button className="btn-primary" disabled={ocupado}
-          onClick={() => correr(() => sb.rpc("tickets_lectura_guardar", { p: { activa, sectores, ...(url.trim() ? { url } : {}), ...(token.trim() ? { token } : {}) } }), "Configuración guardada")}>
+          onClick={() => correr(() => sb.rpc("tickets_lectura_guardar", { p: { activa, generados, sectores, ...(url.trim() ? { url } : {}), ...(token.trim() ? { token } : {}) } }), "Configuración guardada")}>
           Guardar
         </button>
         <button className="btn-secondary" disabled={ocupado || !cfg.url}

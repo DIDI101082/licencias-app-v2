@@ -16,6 +16,7 @@ alter table public.tickets_config
   add column if not exists lectura_activa boolean not null default false,
   add column if not exists lectura_url text,          -- endpoint GET del sistema de tickets
   add column if not exists lectura_token text,        -- se envía como "Authorization: Bearer <token>"
+  add column if not exists lectura_generados boolean not null default true,   -- leer también la bandeja de generados (tipoBandeja=1)
   add column if not exists lectura_sectores text,     -- sectores a leer, separados por coma (vacío = todos)
   add column if not exists lectura_ultima timestamptz,
   add column if not exists lectura_total int,
@@ -41,6 +42,18 @@ alter table public.tickets_ext
   add column if not exists tipo text,        -- tipo de ticket (Incidente, Solicitud…)
   add column if not exists sla text,         -- estado del SLA tal como lo informa el sistema de tickets
   add column if not exists cliente text;
+-- Bandeja: tickets asignados a la subárea (los que hay que resolver) o generados por ella.
+-- Un mismo ticket puede estar en las dos, así que la clave es (id, bandeja).
+alter table public.tickets_ext
+  add column if not exists bandeja text not null default 'asignado' check (bandeja in ('asignado', 'generado'));
+do $$
+begin
+  if not exists (select 1 from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
+                  where i.indrelid = 'public.tickets_ext'::regclass and i.indisprimary and a.attname = 'bandeja') then
+    alter table public.tickets_ext drop constraint if exists tickets_ext_pkey;
+    alter table public.tickets_ext add primary key (id, bandeja);
+  end if;
+end $$;
 create index if not exists idx_tickets_ext_grupo on public.tickets_ext(grupo);
 
 alter table public.tickets_ext enable row level security;
@@ -78,7 +91,8 @@ end $$;
 -- ----------------------------------------------------------
 -- Lectura
 -- ----------------------------------------------------------
-create or replace function public.tickets_leer()
+-- Lee UNA bandeja (una dirección) y guarda sus tickets. No toca la configuración.
+create or replace function public.tickets_leer_una(p_url text, p_bandeja text, v_ahora timestamptz)
 returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare
   c tickets_config;
@@ -86,7 +100,6 @@ declare
   j jsonb;
   v_lista jsonb;
   v_headers http_header[] := '{}';
-  v_ahora timestamptz := clock_timestamp();
   v_error text;
   v_sectores text[];
   v_url text;
@@ -97,7 +110,7 @@ begin
   -- Sectores a leer, en minúsculas y sin espacios de más (null = todos)
   select array_agg(lower(trim(x))) into v_sectores
     from unnest(string_to_array(coalesce(c.lectura_sectores, ''), ',')) x where trim(x) <> '';
-  if c.lectura_url is null then
+  if p_url is null then
     v_error := 'Falta configurar la dirección de lectura del sistema de tickets';
   else
     -- El token va en los dos encabezados habituales: "X-API-Key" y "Authorization: Bearer"
@@ -107,7 +120,7 @@ begin
     v_headers := v_headers || http_header('Accept', 'application/json');
     begin
       begin perform http_set_curlopt('CURLOPT_TIMEOUT_MS', '20000'); exception when others then null; end;
-      v_url := c.lectura_url;
+      v_url := p_url;
       if v_sectores is not null then
         v_url := v_url || case when v_url like '%?%' then '&' else '?' end || 'sector='
                  || (select string_agg(urlencode(trim(x)), ',') from unnest(string_to_array(c.lectura_sectores, ',')) x where trim(x) <> '');
@@ -121,8 +134,8 @@ begin
         end;
       else
         -- Se informa la ruta consultada (sin parámetros) para detectar una dirección mal cargada
-        v_error := 'El sistema de tickets respondió ' || r.status || ' en ' || coalesce(substring(c.lectura_url from '^https?://[^/?#]+([^?#]*)'), '') 
-                   || case when substring(c.lectura_url from '^https?://[^/?#]+([^?#]*)') in ('', '/') then ' (la dirección no tiene ruta: falta la parte /api/...)' else '' end
+        v_error := 'El sistema de tickets respondió ' || r.status || ' en ' || coalesce(substring(p_url from '^https?://[^/?#]+([^?#]*)'), '') 
+                   || case when substring(p_url from '^https?://[^/?#]+([^?#]*)') in ('', '/') then ' (la dirección no tiene ruta: falta la parte /api/...)' else '' end
                    || coalesce(': ' || nullif(left(r.content, 200), ''), '');
       end if;
     exception when others then
@@ -141,7 +154,6 @@ begin
   end if;
 
   if v_error is not null then
-    update tickets_config set lectura_error = left(v_error, 900) where id = 1;
     return jsonb_build_object('ok', false, 'error', v_error);
   end if;
 
@@ -176,18 +188,18 @@ begin
       from jsonb_array_elements(v_lista) x
      where jsonb_typeof(x) = 'object'
   ), ins as (
-    insert into tickets_ext as t (id, numero, titulo, estado, grupo, sector, prioridad, solicitante, asignado, creado, actualizado, cerrado, url, tipo, sla, cliente, visto)
+    insert into tickets_ext as t (id, numero, titulo, estado, grupo, sector, prioridad, solicitante, asignado, creado, actualizado, cerrado, url, tipo, sla, cliente, bandeja, visto)
     select distinct on (d.id)
            left(d.id, 100), left(d.numero, 100), left(d.titulo, 500), left(d.estado, 100), tickets_grupo(d.estado, d.cerrado),
            left(d.sector, 150), left(d.prioridad, 60), left(d.solicitante, 200), left(d.asignado, 200),
            d.creado, d.actualizado, case when tickets_grupo(d.estado, d.cerrado) = 'cerrado' then coalesce(d.cerrado, d.cambio_estado) end,
-           case when d.url ~* '^https?://' then left(d.url, 500) end, left(d.tipo, 100), left(d.sla, 60), left(d.cliente, 200), v_ahora
+           case when d.url ~* '^https?://' then left(d.url, 500) end, left(d.tipo, 100), left(d.sla, 60), left(d.cliente, 200), p_bandeja, v_ahora
       from datos d
      where coalesce(d.id, '') <> ''
        -- los cerrados hace más de un año no se guardan
        and not (tickets_grupo(d.estado, d.cerrado) = 'cerrado' and coalesce(d.cerrado, d.cambio_estado) < v_ahora - interval '365 days')
        and (v_sectores is null or lower(trim(d.sector)) = any(v_sectores))
-    on conflict (id) do update set
+    on conflict (id, bandeja) do update set
       numero = excluded.numero, titulo = excluded.titulo, estado = excluded.estado, grupo = excluded.grupo,
       sector = excluded.sector, prioridad = excluded.prioridad, solicitante = excluded.solicitante, asignado = excluded.asignado,
       creado = coalesce(excluded.creado, t.creado), actualizado = excluded.actualizado,
@@ -203,17 +215,56 @@ begin
   -- El endpoint devuelve todos los tickets sin cerrar: uno que figuraba abierto y ya no viene, se eliminó
   -- o se cerró hace mucho. Nunca se limpia con una respuesta vacía. Los cerrados se conservan un año.
   if n > 0 then
-    delete from tickets_ext where grupo <> 'cerrado' and visto < v_ahora;
+    delete from tickets_ext where bandeja = p_bandeja and grupo <> 'cerrado' and visto < v_ahora;
     get diagnostics n_quitados = row_count;
     -- Si se limitó a ciertos sectores, no queda guardado nada de los demás
     if v_sectores is not null then
-      delete from tickets_ext where sector is null or not (lower(trim(sector)) = any(v_sectores));
+      delete from tickets_ext where bandeja = p_bandeja and (sector is null or not (lower(trim(sector)) = any(v_sectores)));
     end if;
     delete from tickets_ext where grupo = 'cerrado' and coalesce(cerrado, actualizado, visto) < v_ahora - interval '365 days';
   end if;
 
-  update tickets_config set lectura_ultima = v_ahora, lectura_total = n, lectura_error = null where id = 1;
   return jsonb_build_object('ok', true, 'tickets', n, 'quitados', n_quitados);
+end $$;
+revoke all on function public.tickets_leer_una(text, text, timestamptz) from public, anon, authenticated;
+
+-- Lectura completa: la bandeja configurada y, si está activado y la dirección es la de asignados
+-- (tipoBandeja=2), también la de generados (la misma dirección con tipoBandeja=1).
+create or replace function public.tickets_leer()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  c tickets_config;
+  v_ahora timestamptz := clock_timestamp();
+  v_bandeja text;
+  a jsonb;
+  g jsonb;
+  n int;
+begin
+  select * into c from tickets_config where id = 1;
+  v_bandeja := case when c.lectura_url ~* 'tipoBandeja=1(\D|$)' then 'generado' else 'asignado' end;
+  a := tickets_leer_una(c.lectura_url, v_bandeja, v_ahora);
+  if not (a ->> 'ok')::boolean then
+    update tickets_config set lectura_error = left(a ->> 'error', 900) where id = 1;
+    return a;
+  end if;
+  n := (a ->> 'tickets')::int;
+
+  if c.lectura_generados and c.lectura_url ~* 'tipoBandeja=2(\D|$)' then
+    g := tickets_leer_una(regexp_replace(c.lectura_url, 'tipoBandeja=2', 'tipoBandeja=1', 'i'), 'generado', v_ahora);
+    if not (g ->> 'ok')::boolean then
+      -- Los asignados quedaron leídos; se informa el problema con la otra bandeja
+      update tickets_config set lectura_ultima = v_ahora, lectura_total = n,
+             lectura_error = left('Bandeja de generados: ' || (g ->> 'error'), 900) where id = 1;
+      return jsonb_build_object('ok', false, 'error', 'Se leyeron ' || n || ' tickets asignados, pero falló la bandeja de generados: ' || (g ->> 'error'));
+    end if;
+    n := n + (g ->> 'tickets')::int;
+  else
+    delete from tickets_ext where bandeja <> v_bandeja;   -- no queda guardada una bandeja que ya no se lee
+  end if;
+
+  update tickets_config set lectura_ultima = v_ahora, lectura_total = n, lectura_error = null where id = 1;
+  return jsonb_build_object('ok', true, 'tickets', n, 'asignados', case when v_bandeja = 'asignado' then (a ->> 'tickets')::int else 0 end,
+                            'generados', case when v_bandeja = 'generado' then (a ->> 'tickets')::int else coalesce((g ->> 'tickets')::int, 0) end);
 end $$;
 revoke all on function public.tickets_leer() from public, anon, authenticated;
 
@@ -237,7 +288,7 @@ begin
   if mi_rol() is distinct from 'administrador' then raise exception 'Solo administradores'; end if;
   select * into c from tickets_config where id = 1;
   return jsonb_build_object(
-    'activa', c.lectura_activa, 'sectores', c.lectura_sectores, 'ultima', c.lectura_ultima, 'total', c.lectura_total, 'error', c.lectura_error,
+    'activa', c.lectura_activa, 'generados', c.lectura_generados, 'sectores', c.lectura_sectores, 'ultima', c.lectura_ultima, 'total', c.lectura_total, 'error', c.lectura_error,
     'url', substring(c.lectura_url from '^https?://([^?#]+)'),  -- servidor y ruta, sin parámetros (ahí podría ir una clave)
     'con_token', c.lectura_token is not null);
 end $$;
@@ -256,7 +307,8 @@ begin
   end if;
   if p ? 'token' then update tickets_config set lectura_token = nullif(trim(p ->> 'token'), '') where id = 1; end if;
   if p ? 'sectores' then update tickets_config set lectura_sectores = nullif(trim(p ->> 'sectores'), '') where id = 1; end if;
-  update tickets_config set lectura_activa = coalesce((p ->> 'activa')::boolean, lectura_activa), lectura_error = null where id = 1;
+  update tickets_config set lectura_activa = coalesce((p ->> 'activa')::boolean, lectura_activa),
+         lectura_generados = coalesce((p ->> 'generados')::boolean, lectura_generados), lectura_error = null where id = 1;
   perform alertas_registrar_cambio('Lectura del sistema de tickets',
     jsonb_build_object('configuracion', jsonb_build_object('antes', '(oculto)', 'despues', '(cambiada)')));
 end $$;
@@ -269,7 +321,7 @@ begin
   if mi_rol() is distinct from 'administrador' then raise exception 'Solo administradores'; end if;
   j := tickets_leer();
   if not (j ->> 'ok')::boolean then raise exception '%', j ->> 'error'; end if;
-  return 'Se leyeron ' || (j ->> 'tickets') || ' tickets';
+  return 'Se leyeron ' || (j ->> 'tickets') || ' tickets (' || (j ->> 'asignados') || ' asignados, ' || (j ->> 'generados') || ' generados)';
 end $$;
 grant execute on function public.tickets_leer_ahora() to authenticated;
 

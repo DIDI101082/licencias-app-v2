@@ -10,6 +10,7 @@ import TicketsLectura from "@/components/TicketsLectura";
 // Tickets del sistema de tickets (helpdesk), leídos cada 15 minutos. Solo lectura.
 
 type Grupo = "abierto" | "en_espera" | "cerrado";
+type Bandeja = "asignado" | "generado";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Ticket = Record<string, any>;
 
@@ -18,10 +19,16 @@ const GRUPOS: Record<Grupo, { titulo: string; uno: string; pill: string }> = {
   en_espera: { titulo: "En espera", uno: "En espera", pill: "bg-amber-500/10 text-amber-700" },
   cerrado: { titulo: "Cerrados (30 días)", uno: "Cerrado", pill: "bg-emerald-50 text-emerald-700" },
 };
+const BANDEJAS: Record<Bandeja, { titulo: string; detalle: string }> = {
+  asignado: { titulo: "Asignados al área", detalle: "Tickets que el área tiene que resolver." },
+  generado: { titulo: "Generados por el área", detalle: "Tickets que el área abrió hacia otros sectores." },
+};
 const DIA = 86400000;
+const SEMANAS = 12;
 // Color del estado de SLA que informa el sistema de tickets
+const slaVencidoRe = /vencido|escalado/i;
 const slaPill = (v: string | null) =>
-  /vencido|escalado/i.test(v ?? "") ? "bg-red-50 text-red-600"
+  slaVencidoRe.test(v ?? "") ? "bg-red-50 text-red-600"
     : /por vencer|sin responder/i.test(v ?? "") ? "bg-amber-500/10 text-amber-700"
     : /en tiempo/i.test(v ?? "") ? "bg-emerald-50 text-emerald-700" : "bg-line/[0.05] text-ink/60";
 
@@ -34,19 +41,49 @@ function duracion(ms: number | null) {
   return d === 1 ? "1 día" : `${d} días`;
 }
 const fecha = (v: string | null) => (v ? new Date(v).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" }) : "—");
+const promedio = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+// Lunes de la semana (hora de Argentina) como AAAA-MM-DD
+function semanaDe(ms: number) {
+  const d = new Date(new Date(ms).toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Lista de conteos con barra proporcional (por tipo, por prioridad)
+function Conteos({ titulo, datos }: { titulo: string; datos: [string, number][] }) {
+  const max = Math.max(1, ...datos.map(([, n]) => n));
+  return (
+    <div className="card p-5">
+      <h2 className="font-medium text-ink mb-3">{titulo}</h2>
+      {datos.length === 0 ? <p className="text-sm text-ink/50">Sin tickets.</p> : (
+        <ul className="space-y-2">
+          {datos.map(([k, n]) => (
+            <li key={k} className="text-sm">
+              <div className="flex justify-between gap-3"><span className="text-ink truncate">{k}</span><span className="tabular-nums text-ink/70">{n}</span></div>
+              <div className="h-1.5 rounded bg-line/[0.06] mt-1"><div className="h-1.5 rounded bg-brand-500" style={{ width: `${(n / max) * 100}%` }} /></div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export default function Tickets() {
   const { esAdmin } = usePerfil();
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [falta, setFalta] = useState(false);
+  const [bandeja, setBandeja] = useState<Bandeja>("asignado");
   const [filtro, setFiltro] = useState<Grupo | null>(null);
+  const [quietos, setQuietos] = useState(false);
+  const [diasQuieto, setDiasQuieto] = useState(7);
   const [texto, setTexto] = useState("");
   const [verConfig, setVerConfig] = useState(false);
   const [pagina, setPagina] = useState(1);
   const [ahora, setAhora] = useState(Date.now());
 
   const cargar = () =>
-    createClient().from("tickets_ext").select("*").order("creado", { ascending: true, nullsFirst: false }).limit(5000)
+    createClient().from("tickets_ext").select("*").order("creado", { ascending: true, nullsFirst: false }).limit(10000)
       .then(({ data, error }) => { setFalta(!!error && /tickets_ext/.test(error.message)); setTickets(data ?? []); setAhora(Date.now()); });
   useEffect(() => {
     cargar();
@@ -60,8 +97,17 @@ export default function Tickets() {
     const fin = t.grupo === "cerrado" ? (t.cerrado ? Date.parse(t.cerrado) : null) : ahora;
     return fin == null ? null : fin - Date.parse(t.creado);
   };
+  // Tiempo sin movimiento: desde la última modificación (o la creación) hasta ahora
+  const quieto = (t: Ticket): number | null => {
+    const u = t.actualizado ?? t.creado;
+    return u ? ahora - Date.parse(u) : null;
+  };
 
-  const lista = tickets ?? [];
+  const todos = tickets ?? [];
+  const hayGenerados = todos.some((t) => t.bandeja === "generado");
+  const hayAsignados = todos.some((t) => t.bandeja !== "generado");
+  const bandejaActual: Bandeja = bandeja === "generado" && !hayGenerados ? "asignado" : bandeja === "asignado" && !hayAsignados && hayGenerados ? "generado" : bandeja;
+  const lista = todos.filter((t) => (t.bandeja ?? "asignado") === bandejaActual);
   const sinCerrar = lista.filter((t) => t.grupo !== "cerrado");
   const cerrados30 = lista.filter((t) => t.grupo === "cerrado" && t.cerrado && ahora - Date.parse(t.cerrado) <= 30 * DIA);
   const cuenta: Record<Grupo, number> = {
@@ -69,36 +115,62 @@ export default function Tickets() {
     en_espera: lista.filter((t) => t.grupo === "en_espera").length,
     cerrado: cerrados30.length,
   };
-  const tiempos = sinCerrar.map(tiempo).filter((x): x is number => x != null);
-  const promedio = tiempos.length ? tiempos.reduce((a, b) => a + b, 0) / tiempos.length : null;
-  const slaVencido = sinCerrar.filter((t) => /vencido|escalado/i.test(t.sla ?? "")).length;
+  const antiguedad = promedio(sinCerrar.map(tiempo).filter((x): x is number => x != null));
+  const resolucion = promedio(cerrados30.map(tiempo).filter((x): x is number => x != null));
+  const slaVencido = sinCerrar.filter((t) => slaVencidoRe.test(t.sla ?? "")).length;
   const haySla = lista.some((t) => t.sla);
-  const resolucion = cerrados30.map(tiempo).filter((x): x is number => x != null);
-  const promResolucion = resolucion.length ? resolucion.reduce((a, b) => a + b, 0) / resolucion.length : null;
+  const sinMovimiento = sinCerrar.filter((t) => (quieto(t) ?? 0) >= diasQuieto * DIA);
 
   // Sin cerrar: por sector si hay más de uno; si es la bandeja de un solo sector, por persona asignada
   const porSector = new Set(sinCerrar.map((t) => t.sector).filter(Boolean)).size > 1;
-  const sectores = useMemo(() => {
-    const m = new Map<string, { sector: string; abierto: number; en_espera: number; max: number }>();
+  const carga = useMemo(() => {
+    const m = new Map<string, { clave: string; abierto: number; en_espera: number; vencidos: number; quietos: number; max: number }>();
     sinCerrar.forEach((t) => {
       const k = porSector ? t.sector || "Sin sector" : t.asignado || "Sin asignar";
-      const x = m.get(k) ?? { sector: k, abierto: 0, en_espera: 0, max: 0 };
+      const x = m.get(k) ?? { clave: k, abierto: 0, en_espera: 0, vencidos: 0, quietos: 0, max: 0 };
       x[t.grupo as "abierto" | "en_espera"]++;
+      if (slaVencidoRe.test(t.sla ?? "")) x.vencidos++;
+      if ((quieto(t) ?? 0) >= diasQuieto * DIA) x.quietos++;
       x.max = Math.max(x.max, tiempo(t) ?? 0);
       m.set(k, x);
     });
     return Array.from(m.values()).sort((a, b) => b.abierto + b.en_espera - (a.abierto + a.en_espera));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickets, ahora]);
+  }, [tickets, ahora, bandejaActual, diasQuieto]);
+
+  const contar = (f: (t: Ticket) => string) => {
+    const m = new Map<string, number>();
+    sinCerrar.forEach((t) => m.set(f(t), (m.get(f(t)) ?? 0) + 1));
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+  };
+  const porTipo = contar((t) => t.tipo || "Sin tipo");
+  const porPrioridad = contar((t) => t.prioridad || "Sin prioridad");
+
+  // Últimas semanas: cuántos tickets se crearon y cuántos se cerraron en cada una
+  const semanas = useMemo(() => {
+    const out: { semana: string; creados: number; cerrados: number }[] = [];
+    const idx = new Map<string, number>();
+    for (let i = SEMANAS - 1; i >= 0; i--) { const s = semanaDe(ahora - i * 7 * DIA); idx.set(s, out.length); out.push({ semana: s, creados: 0, cerrados: 0 }); }
+    lista.forEach((t) => {
+      const c = t.creado ? idx.get(semanaDe(Date.parse(t.creado))) : undefined;
+      if (c != null) out[c].creados++;
+      const z = t.grupo === "cerrado" && t.cerrado ? idx.get(semanaDe(Date.parse(t.cerrado))) : undefined;
+      if (z != null) out[z].cerrados++;
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickets, ahora, bandejaActual]);
+  const maxSemana = Math.max(1, ...semanas.map((s) => Math.max(s.creados, s.cerrados)));
+  const haySemanas = semanas.some((s) => s.creados + s.cerrados > 0);
 
   // Sin filtro se muestran los que no están cerrados, del más antiguo al más nuevo
   const filas = useMemo(() => {
-    const base = filtro === "cerrado" ? cerrados30 : filtro ? lista.filter((t) => t.grupo === filtro) : sinCerrar;
+    const base = quietos ? sinMovimiento : filtro === "cerrado" ? cerrados30 : filtro ? lista.filter((t) => t.grupo === filtro) : sinCerrar;
     const q = texto.trim().toLowerCase();
-    return base.filter((t) => !q || [t.id, t.numero, t.titulo, t.estado, t.sector, t.asignado, t.solicitante, t.prioridad]
-      .concat([t.tipo, t.sla, t.cliente]).some((v) => v && String(v).toLowerCase().includes(q)));
+    return base.filter((t) => !q || [t.id, t.numero, t.titulo, t.estado, t.sector, t.asignado, t.solicitante, t.prioridad, t.tipo, t.sla, t.cliente]
+      .some((v) => v && String(v).toLowerCase().includes(q)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickets, filtro, texto, ahora]);
+  }, [tickets, filtro, quietos, diasQuieto, texto, ahora, bandejaActual]);
 
   const fc = useFiltrosColumna(filas, {
     estado: (t) => t.estado || GRUPOS[t.grupo as Grupo].uno,
@@ -108,7 +180,7 @@ export default function Tickets() {
     sla: (t) => t.sla || "—",
   });
   const enTabla = fc.filtradas;
-  useEffect(() => { setPagina(1); }, [filtro, texto, fc.filtros]);
+  useEffect(() => { setPagina(1); }, [filtro, quietos, texto, bandejaActual, fc.filtros]);
   const POR_PAGINA = 50;
   const paginas = Math.max(1, Math.ceil(enTabla.length / POR_PAGINA));
   const paginaActual = Math.min(pagina, paginas);
@@ -116,12 +188,12 @@ export default function Tickets() {
 
   const exportar = () =>
     exportarExcel(
-      `tickets-${new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })}`,
-      ["Ticket", "Título", "Tipo", "Estado", "Situación", "SLA", "Sector", "Prioridad", "Solicitante", "Asignado a", "Cliente", "Creado", "Cerrado", "Días"],
+      `tickets-${bandejaActual}s-${new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })}`,
+      ["Ticket", "Título", "Tipo", "Estado", "Situación", "SLA", "Sector", "Prioridad", "Solicitante", "Asignado a", "Cliente", "Creado", "Último movimiento", "Cerrado", "Días", "Días sin movimiento"],
       enTabla.map((t) => {
-        const ms = tiempo(t);
+        const ms = tiempo(t), q = t.grupo === "cerrado" ? null : quieto(t);
         return [t.numero || t.id, t.titulo, t.tipo, t.estado, GRUPOS[t.grupo as Grupo].uno, t.sla, t.sector, t.prioridad, t.solicitante, t.asignado, t.cliente,
-          fecha(t.creado), t.cerrado ? fecha(t.cerrado) : "", ms == null ? "" : Math.round((ms / DIA) * 10) / 10];
+          fecha(t.creado), fecha(t.actualizado), t.cerrado ? fecha(t.cerrado) : "", ms == null ? "" : Math.round((ms / DIA) * 10) / 10, q == null ? "" : Math.floor(q / DIA)];
       }),
       { "Título": 40, Sector: 22, Solicitante: 26, "Asignado a": 26 },
     );
@@ -140,61 +212,115 @@ export default function Tickets() {
 
       {esAdmin && verConfig && <TicketsLectura alLeer={cargar} />}
 
+      {hayGenerados && hayAsignados && (
+        <div>
+          <div className="flex gap-2 flex-wrap" role="tablist" aria-label="Bandeja">
+            {(["asignado", "generado"] as Bandeja[]).map((b) => (
+              <button key={b} role="tab" aria-selected={bandejaActual === b} onClick={() => { setBandeja(b); setFiltro(null); setQuietos(false); fc.limpiar(); }}
+                className={`px-4 py-2 rounded-lg text-sm transition-colors ${bandejaActual === b ? "bg-brand-600 text-white font-medium" : "text-ink/70 hover:bg-line/[0.06]"}`}>
+                {BANDEJAS[b].titulo} ({todos.filter((t) => (t.bandeja ?? "asignado") === b && t.grupo !== "cerrado").length})
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-ink/50 mt-2">{BANDEJAS[bandejaActual].detalle}</p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {(["abierto", "en_espera", "cerrado"] as Grupo[]).map((g) => (
-          <button key={g} onClick={() => setFiltro(filtro === g ? null : g)} aria-pressed={filtro === g}
-            className={`card p-5 text-left transition-colors ${filtro === g ? "border-brand-500 ring-2 ring-brand-500/20" : "hover:border-brand-300"}`}>
+          <button key={g} onClick={() => { setQuietos(false); setFiltro(filtro === g ? null : g); }} aria-pressed={!quietos && filtro === g}
+            className={`card p-5 text-left transition-colors ${!quietos && filtro === g ? "border-brand-500 ring-2 ring-brand-500/20" : "hover:border-brand-300"}`}>
             <div className="text-xs text-ink/50 font-medium">{GRUPOS[g].titulo}</div>
             <div className="font-display text-3xl mt-1 text-ink">{cuenta[g]}</div>
           </button>
         ))}
-        <div className="card p-5">
-          <div className="text-xs text-ink/50 font-medium">Antigüedad promedio</div>
-          <div className="font-display text-3xl mt-1 text-ink">{duracion(promedio)}</div>
-          <div className="text-xs text-ink/50 mt-1">de los que siguen sin cerrar</div>
-        </div>
         <div className="card p-5">
           <div className="text-xs text-ink/50 font-medium">SLA vencido</div>
           <div className={`font-display text-3xl mt-1 ${slaVencido ? "text-red-600" : "text-ink"}`}>{haySla ? slaVencido : "—"}</div>
           <div className="text-xs text-ink/50 mt-1">sin cerrar, vencidos o escalados</div>
         </div>
         <div className="card p-5">
+          <div className="text-xs text-ink/50 font-medium">Antigüedad promedio</div>
+          <div className="font-display text-3xl mt-1 text-ink">{duracion(antiguedad)}</div>
+          <div className="text-xs text-ink/50 mt-1">de los que siguen sin cerrar</div>
+        </div>
+        <div className="card p-5">
           <div className="text-xs text-ink/50 font-medium">Tiempo de resolución</div>
-          <div className="font-display text-3xl mt-1 text-ink">{duracion(promResolucion)}</div>
+          <div className="font-display text-3xl mt-1 text-ink">{duracion(resolucion)}</div>
           <div className="text-xs text-ink/50 mt-1">promedio, cerrados en 30 días</div>
         </div>
       </div>
 
-      {tickets && lista.length === 0 && (
+      {tickets && todos.length === 0 && (
         <p className="text-sm text-ink/60">
           Todavía no hay tickets leídos. {esAdmin ? "Cargá la dirección y el token en “Configurar lectura” y tocá “Leer ahora”." : "Un administrador tiene que configurar la lectura."}
         </p>
       )}
 
-      {sectores.length > 0 && (
-        <div className="card p-5">
-          <h2 className="font-medium text-ink mb-3">Sin cerrar, {porSector ? "por sector" : "por persona asignada"}</h2>
-          <div className="overflow-x-auto">
-            <table className="data w-full">
-              <thead><tr><th>{porSector ? "Sector" : "Asignado a"}</th><th>Abiertos</th><th>En espera</th><th>El más antiguo</th></tr></thead>
-              <tbody>
-                {sectores.map((s) => (
-                  <tr key={s.sector}>
-                    <td className="text-ink">{s.sector}</td>
-                    <td className="tabular-nums">{s.abierto}</td>
-                    <td className="tabular-nums">{s.en_espera}</td>
-                    <td className="text-ink/70">{duracion(s.max || null)}</td>
-                  </tr>
+      {lista.length > 0 && (
+        <div className="grid lg:grid-cols-2 gap-6">
+          <div className="card p-5">
+            <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+              <h2 className="font-medium text-ink">Últimas {SEMANAS} semanas</h2>
+              <span className="text-xs text-ink/50 flex gap-3">
+                <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-brand-500 inline-block" /> Creados</span>
+                <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-emerald-500 inline-block" /> Cerrados</span>
+              </span>
+            </div>
+            {!haySemanas ? <p className="text-sm text-ink/50">Sin movimientos en este período.</p> : (
+              <div className="flex items-end gap-2 h-36" role="img" aria-label="Tickets creados y cerrados por semana">
+                {semanas.map((s) => (
+                  <div key={s.semana} className="flex-1 flex flex-col h-full" title={`Semana del ${s.semana.split("-").reverse().join("/")}: ${s.creados} creados, ${s.cerrados} cerrados`}>
+                    <div className="flex-1 flex items-end gap-[2px]">
+                      <div className="flex-1 bg-brand-500 rounded-t-sm" style={{ height: `${(s.creados / maxSemana) * 100}%` }} />
+                      <div className="flex-1 bg-emerald-500 rounded-t-sm" style={{ height: `${(s.cerrados / maxSemana) * 100}%` }} />
+                    </div>
+                    <div className="text-[10px] text-ink/40 text-center mt-1">{s.semana.slice(8)}/{s.semana.slice(5, 7)}</div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            )}
+            <p className="text-xs text-ink/50 mt-2">Si se crean más de los que se cierran, el pendiente crece. Cada barra es una semana (de lunes a domingo).</p>
           </div>
+
+          <div className="card p-5">
+            <h2 className="font-medium text-ink mb-3">Sin cerrar, {porSector ? "por sector" : "por persona asignada"}</h2>
+            {carga.length === 0 ? <p className="text-sm text-ink/50">No hay tickets sin cerrar.</p> : (
+              <div className="overflow-x-auto">
+                <table className="data w-full">
+                  <thead><tr><th>{porSector ? "Sector" : "Asignado a"}</th><th>Abiertos</th><th>En espera</th><th>SLA vencido</th><th>Sin movimiento</th><th>El más antiguo</th></tr></thead>
+                  <tbody>
+                    {carga.map((s) => (
+                      <tr key={s.clave}>
+                        <td className="text-ink">{s.clave}</td>
+                        <td className="tabular-nums">{s.abierto}</td>
+                        <td className="tabular-nums">{s.en_espera}</td>
+                        <td className={`tabular-nums ${s.vencidos ? "text-red-600 font-medium" : "text-ink/50"}`}>{s.vencidos}</td>
+                        <td className={`tabular-nums ${s.quietos ? "text-amber-700" : "text-ink/50"}`}>{s.quietos}</td>
+                        <td className="text-ink/70 whitespace-nowrap">{duracion(s.max || null)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <Conteos titulo="Sin cerrar, por tipo" datos={porTipo} />
+          <Conteos titulo="Sin cerrar, por prioridad" datos={porPrioridad} />
         </div>
       )}
 
       <div className="flex gap-3 flex-wrap items-center">
         <input type="search" className="input flex-1 min-w-[14rem]" placeholder="Buscar por número, título, sector o persona…"
           value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Buscar" />
+        <button onClick={() => { setQuietos(!quietos); setFiltro(null); }} aria-pressed={quietos}
+          className={`px-3 py-2 rounded-lg text-sm border transition-colors ${quietos ? "border-amber-500 bg-amber-500/10 text-amber-700 font-medium" : "border-line/20 text-ink/70 hover:border-brand-300"}`}>
+          Sin movimiento ({sinMovimiento.length})
+        </button>
+        <select className="input w-auto" value={diasQuieto} onChange={(e) => setDiasQuieto(Number(e.target.value))} aria-label="Días sin movimiento">
+          {[3, 7, 15, 30].map((d) => <option key={d} value={d}>hace más de {d} días</option>)}
+        </select>
         <button className="btn-secondary" onClick={exportar} disabled={enTabla.length === 0}>Exportar a Excel ({enTabla.length})</button>
       </div>
 
@@ -206,29 +332,33 @@ export default function Tickets() {
             <tr>
               <th>Ticket</th><ThFiltro ctl={fc} col="estado">Estado</ThFiltro><ThFiltro ctl={fc} col="sector">Sector</ThFiltro>
               <ThFiltro ctl={fc} col="prioridad">Prioridad</ThFiltro><ThFiltro ctl={fc} col="asignado">Asignado a</ThFiltro>
-              <ThFiltro ctl={fc} col="sla">SLA</ThFiltro><th>Creado</th><th>{filtro === "cerrado" ? "Tardó" : "Lleva"}</th>
+              <ThFiltro ctl={fc} col="sla">SLA</ThFiltro><th>Creado</th><th>{filtro === "cerrado" && !quietos ? "Tardó" : "Lleva"}</th><th>Último movimiento</th>
             </tr>
           </thead>
           <tbody>
-            {visibles.map((t) => (
-              <tr key={t.id}>
-                <td>
-                  {t.url ? <a href={t.url} target="_blank" rel="noopener noreferrer" className="font-medium text-brand-600 hover:underline">{t.numero || `#${t.id}`}</a>
-                    : <span className="font-medium text-ink">{t.numero || `#${t.id}`}</span>}
-                  <div className="text-xs text-ink/60 max-w-[28rem] truncate" title={t.titulo ?? ""}>{t.titulo ?? "—"}</div>
-                  {(t.tipo || t.solicitante) && <div className="text-xs text-ink/40">{[t.tipo, t.solicitante && `de ${t.solicitante}`].filter(Boolean).join(" · ")}</div>}
-                </td>
-                <td><span className={`pill ${GRUPOS[t.grupo as Grupo].pill}`}>{t.estado || GRUPOS[t.grupo as Grupo].uno}</span></td>
-                <td className="text-ink/70">{t.sector ?? "—"}</td>
-                <td className="text-ink/70">{t.prioridad ?? "—"}</td>
-                <td className="text-ink/70">{t.asignado ?? "Sin asignar"}</td>
-                <td>{t.sla ? <span className={`pill ${slaPill(t.sla)}`}>{t.sla}</span> : <span className="text-ink/40">—</span>}</td>
-                <td className="text-ink/60 whitespace-nowrap">{fecha(t.creado)}</td>
-                <td className="text-ink whitespace-nowrap">{duracion(tiempo(t))}</td>
-              </tr>
-            ))}
+            {visibles.map((t) => {
+              const q = t.grupo === "cerrado" ? null : quieto(t);
+              return (
+                <tr key={`${t.bandeja}-${t.id}`}>
+                  <td>
+                    {t.url ? <a href={t.url} target="_blank" rel="noopener noreferrer" className="font-medium text-brand-600 hover:underline">{t.numero || `#${t.id}`}</a>
+                      : <span className="font-medium text-ink">{t.numero || `#${t.id}`}</span>}
+                    <div className="text-xs text-ink/60 max-w-[28rem] truncate" title={t.titulo ?? ""}>{t.titulo ?? "—"}</div>
+                    {(t.tipo || t.solicitante) && <div className="text-xs text-ink/40">{[t.tipo, t.solicitante && `de ${t.solicitante}`].filter(Boolean).join(" · ")}</div>}
+                  </td>
+                  <td><span className={`pill ${GRUPOS[t.grupo as Grupo].pill}`}>{t.estado || GRUPOS[t.grupo as Grupo].uno}</span></td>
+                  <td className="text-ink/70">{t.sector ?? "—"}</td>
+                  <td className="text-ink/70">{t.prioridad ?? "—"}</td>
+                  <td className="text-ink/70">{t.asignado ?? "Sin asignar"}</td>
+                  <td>{t.sla ? <span className={`pill ${slaPill(t.sla)}`}>{t.sla}</span> : <span className="text-ink/40">—</span>}</td>
+                  <td className="text-ink/60 whitespace-nowrap">{fecha(t.creado)}</td>
+                  <td className="text-ink whitespace-nowrap">{duracion(tiempo(t))}</td>
+                  <td className={`whitespace-nowrap ${q != null && q >= diasQuieto * DIA ? "text-amber-700" : "text-ink/60"}`}>{q == null ? "—" : `hace ${duracion(q)}`}</td>
+                </tr>
+              );
+            })}
             {enTabla.length === 0 && (
-              <tr><td colSpan={8} className="text-center text-ink/40 py-10">
+              <tr><td colSpan={9} className="text-center text-ink/40 py-10">
                 {texto || fc.activos ? "Ningún ticket coincide con el filtro." : "No hay tickets en esta situación."}
               </td></tr>
             )}
