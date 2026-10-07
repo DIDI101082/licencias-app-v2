@@ -49,7 +49,7 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
         <details className="text-xs text-ink/60 mt-2">
           <summary className="cursor-pointer">Formato que tiene que devolver el endpoint</summary>
           <pre className="mt-2 p-3 rounded bg-line/[0.04] overflow-x-auto">{`GET <dirección>?sector=<sectores separados por coma>   (el parámetro va solo si cargaste sectores)
-Encabezado: Authorization: Bearer <token>
+Encabezados: X-API-Key: <token>  y  Authorization: Bearer <token>  (se envían los dos)
 
 200 OK · application/json
 {
@@ -113,8 +113,8 @@ Estados: si el texto contiene "cerrado", "resuelto", "finalizado" o "cancelado" 
           {cfg.ultima ? `Última lectura: ${new Date(cfg.ultima).toLocaleString("es-AR")} · ${cfg.total ?? 0} tickets` : "Todavía no se hizo ninguna lectura"}
         </span>
       </div>
-      {msg && <p className={`text-sm rounded-md px-3 py-2 ${msg.ok ? "text-emerald-700 bg-emerald-50" : "text-red-600 bg-red-50"}`}>{msg.texto}</p>}
-      {!msg && cfg.error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">Último error: {cfg.error}</p>}
+      {msg && <p className={`text-sm rounded-md px-3 py-2 break-words ${msg.ok ? "text-emerald-700 bg-emerald-50" : "text-red-600 bg-red-50"}`}>{msg.texto}</p>}
+      {!msg && cfg.error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2 break-words">Último error: {cfg.error}</p>}
     </div>
   );
 }

@@ -93,7 +93,10 @@ begin
   if c.lectura_url is null then
     v_error := 'Falta configurar la dirección de lectura del sistema de tickets';
   else
-    if c.lectura_token is not null then v_headers := array[http_header('Authorization', 'Bearer ' || c.lectura_token)]; end if;
+    -- El token va en los dos encabezados habituales: "X-API-Key" y "Authorization: Bearer"
+    if c.lectura_token is not null then
+      v_headers := array[http_header('X-API-Key', c.lectura_token), http_header('Authorization', 'Bearer ' || c.lectura_token)];
+    end if;
     v_headers := v_headers || http_header('Accept', 'application/json');
     begin
       begin perform http_set_curlopt('CURLOPT_TIMEOUT_MS', '20000'); exception when others then null; end;
@@ -122,12 +125,13 @@ begin
     v_lista := case when jsonb_typeof(j) = 'array' then j
                     else coalesce(j -> 'tickets', j -> 'data', j -> 'items', j -> 'results') end;
     if jsonb_typeof(v_lista) is distinct from 'array' then
-      v_error := 'La respuesta no trae la lista de tickets (se espera {"tickets": [...]})';
+      -- Se muestra el comienzo de la respuesta para poder adaptar la lectura al formato real
+      v_error := 'La respuesta no trae la lista de tickets (se espera {"tickets": [...]}). Recibido: ' || left(r.content, 600);
     end if;
   end if;
 
   if v_error is not null then
-    update tickets_config set lectura_error = left(v_error, 300) where id = 1;
+    update tickets_config set lectura_error = left(v_error, 900) where id = 1;
     return jsonb_build_object('ok', false, 'error', v_error);
   end if;
 
