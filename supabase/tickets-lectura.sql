@@ -113,7 +113,10 @@ begin
           v_error := 'El sistema de tickets no respondió con un JSON';
         end;
       else
-        v_error := 'El sistema de tickets respondió ' || r.status || coalesce(': ' || left(r.content, 200), '');
+        -- Se informa la ruta consultada (sin parámetros) para detectar una dirección mal cargada
+        v_error := 'El sistema de tickets respondió ' || r.status || ' en ' || coalesce(substring(c.lectura_url from '^https?://[^/?#]+([^?#]*)'), '') 
+                   || case when substring(c.lectura_url from '^https?://[^/?#]+([^?#]*)') in ('', '/') then ' (la dirección no tiene ruta: falta la parte /api/...)' else '' end
+                   || coalesce(': ' || nullif(left(r.content, 200), ''), '');
       end if;
     exception when others then
       v_error := 'No se pudo conectar con el sistema de tickets: ' || sqlerrm;
@@ -208,7 +211,7 @@ begin
   select * into c from tickets_config where id = 1;
   return jsonb_build_object(
     'activa', c.lectura_activa, 'sectores', c.lectura_sectores, 'ultima', c.lectura_ultima, 'total', c.lectura_total, 'error', c.lectura_error,
-    'url', case when c.lectura_url is null then null else substring(c.lectura_url from '^https?://([^/]+)') end,  -- solo el servidor
+    'url', substring(c.lectura_url from '^https?://([^?#]+)'),  -- servidor y ruta, sin parámetros (ahí podría ir una clave)
     'con_token', c.lectura_token is not null);
 end $$;
 grant execute on function public.tickets_lectura_ver() to authenticated;

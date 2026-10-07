@@ -81,14 +81,15 @@ Estados: si el texto contiene "cerrado", "resuelto", "finalizado" o "cancelado" 
       <div className="grid md:grid-cols-2 gap-3">
         <label className="block text-sm">Dirección (endpoint de lectura)
           <input className="input mt-1" value={url} onChange={(e) => setUrl(e.target.value)}
-            placeholder={cfg.url ? `Configurada (${cfg.url}). Pegá otra para reemplazarla` : "https://helpdesk.accusys.com.ar/api/cyber/tickets"} />
+            placeholder={cfg.url ? `Configurada: ${cfg.url}` : "https://helpdesk.accusys.com.ar/api/cyber/tickets"} />
+          {cfg.url && <span className="text-xs text-ink/50">Guardada: <code>https://{cfg.url}</code>. Para cambiarla, pegá la dirección completa.</span>}
         </label>
         <label className="block text-sm">Token
           <input className="input mt-1" type="password" value={token} onChange={(e) => setToken(e.target.value)}
             placeholder={cfg.con_token ? "Configurado. Escribí otro para reemplazarlo" : "Token de solo lectura"} />
         </label>
         <label className="block text-sm md:col-span-2">Sectores a leer
-          <input className="input mt-1" value={sectores} onChange={(e) => setSectores(e.target.value)} placeholder="Ciberseguridad" />
+          <input className="input mt-1" value={sectores} onChange={(e) => setSectores(e.target.value)} placeholder="Vacío: todos los sectores" />
           <span className="text-xs text-ink/50">
             Escribilos igual que figuran en el sistema de tickets, separados por coma. Vacío = todos los sectores.
             Solo se guardan los tickets de estos sectores.
