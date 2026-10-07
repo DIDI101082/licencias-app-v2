@@ -16,7 +16,8 @@ const DIA = 86400000;
 const TZ = "America/Argentina/Buenos_Aires";
 const slaVencidoRe = /vencido|escalado/i;
 const sectoresDe = (t: Ticket): string[] => (t.sector ? String(t.sector).split(", ").filter(Boolean) : []);
-const personasDe = (t: Ticket): string[] => (t.asignado ? String(t.asignado).split(", ").filter(Boolean) : []);
+// Varias personas asignadas vienen separadas con "; " (cada nombre es "Apellido, Nombre")
+const personasDe = (t: Ticket): string[] => (t.asignado ? String(t.asignado).split("; ").map((x) => x.trim()).filter(Boolean) : []);
 const fecha = (v: string | number | null) => (v ? new Date(v).toLocaleDateString("es-AR", { timeZone: TZ }) : "—");
 const promedio = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 function duracion(ms: number | null) {
@@ -174,7 +175,7 @@ export default function ReporteHelpdesk() {
 
   return (
     <div className="space-y-6">
-      <style>{`@media print { @page { size: A4 landscape; margin: 12mm; } body { background: #fff !important; } .card { box-shadow: none !important; border: 1px solid #ddd !important; } table.data { font-size: 10px; } tr { break-inside: avoid; } a { color: inherit !important; text-decoration: none !important; } }`}</style>
+      <style>{`@media print { @page { size: A4 landscape; margin: 12mm; } body { background: #fff !important; } .card { box-shadow: none !important; border: 1px solid #ddd !important; } table.data { font-size: 9px; } table.data th, table.data td { padding: 3px 5px !important; } .overflow-x-auto { overflow: visible !important; } tr { break-inside: avoid; } a { color: inherit !important; text-decoration: none !important; } }`}</style>
 
       <div className="flex items-end justify-between gap-4 flex-wrap print:hidden">
         <div>

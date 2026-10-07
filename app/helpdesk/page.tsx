@@ -45,6 +45,8 @@ function duracion(ms: number | null) {
 const fecha = (v: string | null) => (v ? new Date(v).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" }) : "—");
 // Un ticket puede estar asignado a más de un sector ("CAU Servidores, Ciberseguridad")
 const sectoresDe = (t: Ticket): string[] => (t.sector ? String(t.sector).split(", ").filter(Boolean) : []);
+// Varias personas asignadas vienen separadas con "; " (cada nombre es "Apellido, Nombre")
+const personasDe = (t: Ticket): string[] => (t.asignado ? String(t.asignado).split("; ").map((x) => x.trim()).filter(Boolean) : []);
 const promedio = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 // Lunes de la semana (hora de Argentina) como AAAA-MM-DD
 function semanaDe(ms: number) {
@@ -177,7 +179,7 @@ export default function Tickets() {
   const carga = useMemo(() => {
     const m = new Map<string, { clave: string; abierto: number; en_espera: number; vencidos: number; quietos: number; falta: number; max: number }>();
     sinCerrar.forEach((t) => {
-      const personas: string[] = t.asignado ? String(t.asignado).split(", ").filter(Boolean) : ["Sin asignar"];
+      const personas: string[] = personasDe(t).length ? personasDe(t) : ["Sin asignar"];
       personas.forEach((k) => {
         const x = m.get(k) ?? { clave: k, abierto: 0, en_espera: 0, vencidos: 0, quietos: 0, falta: 0, max: 0 };
         if (t.respuesta_de === "atencion") x.falta++;
@@ -230,7 +232,7 @@ export default function Tickets() {
     estado: (t) => t.estado || GRUPOS[t.grupo as Grupo].uno,
     sector: (t) => (sectoresDe(t).length ? sectoresDe(t) : ["Sin sector"]),
     prioridad: (t) => t.prioridad || "—",
-    asignado: (t) => t.asignado || "Sin asignar",
+    asignado: (t) => (personasDe(t).length ? personasDe(t) : ["Sin asignar"]),
     respuesta: (t) => (t.grupo === "cerrado" ? "—" : t.respuesta_de === "atencion" ? txtFalta : t.respuesta_de === "solicitante" ? "Espera al solicitante" : "Sin leer"),
     sla: (t) => t.sla || "—",
   });

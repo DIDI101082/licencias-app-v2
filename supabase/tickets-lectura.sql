@@ -205,7 +205,8 @@ begin
            coalesce(x ->> 'prioridad', x ->> 'priority') as prioridad,
            coalesce(x ->> 'solicitante', x ->> 'usuario', x ->> 'requester', x ->> 'autor') as solicitante,
            coalesce(x ->> 'asignado', x ->> 'asignado_a', x ->> 'responsable', x ->> 'assignee',
-                    nullif(array_to_string(k.personas, ', '), '')) as asignado,
+                    -- separadas con "; ": los nombres vienen como "Apellido, Nombre" y la coma no sirve de separador
+                    nullif(array_to_string(k.personas, '; '), '')) as asignado,
            tickets_fecha(coalesce(x ->> 'creado', x ->> 'fecha_creacion', x ->> 'created_at', x ->> 'fechaAlta')) as creado,
            tickets_fecha(coalesce(x ->> 'actualizado', x ->> 'fecha_actualizacion', x ->> 'updated_at', x ->> 'fechaUltimaModificacion')) as actualizado,
            tickets_fecha(coalesce(x ->> 'cerrado', x ->> 'fecha_cierre', x ->> 'closed_at', x ->> 'fechaCierre')) as cerrado,
