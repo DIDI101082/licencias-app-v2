@@ -8,13 +8,14 @@ import { conectado, hace } from "@/lib/monitoreo";
 import { claseCodigo } from "@/lib/inventario";
 import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/FiltroColumna";
 
-type Tipo = "oficina" | "vpn" | "remoto" | "invitados";
+type Tipo = "oficina" | "vpn" | "remoto" | "invitados" | "servidores";
 
 const TIPOS: Record<Tipo | "desconocido", { titulo: string; pill: string; barra: string }> = {
   oficina: { titulo: "En la oficina", pill: "bg-brand-50 text-brand-700", barra: "bg-brand-500" },
   vpn: { titulo: "Home office con VPN", pill: "bg-emerald-50 text-emerald-700", barra: "bg-emerald-500" },
   remoto: { titulo: "Home office sin VPN", pill: "bg-amber-500/10 text-amber-700", barra: "bg-amber-500" },
   invitados: { titulo: "En WiFi de invitados", pill: "bg-red-50 text-red-600", barra: "bg-red-500" },
+  servidores: { titulo: "Servidores", pill: "bg-line/[0.06] text-ink/70", barra: "bg-line/40" },
   desconocido: { titulo: "Sin datos", pill: "bg-line/[0.05] text-ink/50", barra: "bg-line/20" },
 };
 
@@ -42,7 +43,8 @@ function Redes() {
         <p className="text-sm text-ink/60 mt-1">
           Con estas redes se decide dónde está cada equipo. Los cambios se aplican en el siguiente reporte de cada agente (unos minutos).
           En el nombre del WiFi, <code className="text-xs">%</code> es un comodín: <code className="text-xs">Accusys%P5</code> acepta
-          “Accusys_P5” y “Accusys_Wifi_P5”, sin importar mayúsculas.
+          “Accusys_P5” y “Accusys_Wifi_P5”, sin importar mayúsculas. Las redes de tipo Servidores solo se aplican a servidores, que nunca
+          cuentan como home office.
         </p>
       </div>
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
@@ -55,7 +57,7 @@ function Redes() {
                 <td className="text-ink">{r.nombre}</td>
                 <td className="text-ink/70">{r.sede}</td>
                 <td className="font-mono text-xs">{r.cidr}</td>
-                <td className="text-ink/70">{r.tipo === "corporativa" ? "Oficina" : r.tipo === "invitados" ? "Invitados" : "VPN"}</td>
+                <td className="text-ink/70">{r.tipo === "corporativa" ? "Oficina" : r.tipo === "invitados" ? "Invitados" : r.tipo === "servidores" ? "Servidores" : "VPN"}</td>
                 <td className="text-ink/70">{r.ssid ?? "—"}</td>
                 <td className="text-right"><button className="text-sm text-ink/40 hover:text-red-600" onClick={() => borrar(r.id)}>Quitar</button></td>
               </tr>
@@ -71,6 +73,7 @@ function Redes() {
           <label className="label">Tipo</label>
           <select className="input" value={nueva.tipo} onChange={(e) => setNueva({ ...nueva, tipo: e.target.value })}>
             <option value="corporativa">Oficina</option><option value="invitados">Invitados</option><option value="vpn">VPN</option>
+            <option value="servidores">Servidores</option>
           </select>
         </div>
         <div><label className="label">WiFi (opcional)</label><input className="input" value={nueva.ssid} onChange={(e) => setNueva({ ...nueva, ssid: e.target.value })} placeholder="Accusys%P6" /></div>
@@ -156,7 +159,7 @@ export default function Ubicacion() {
   const hayHistorial = dias.some((d) => d.oficina + d.casa > 0);
 
   // Red o piso de cada equipo, tal como se muestra en la columna "Red"
-  const redDe = (d: any) => d.ubicacion_red ?? (tipoDe(d) === "remoto" ? "Red de su casa" : "Sin datos");
+  const redDe = (d: any) => d.ubicacion_red ?? (tipoDe(d) === "remoto" ? "Red de su casa" : tipoDe(d) === "servidores" ? "Red no identificada" : "Sin datos");
   const redes = useMemo(() => {
     const m = new Map<string, number>();
     conectados.filter((d) => !filtro || tipoDe(d) === filtro).forEach((d) => m.set(redDe(d), (m.get(redDe(d)) ?? 0) + 1));
@@ -174,7 +177,7 @@ export default function Ubicacion() {
   const ipDe = (d: any) => (d.redes ?? []).find((r: any) => r.gateway)?.ip ?? d.ip;
   const fc = useFiltrosColumna(filas, {
     equipo: (d) => d.hostname,
-    ubicacion: (d) => (tipoDe(d) === "oficina" ? d.ubicacion_sede : TIPOS[tipoDe(d)].titulo),
+    ubicacion: (d) => (tipoDe(d) === "oficina" || tipoDe(d) === "servidores" ? d.ubicacion_sede ?? TIPOS[tipoDe(d)].titulo : TIPOS[tipoDe(d)].titulo),
     red: (d) => [zonaDe.get(d.id)?.zona, redDe(d)].filter(Boolean) as string[],
     ip: (d) => ipDe(d),
     reporte: (d) => hace(d.ultimo_reporte, ahora),
@@ -199,8 +202,8 @@ export default function Ubicacion() {
 
       {esAdmin && verRedes && <Redes />}
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        {(["oficina", "vpn", "remoto", "invitados"] as Tipo[]).map((t) => {
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        {(["oficina", "vpn", "remoto", "invitados", "servidores"] as Tipo[]).map((t) => {
           const n = cuenta(t);
           return (
             <button key={t} onClick={() => setFiltro(filtro === t ? null : t)} aria-pressed={filtro === t}
@@ -326,10 +329,10 @@ export default function Ubicacion() {
                     {d.inv_equipos && <Link href={`/inventario/equipos/${d.inv_equipos.id}`} className={`${claseCodigo(d.inv_equipos.codigo)} ml-2`}>{d.inv_equipos.codigo}</Link>}
                     <div className="text-xs text-ink/50">{d.usuario ?? "Sin sesión"}</div>
                   </td>
-                  <td><span className={`pill ${TIPOS[t].pill}`}>{t === "oficina" ? d.ubicacion_sede : TIPOS[t].titulo}</span></td>
+                  <td><span className={`pill ${TIPOS[t].pill}`}>{t === "oficina" || t === "servidores" ? d.ubicacion_sede ?? TIPOS[t].titulo : TIPOS[t].titulo}</span></td>
                   <td className="text-ink/70">
                     {zonaDe.get(d.id) && <div className="text-ink">{zonaDe.get(d.id)!.zona}<span className="text-xs text-ink/50"> · antena {zonaDe.get(d.id)!.antena}</span></div>}
-                    {d.ubicacion_red ?? (t === "remoto" ? "Red de su casa" : "—")}
+                    {d.ubicacion_red ?? (t === "remoto" ? "Red de su casa" : t === "servidores" ? "Red no identificada" : "—")}
                     {d.ssid && <div className="text-xs text-ink/50">WiFi: {d.ssid}</div>}
                   </td>
                   <td className="text-xs text-ink/60 whitespace-nowrap">

@@ -14,6 +14,7 @@ const UBICACION: Record<string, { texto: string; clase: string }> = {
   vpn: { texto: "Home office con VPN", clase: "bg-emerald-50 text-emerald-700" },
   remoto: { texto: "Home office sin VPN", clase: "bg-amber-500/10 text-amber-700" },
   invitados: { texto: "WiFi de invitados", clase: "bg-red-50 text-red-600" },
+  servidores: { texto: "Servidor", clase: "bg-line/[0.05] text-ink/60" },
 };
 
 // Costo mensual equivalente de una licencia
