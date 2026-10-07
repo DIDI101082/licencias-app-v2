@@ -75,6 +75,7 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/incidentes", label: "Incidentes" },
     { href: "/auditoria/revision", label: "Revisión de accesos" },
     { href: "/auditoria/alertas", label: "Alertas" },
+    { href: "/auditoria/tickets", label: "Tickets" },
     { href: "/auditoria", label: "Cambios" },
     { href: "/auditoria/sesiones", label: "Inicios de sesión" },
   ] },
