@@ -47,41 +47,33 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
           cada ticket (número, título, estado, sector, asignado y fechas). Accusys Cyber no modifica tickets por esta vía.
         </p>
         <details className="text-xs text-ink/60 mt-2">
-          <summary className="cursor-pointer">Formato que tiene que devolver el endpoint</summary>
-          <pre className="mt-2 p-3 rounded bg-line/[0.04] overflow-x-auto">{`GET <dirección>?sector=<sectores separados por coma>   (el parámetro va solo si cargaste sectores)
-Encabezados: X-API-Key: <token>  y  Authorization: Bearer <token>  (se envían los dos)
+          <summary className="cursor-pointer">Qué dirección cargar</summary>
+          <div className="mt-2 space-y-2">
+            <p>
+              <b>Helpdesk Dashboard API</b> (workdesk): la bandeja de una subárea. La API Key va en el campo Token; se envía en el
+              encabezado <code>X-API-Key</code>.
+            </p>
+            <pre className="p-3 rounded bg-line/[0.04] overflow-x-auto">{`Tickets asignados a la subárea (los que hay que resolver):
+https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&tipoBandeja=2
 
-200 OK · application/json
-{
-  "tickets": [
-    {
-      "id": "1024",                       // obligatorio, único y estable
-      "numero": "HD-1024",                // opcional: número visible
-      "titulo": "No conecta la VPN",
-      "estado": "En curso",               // texto libre (ver abajo)
-      "sector": "CAU",
-      "prioridad": "Alta",
-      "solicitante": "Nombre Apellido",
-      "asignado": "Nombre Apellido",
-      "creado": "2026-10-01T12:00:00Z",   // ISO 8601
-      "actualizado": "2026-10-06T10:00:00Z",
-      "cerrado": null,                    // fecha de cierre o null
-      "url": "https://helpdesk.accusys.com.ar/tickets/1024"
-    }
-  ]
-}
-
-Qué tickets devolver: TODOS los que no están cerrados + los cerrados en los últimos 90 días,
-de los sectores pedidos (o de todos, si no viene el parámetro sector).
-Estados: si el texto contiene "cerrado", "resuelto", "finalizado" o "cancelado" cuenta como cerrado;
-"espera", "pendiente" o "pausado" cuenta como en espera; cualquier otro, como abierto.`}</pre>
+Tickets generados por la subárea:
+https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&tipoBandeja=1`}</pre>
+            <p>
+              De cada ticket se toma: número, título, estado, tipo, prioridad, autor, asignados, estado del SLA y fechas. La bandeja no informa
+              la fecha de cierre: para un ticket resuelto o cerrado se usa la fecha de su último cambio de estado.
+            </p>
+            <p>
+              También se acepta cualquier endpoint GET que devuelva una lista JSON de tickets con <code>id</code>, <code>titulo</code>,{" "}
+              <code>estado</code>, <code>sector</code>, <code>creado</code> y <code>cerrado</code>.
+            </p>
+          </div>
         </details>
       </div>
 
       <div className="grid md:grid-cols-2 gap-3">
         <label className="block text-sm">Dirección (endpoint de lectura)
           <input className="input mt-1" value={url} onChange={(e) => setUrl(e.target.value)}
-            placeholder={cfg.url ? `Configurada: ${cfg.url}` : "https://helpdesk.accusys.com.ar/api/cyber/tickets"} />
+            placeholder={cfg.url ? `Configurada: ${cfg.url}` : "https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&tipoBandeja=2"} />
           {cfg.url && <span className="text-xs text-ink/50">Guardada: <code>https://{cfg.url}</code>. Para cambiarla, pegá la dirección completa.</span>}
         </label>
         <label className="block text-sm">Token
@@ -92,7 +84,7 @@ Estados: si el texto contiene "cerrado", "resuelto", "finalizado" o "cancelado" 
           <input className="input mt-1" value={sectores} onChange={(e) => setSectores(e.target.value)} placeholder="Vacío: todos los sectores" />
           <span className="text-xs text-ink/50">
             Escribilos igual que figuran en el sistema de tickets, separados por coma. Vacío = todos los sectores.
-            Solo se guardan los tickets de estos sectores.
+            Solo se guardan los tickets de estos sectores. Con la Helpdesk Dashboard API dejalo vacío: la bandeja ya viene filtrada por subárea.
           </span>
         </label>
       </div>

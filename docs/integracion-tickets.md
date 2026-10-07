@@ -1,91 +1,59 @@
-# Lectura de tickets del Helpdesk desde Accusys Cyber
+# Tickets del Helpdesk en Accusys Cyber
 
-Especificación para el equipo que mantiene el sistema de tickets (`helpdesk.accusys.com.ar`).
+Accusys Cyber **solo lee** el estado de los tickets del área para mostrar un tablero en Gobierno → Tickets:
+abiertos, en espera, cerrados, SLA y cuánto tiempo lleva cada uno. No crea, modifica ni cierra tickets.
 
-Accusys Cyber necesita **solo leer** el estado de los tickets **del área de Ciberseguridad** para mostrar un tablero: abiertos, en espera,
-cerrados y cuánto tiempo lleva cada uno. No crea, modifica ni cierra tickets.
+## De dónde lee
 
-Hace falta un único endpoint `GET` de solo lectura en el helpdesk. Accusys Cyber lo consulta cada 15 minutos.
-La ruta la elige el equipo del helpdesk (ejemplo: `/api/cyber/tickets`).
+De la **Helpdesk Dashboard API** (`workdesk.accusys.com.ar`), endpoint de bandeja por subárea:
 
-## Seguridad
-
-- Solo HTTPS.
-- Autenticación con un token de servicio de **solo lectura** en el encabezado `Authorization: Bearer <token>`.
-- Si el token falta o es incorrecto: responder `401`.
-- La consulta sale de la base de Accusys Cyber (Supabase), no de la red interna:
-  el endpoint tiene que ser accesible desde internet. No hay IP de origen fija para filtrar; la protección es el token.
-- Del lado de Cyber el token no se muestra en la app ni en los logs, y solo lo carga un administrador.
-
-## El endpoint
-
-**Pedido:** `GET <dirección>?sector=<sector>` con `Authorization: Bearer <token>` y `Accept: application/json`.
-
-El parámetro `sector` trae el nombre del sector tal como figura en el helpdesk (por ejemplo `sector=Ciberseguridad`);
-si son varios, separados por coma. El endpoint tiene que devolver **solo los tickets asignados a esos sectores**.
-Si prefieren, el token puede quedar limitado a ese sector del lado del helpdesk: Cyber no necesita ver los demás.
-
-**Respuesta:** `200 OK`, `Content-Type: application/json`.
-
-```json
-{
-  "tickets": [
-    {
-      "id": "1024",
-      "numero": "HD-1024",
-      "titulo": "No conecta la VPN",
-      "estado": "En curso",
-      "sector": "CAU",
-      "prioridad": "Alta",
-      "solicitante": "Nombre Apellido",
-      "asignado": "Nombre Apellido",
-      "creado": "2026-10-01T12:00:00Z",
-      "actualizado": "2026-10-06T10:00:00Z",
-      "cerrado": null,
-      "url": "https://helpdesk.accusys.com.ar/tickets/1024"
-    }
-  ]
-}
+```
+GET https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/{idSubarea}?idEmpresa=1&tipoBandeja=2
+Encabezado: X-API-Key: <API Key>
 ```
 
-| Campo | Obligatorio | Detalle |
-|---|---|---|
-| `id` | Sí | Identificador único y estable del ticket (texto o número). |
-| `numero` | No | Número visible para el usuario, si es distinto del `id`. |
-| `titulo` | Sí | Asunto del ticket. |
-| `estado` | Sí | Texto del estado tal como lo muestra el helpdesk. |
-| `sector` | Sí | Sector o área que lo tiene asignado. |
-| `prioridad` | No | |
-| `solicitante` | No | Quién lo pidió. |
-| `asignado` | No | Persona que lo atiende. |
-| `creado` | Sí | Fecha de creación, ISO 8601 con zona horaria (ej. `2026-10-01T12:00:00Z` o `...-03:00`). |
-| `actualizado` | No | Última modificación. |
-| `cerrado` | Sí en cerrados | Fecha de cierre; `null` si sigue abierto. |
-| `url` | No | Enlace directo al ticket. |
+- `tipoBandeja=2`: tickets **asignados a** la subárea (los que hay que resolver).
+- `tipoBandeja=1`: tickets **generados por** la subárea.
+- Para esta integración: `idSubarea=50`, `idEmpresa=1`.
 
-**Qué tickets devolver, siempre en una sola respuesta:**
+La consulta sale de la base de Accusys Cyber (Supabase) cada 15 minutos.
 
-- **Todos** los tickets del sector pedido que no están cerrados, sin importar la antigüedad.
-- Los tickets del sector pedido cerrados en los últimos **90 días**.
+## Configuración en Cyber
 
-Es importante que vengan todos los abiertos: si un ticket que figuraba abierto deja de venir, Cyber lo da por eliminado.
-Si la lista es muy grande (miles de tickets), avisar para acordar paginado.
+Gobierno → Tickets → Configurar lectura (solo administradores):
 
-**Cómo interpreta Cyber el estado** (no hace falta cambiar los nombres del helpdesk):
+- **Dirección:** la URL completa de la bandeja, con sus parámetros.
+- **Token:** la API Key. No se muestra en la app ni en los logs.
+- **Sectores a leer:** vacío (la bandeja ya viene filtrada por subárea).
 
-| Si el texto del estado contiene… | Cuenta como |
+## Qué toma de cada ticket
+
+| En Cyber | Campo de la API |
 |---|---|
-| cerrado, resuelto, finalizado, completado, cancelado, anulado, rechazado | Cerrado |
-| espera, pendiente, pausado, detenido | En espera |
-| cualquier otro (nuevo, abierto, en curso, asignado…) | Abierto |
+| Número | `idTicket` |
+| Título | `titulo` |
+| Estado | `estado` |
+| Tipo | `tipoTicket` |
+| Prioridad | `prioridad` |
+| Solicitante | `autor` |
+| Asignado a | personas de `asignados` (tipo 1) |
+| Sector | subárea o grupo de `asignados` (tipo 2 y 3) |
+| SLA | `estadoSla` |
+| Creado | `fechaAlta` |
+| Actualizado | `fechaUltimaModificacion` |
+| Cerrado | `fechaUltimoCambioEstado`, solo si el estado es de cierre |
 
-Si el helpdesk usa estados con otros nombres, pasar la lista completa y se ajusta la regla en Cyber.
+## Cómo se interpretan los estados
 
-**Errores:** `401` token inválido, `5xx` falla interna. Cyber muestra el error y reintenta a los 15 minutos; no borra nada.
+| Estado en el helpdesk | En Cyber |
+|---|---|
+| Pendiente, Asignado, En curso, En revisión, Devuelto, Reabierto | Abierto |
+| En espera | En espera |
+| Resuelto, Cerrado, Rechazado | Cerrado |
 
-**No incluir** descripción completa, comentarios, adjuntos ni datos personales más allá de nombres: Cyber solo muestra tablero y tiempos.
+## Supuestos a confirmar con el equipo del helpdesk
 
-## Cómo probar
-
-1. `curl -H "Authorization: Bearer <token>" https://helpdesk.accusys.com.ar/<ruta>` tiene que devolver el JSON de arriba.
-2. En Accusys Cyber → Gobierno → Tickets → Configurar lectura: cargar dirección y token, y tocar **Leer ahora**.
+- Las fechas vienen sin zona horaria (`2026-06-20T10:34:11`): Cyber las toma como **hora de Argentina**.
+- La bandeja no informa fecha de cierre: se usa la fecha del último cambio de estado.
+- Se asume que la bandeja devuelve también los tickets resueltos y cerrados. Si solo devuelve los pendientes,
+  en Cyber no van a figurar los cerrados ni el tiempo de resolución.

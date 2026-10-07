@@ -37,6 +37,10 @@ create table if not exists public.tickets_ext (
   url text,
   visto timestamptz not null default now()   -- última lectura en la que vino
 );
+alter table public.tickets_ext
+  add column if not exists tipo text,        -- tipo de ticket (Incidente, Solicitud…)
+  add column if not exists sla text,         -- estado del SLA tal como lo informa el sistema de tickets
+  add column if not exists cliente text;
 create index if not exists idx_tickets_ext_grupo on public.tickets_ext(grupo);
 
 alter table public.tickets_ext enable row level security;
@@ -50,20 +54,23 @@ create or replace function public.tickets_grupo(p_estado text, p_cerrado timesta
 returns text language sql immutable as $$
   select case
     when p_estado ~* 'cerrad|resuel|finaliz|complet|cancel|anulad|rechaz|closed|resolved|done' then 'cerrado'
-    when p_estado ~* 'espera|pendiente|paus|deten|hold|waiting|pending' then 'en_espera'
+    -- "Pendiente" es un ticket recién creado, todavía sin asignar: cuenta como abierto
+    when p_estado ~* 'espera|paus|deten|hold|waiting' then 'en_espera'
     when coalesce(trim(p_estado), '') = '' and p_cerrado is not null then 'cerrado'
     else 'abierto'
   end
 $$;
 
--- Fecha en texto → timestamptz (acepta ISO 8601 o segundos/milisegundos Unix; si no se entiende, null)
+-- Fecha en texto → timestamptz (acepta ISO 8601 o segundos/milisegundos Unix; si no se entiende, null).
+-- Una fecha sin zona horaria ("2026-06-20T10:34:11") se toma como hora de Argentina.
 create or replace function public.tickets_fecha(p text)
 returns timestamptz language plpgsql immutable as $$
 begin
   if coalesce(trim(p), '') = '' then return null; end if;
   if p ~ '^\d{13}$' then return to_timestamp(p::bigint / 1000.0); end if;
   if p ~ '^\d{10}$' then return to_timestamp(p::bigint); end if;
-  return p::timestamptz;
+  if p ~* '(z|[+-]\d{2}(:?\d{2})?)$' then return p::timestamptz; end if;
+  return p::timestamp at time zone 'America/Argentina/Buenos_Aires';
 exception when others then
   return null;
 end $$;
@@ -139,39 +146,59 @@ begin
   end if;
 
   with datos as (
-    select coalesce(x ->> 'id', x ->> 'ticket_id', x ->> 'numero') as id,
+    -- Nombres de campo aceptados: los del formato propio y los de la Helpdesk Dashboard API
+    -- (bandeja por subárea: idTicket, fechaAlta, asignados[], estadoSla, fechaUltimoCambioEstado…)
+    select coalesce(x ->> 'id', x ->> 'idTicket', x ->> 'ticket_id', x ->> 'numero') as id,
            coalesce(x ->> 'numero', x ->> 'number', x ->> 'codigo') as numero,
            coalesce(x ->> 'titulo', x ->> 'asunto', x ->> 'title', x ->> 'subject') as titulo,
            coalesce(x ->> 'estado', x ->> 'status') as estado,
-           coalesce(x ->> 'sector', x ->> 'area', x ->> 'departamento', x ->> 'cola') as sector,
+           -- sector: el informado o, si no viene, la subárea (tipo 2) o el grupo (tipo 3) al que está asignado
+           coalesce(x ->> 'sector', x ->> 'area', x ->> 'departamento', x ->> 'cola',
+                    (select string_agg(a ->> 'nombre', ', ' order by a ->> 'tipo') from jsonb_array_elements(
+                       case when jsonb_typeof(x -> 'asignados') = 'array' then x -> 'asignados' else '[]'::jsonb end) a
+                      where a ->> 'tipo' in ('2', '3'))) as sector,
            coalesce(x ->> 'prioridad', x ->> 'priority') as prioridad,
-           coalesce(x ->> 'solicitante', x ->> 'usuario', x ->> 'requester') as solicitante,
-           coalesce(x ->> 'asignado', x ->> 'asignado_a', x ->> 'responsable', x ->> 'assignee') as asignado,
-           tickets_fecha(coalesce(x ->> 'creado', x ->> 'fecha_creacion', x ->> 'created_at')) as creado,
-           tickets_fecha(coalesce(x ->> 'actualizado', x ->> 'fecha_actualizacion', x ->> 'updated_at')) as actualizado,
-           tickets_fecha(coalesce(x ->> 'cerrado', x ->> 'fecha_cierre', x ->> 'closed_at')) as cerrado,
+           coalesce(x ->> 'solicitante', x ->> 'usuario', x ->> 'requester', x ->> 'autor') as solicitante,
+           -- asignado: el informado o, si no viene, las personas (tipo 1) de la lista de asignados
+           coalesce(x ->> 'asignado', x ->> 'asignado_a', x ->> 'responsable', x ->> 'assignee',
+                    (select string_agg(a ->> 'nombre', ', ') from jsonb_array_elements(
+                       case when jsonb_typeof(x -> 'asignados') = 'array' then x -> 'asignados' else '[]'::jsonb end) a
+                      where a ->> 'tipo' = '1')) as asignado,
+           tickets_fecha(coalesce(x ->> 'creado', x ->> 'fecha_creacion', x ->> 'created_at', x ->> 'fechaAlta')) as creado,
+           tickets_fecha(coalesce(x ->> 'actualizado', x ->> 'fecha_actualizacion', x ->> 'updated_at', x ->> 'fechaUltimaModificacion')) as actualizado,
+           tickets_fecha(coalesce(x ->> 'cerrado', x ->> 'fecha_cierre', x ->> 'closed_at', x ->> 'fechaCierre')) as cerrado,
+           -- la bandeja no informa fecha de cierre: para un ticket cerrado se usa su último cambio de estado
+           tickets_fecha(x ->> 'fechaUltimoCambioEstado') as cambio_estado,
+           coalesce(x ->> 'tipo', x ->> 'tipoTicket') as tipo,
+           coalesce(x ->> 'sla', x ->> 'estadoSla') as sla,
+           nullif(trim(x ->> 'cliente'), '') as cliente,
            x ->> 'url' as url
       from jsonb_array_elements(v_lista) x
      where jsonb_typeof(x) = 'object'
   ), ins as (
-    insert into tickets_ext as t (id, numero, titulo, estado, grupo, sector, prioridad, solicitante, asignado, creado, actualizado, cerrado, url, visto)
+    insert into tickets_ext as t (id, numero, titulo, estado, grupo, sector, prioridad, solicitante, asignado, creado, actualizado, cerrado, url, tipo, sla, cliente, visto)
     select distinct on (d.id)
            left(d.id, 100), left(d.numero, 100), left(d.titulo, 500), left(d.estado, 100), tickets_grupo(d.estado, d.cerrado),
            left(d.sector, 150), left(d.prioridad, 60), left(d.solicitante, 200), left(d.asignado, 200),
-           d.creado, d.actualizado, case when tickets_grupo(d.estado, d.cerrado) = 'cerrado' then coalesce(d.cerrado, v_ahora) end, case when d.url ~* '^https?://' then left(d.url, 500) end, v_ahora
+           d.creado, d.actualizado, case when tickets_grupo(d.estado, d.cerrado) = 'cerrado' then coalesce(d.cerrado, d.cambio_estado) end,
+           case when d.url ~* '^https?://' then left(d.url, 500) end, left(d.tipo, 100), left(d.sla, 60), left(d.cliente, 200), v_ahora
       from datos d
      where coalesce(d.id, '') <> ''
+       -- los cerrados hace más de un año no se guardan
+       and not (tickets_grupo(d.estado, d.cerrado) = 'cerrado' and coalesce(d.cerrado, d.cambio_estado) < v_ahora - interval '365 days')
        and (v_sectores is null or lower(trim(d.sector)) = any(v_sectores))
     on conflict (id) do update set
       numero = excluded.numero, titulo = excluded.titulo, estado = excluded.estado, grupo = excluded.grupo,
       sector = excluded.sector, prioridad = excluded.prioridad, solicitante = excluded.solicitante, asignado = excluded.asignado,
       creado = coalesce(excluded.creado, t.creado), actualizado = excluded.actualizado,
-      -- cerrado sin fecha informada: se toma el momento en que se lo vio cerrado por primera vez
-      cerrado = case when excluded.grupo = 'cerrado' then coalesce(excluded.cerrado, t.cerrado, excluded.visto) end,
-      url = excluded.url, visto = excluded.visto
+      cerrado = case when excluded.grupo = 'cerrado' then coalesce(excluded.cerrado, t.cerrado) end,
+      url = excluded.url, tipo = excluded.tipo, sla = excluded.sla, cliente = excluded.cliente, visto = excluded.visto
     returning 1
   )
   select count(*) into n from ins;
+
+  -- Cerrado sin ninguna fecha informada: se toma el momento en que se lo vio cerrado por primera vez
+  update tickets_ext set cerrado = visto where grupo = 'cerrado' and cerrado is null;
 
   -- El endpoint devuelve todos los tickets sin cerrar: uno que figuraba abierto y ya no viene, se eliminó
   -- o se cerró hace mucho. Nunca se limpia con una respuesta vacía. Los cerrados se conservan un año.

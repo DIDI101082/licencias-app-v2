@@ -19,6 +19,11 @@ const GRUPOS: Record<Grupo, { titulo: string; uno: string; pill: string }> = {
   cerrado: { titulo: "Cerrados (30 días)", uno: "Cerrado", pill: "bg-emerald-50 text-emerald-700" },
 };
 const DIA = 86400000;
+// Color del estado de SLA que informa el sistema de tickets
+const slaPill = (v: string | null) =>
+  /vencido|escalado/i.test(v ?? "") ? "bg-red-50 text-red-600"
+    : /por vencer|sin responder/i.test(v ?? "") ? "bg-amber-500/10 text-amber-700"
+    : /en tiempo/i.test(v ?? "") ? "bg-emerald-50 text-emerald-700" : "bg-line/[0.05] text-ink/60";
 
 function duracion(ms: number | null) {
   if (ms == null || ms < 0) return "—";
@@ -66,15 +71,17 @@ export default function Tickets() {
   };
   const tiempos = sinCerrar.map(tiempo).filter((x): x is number => x != null);
   const promedio = tiempos.length ? tiempos.reduce((a, b) => a + b, 0) / tiempos.length : null;
-  const masAntiguo = tiempos.length ? Math.max(...tiempos) : null;
+  const slaVencido = sinCerrar.filter((t) => /vencido|escalado/i.test(t.sla ?? "")).length;
+  const haySla = lista.some((t) => t.sla);
   const resolucion = cerrados30.map(tiempo).filter((x): x is number => x != null);
   const promResolucion = resolucion.length ? resolucion.reduce((a, b) => a + b, 0) / resolucion.length : null;
 
-  // Por sector: abiertos, en espera y el más antiguo
+  // Sin cerrar: por sector si hay más de uno; si es la bandeja de un solo sector, por persona asignada
+  const porSector = new Set(sinCerrar.map((t) => t.sector).filter(Boolean)).size > 1;
   const sectores = useMemo(() => {
     const m = new Map<string, { sector: string; abierto: number; en_espera: number; max: number }>();
     sinCerrar.forEach((t) => {
-      const k = t.sector || "Sin sector";
+      const k = porSector ? t.sector || "Sin sector" : t.asignado || "Sin asignar";
       const x = m.get(k) ?? { sector: k, abierto: 0, en_espera: 0, max: 0 };
       x[t.grupo as "abierto" | "en_espera"]++;
       x.max = Math.max(x.max, tiempo(t) ?? 0);
@@ -89,7 +96,7 @@ export default function Tickets() {
     const base = filtro === "cerrado" ? cerrados30 : filtro ? lista.filter((t) => t.grupo === filtro) : sinCerrar;
     const q = texto.trim().toLowerCase();
     return base.filter((t) => !q || [t.id, t.numero, t.titulo, t.estado, t.sector, t.asignado, t.solicitante, t.prioridad]
-      .some((v) => v && String(v).toLowerCase().includes(q)));
+      .concat([t.tipo, t.sla, t.cliente]).some((v) => v && String(v).toLowerCase().includes(q)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tickets, filtro, texto, ahora]);
 
@@ -98,6 +105,7 @@ export default function Tickets() {
     sector: (t) => t.sector || "Sin sector",
     prioridad: (t) => t.prioridad || "—",
     asignado: (t) => t.asignado || "Sin asignar",
+    sla: (t) => t.sla || "—",
   });
   const enTabla = fc.filtradas;
   useEffect(() => { setPagina(1); }, [filtro, texto, fc.filtros]);
@@ -109,10 +117,10 @@ export default function Tickets() {
   const exportar = () =>
     exportarExcel(
       `tickets-${new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })}`,
-      ["Ticket", "Título", "Estado", "Situación", "Sector", "Prioridad", "Solicitante", "Asignado a", "Creado", "Cerrado", "Días"],
+      ["Ticket", "Título", "Tipo", "Estado", "Situación", "SLA", "Sector", "Prioridad", "Solicitante", "Asignado a", "Cliente", "Creado", "Cerrado", "Días"],
       enTabla.map((t) => {
         const ms = tiempo(t);
-        return [t.numero || t.id, t.titulo, t.estado, GRUPOS[t.grupo as Grupo].uno, t.sector, t.prioridad, t.solicitante, t.asignado,
+        return [t.numero || t.id, t.titulo, t.tipo, t.estado, GRUPOS[t.grupo as Grupo].uno, t.sla, t.sector, t.prioridad, t.solicitante, t.asignado, t.cliente,
           fecha(t.creado), t.cerrado ? fecha(t.cerrado) : "", ms == null ? "" : Math.round((ms / DIA) * 10) / 10];
       }),
       { "Título": 40, Sector: 22, Solicitante: 26, "Asignado a": 26 },
@@ -146,8 +154,9 @@ export default function Tickets() {
           <div className="text-xs text-ink/50 mt-1">de los que siguen sin cerrar</div>
         </div>
         <div className="card p-5">
-          <div className="text-xs text-ink/50 font-medium">El más antiguo</div>
-          <div className="font-display text-3xl mt-1 text-ink">{duracion(masAntiguo)}</div>
+          <div className="text-xs text-ink/50 font-medium">SLA vencido</div>
+          <div className={`font-display text-3xl mt-1 ${slaVencido ? "text-red-600" : "text-ink"}`}>{haySla ? slaVencido : "—"}</div>
+          <div className="text-xs text-ink/50 mt-1">sin cerrar, vencidos o escalados</div>
         </div>
         <div className="card p-5">
           <div className="text-xs text-ink/50 font-medium">Tiempo de resolución</div>
@@ -164,10 +173,10 @@ export default function Tickets() {
 
       {sectores.length > 0 && (
         <div className="card p-5">
-          <h2 className="font-medium text-ink mb-3">Sin cerrar, por sector</h2>
+          <h2 className="font-medium text-ink mb-3">Sin cerrar, {porSector ? "por sector" : "por persona asignada"}</h2>
           <div className="overflow-x-auto">
             <table className="data w-full">
-              <thead><tr><th>Sector</th><th>Abiertos</th><th>En espera</th><th>El más antiguo</th></tr></thead>
+              <thead><tr><th>{porSector ? "Sector" : "Asignado a"}</th><th>Abiertos</th><th>En espera</th><th>El más antiguo</th></tr></thead>
               <tbody>
                 {sectores.map((s) => (
                   <tr key={s.sector}>
@@ -197,7 +206,7 @@ export default function Tickets() {
             <tr>
               <th>Ticket</th><ThFiltro ctl={fc} col="estado">Estado</ThFiltro><ThFiltro ctl={fc} col="sector">Sector</ThFiltro>
               <ThFiltro ctl={fc} col="prioridad">Prioridad</ThFiltro><ThFiltro ctl={fc} col="asignado">Asignado a</ThFiltro>
-              <th>Creado</th><th>{filtro === "cerrado" ? "Tardó" : "Lleva"}</th>
+              <ThFiltro ctl={fc} col="sla">SLA</ThFiltro><th>Creado</th><th>{filtro === "cerrado" ? "Tardó" : "Lleva"}</th>
             </tr>
           </thead>
           <tbody>
@@ -207,17 +216,19 @@ export default function Tickets() {
                   {t.url ? <a href={t.url} target="_blank" rel="noopener noreferrer" className="font-medium text-brand-600 hover:underline">{t.numero || `#${t.id}`}</a>
                     : <span className="font-medium text-ink">{t.numero || `#${t.id}`}</span>}
                   <div className="text-xs text-ink/60 max-w-[28rem] truncate" title={t.titulo ?? ""}>{t.titulo ?? "—"}</div>
+                  {(t.tipo || t.solicitante) && <div className="text-xs text-ink/40">{[t.tipo, t.solicitante && `de ${t.solicitante}`].filter(Boolean).join(" · ")}</div>}
                 </td>
                 <td><span className={`pill ${GRUPOS[t.grupo as Grupo].pill}`}>{t.estado || GRUPOS[t.grupo as Grupo].uno}</span></td>
                 <td className="text-ink/70">{t.sector ?? "—"}</td>
                 <td className="text-ink/70">{t.prioridad ?? "—"}</td>
                 <td className="text-ink/70">{t.asignado ?? "Sin asignar"}</td>
+                <td>{t.sla ? <span className={`pill ${slaPill(t.sla)}`}>{t.sla}</span> : <span className="text-ink/40">—</span>}</td>
                 <td className="text-ink/60 whitespace-nowrap">{fecha(t.creado)}</td>
                 <td className="text-ink whitespace-nowrap">{duracion(tiempo(t))}</td>
               </tr>
             ))}
             {enTabla.length === 0 && (
-              <tr><td colSpan={7} className="text-center text-ink/40 py-10">
+              <tr><td colSpan={8} className="text-center text-ink/40 py-10">
                 {texto || fc.activos ? "Ningún ticket coincide con el filtro." : "No hay tickets en esta situación."}
               </td></tr>
             )}
