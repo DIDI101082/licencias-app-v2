@@ -29,10 +29,20 @@ function duracion(ms: number | null) {
   return d === 1 ? "1 día" : `${d} días`;
 }
 const dias = (ms: number | null) => (ms == null ? "" : Math.round((ms / DIA) * 10) / 10);
+const horas = (ms: number | null) => (ms == null ? "" : Math.round((ms / 3600000) * 10) / 10);
+function mediana(xs: number[]) {
+  if (!xs.length) return null;
+  const o = [...xs].sort((a, b) => a - b), m = Math.floor(o.length / 2);
+  return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
+}
+// Tiempo de primera respuesta de un ticket: desde que se creó hasta el primer mensaje público de quien lo atiende
+const demoraResp = (t: Ticket): number | null =>
+  t.creado && t.primera_resp ? Math.max(0, Date.parse(t.primera_resp) - Date.parse(t.creado)) : null;
 
 type Fila = {
   clave: string; abiertos: number; espera: number; falta: number; vencidos: number; quietos: number;
   creados: number; cerrados: number; resolucion: number | null; masAntiguo: number | null;
+  resp: number | null; respMed: number | null; respMax: number | null; respN: number; esperaMax: number | null;
 };
 
 export default function ReporteHelpdesk() {
@@ -79,7 +89,14 @@ export default function ReporteHelpdesk() {
     const sin = xs.filter((t) => t.grupo !== "cerrado");
     const cerr = xs.filter((t) => t.grupo === "cerrado" && t.cerrado && Date.parse(t.cerrado) >= desde);
     const ant = sin.map(tiempo).filter((x): x is number => x != null);
+    // Primera respuesta: tickets creados en el período que ya tuvieron una
+    const rs = xs.filter((t) => t.creado && Date.parse(t.creado) >= desde).map(demoraResp).filter((x): x is number => x != null);
+    // Mayor espera actual: tickets donde falta la respuesta de quien atiende, desde el último mensaje del solicitante
+    const esp = sin.filter((t) => t.respuesta_de === "atencion").map((t) => (t.ult_msj_fecha ?? t.creado ? ahora - Date.parse(t.ult_msj_fecha ?? t.creado) : null))
+      .filter((x): x is number => x != null);
     return {
+      resp: promedio(rs), respMed: mediana(rs), respMax: rs.length ? Math.max(...rs) : null, respN: rs.length,
+      esperaMax: esp.length ? Math.max(...esp) : null,
       clave,
       abiertos: sin.filter((t) => t.grupo === "abierto").length,
       espera: sin.filter((t) => t.grupo === "en_espera").length,
@@ -93,7 +110,7 @@ export default function ReporteHelpdesk() {
     };
   };
 
-  const { total, porSector, porPersona, porEstado, sinCerrar } = useMemo(() => {
+  const { total, porSector, porPersona, porRespondio, porEstado, sinCerrar } = useMemo(() => {
     const agrupar = (claves: (t: Ticket) => string[]) => {
       const m = new Map<string, Ticket[]>();
       lista.forEach((t) => claves(t).forEach((k) => { const a = m.get(k) ?? []; a.push(t); m.set(k, a); }));
@@ -109,6 +126,9 @@ export default function ReporteHelpdesk() {
       total: medir("Total", lista),
       porSector: agrupar((t) => (sectoresDe(t).length ? sectoresDe(t) : ["Sin sector"])),
       porPersona: agrupar((t) => (personasDe(t).length ? personasDe(t) : ["Sin asignar"])),
+      // Por quién dio la primera respuesta (no por quién está asignado), del más lento al más rápido
+      porRespondio: agrupar((t) => (t.primera_resp_autor ? [String(t.primera_resp_autor)] : [])).filter((f) => f.respN > 0)
+        .sort((a, b) => (b.resp ?? 0) - (a.resp ?? 0)),
       porEstado: Array.from(est.entries()).sort((a, b) => b[1] - a[1]),
       sinCerrar: sin,
     };
@@ -119,18 +139,28 @@ export default function ReporteHelpdesk() {
   const respuesta = (t: Ticket) => (t.respuesta_de === "atencion" ? txtFalta : t.respuesta_de === "solicitante" ? "Espera al solicitante" : "");
   const titBandeja = bandeja === "asignado" ? "Tickets asignados al área" : "Tickets generados por el área";
 
-  const columnas = ["Abiertos", "En espera", "Sin responder", "SLA vencido", "Sin movimiento", `Creados (${periodo} d)`, `Cerrados (${periodo} d)`, "Resolución promedio (días)", "Más antiguo (días)"];
-  const aFila = (f: Fila) => [f.clave, f.abiertos, f.espera, haySeg ? f.falta : "", haySla ? f.vencidos : "", f.quietos, f.creados, f.cerrados, dias(f.resolucion), dias(f.masAntiguo)];
+  const columnas = ["Abiertos", "En espera", "Sin responder", "Mayor espera sin responder (días)", "SLA vencido", "Sin movimiento", `Creados (${periodo} d)`, `Cerrados (${periodo} d)`,
+    "Primera respuesta promedio (horas)", "Primera respuesta mediana (horas)", "Primera respuesta más lenta (horas)", "Tickets con primera respuesta", "Resolución promedio (días)", "Más antiguo (días)"];
+  const aFila = (f: Fila) => [f.clave, f.abiertos, f.espera, haySeg ? f.falta : "", dias(f.esperaMax), haySla ? f.vencidos : "", f.quietos, f.creados, f.cerrados,
+    horas(f.resp), horas(f.respMed), horas(f.respMax), f.respN, dias(f.resolucion), dias(f.masAntiguo)];
+  // Se remarca lo que supera en un 50 % el promedio general (y al menos 4 horas), y las esperas de más de 7 días
+  const lento = (v: number | null) => v != null && total.resp != null && v > Math.max(total.resp * 1.5, 4 * 3600000);
+  const esperaLarga = (v: number | null) => v != null && v > 7 * DIA;
+  // Cobertura de la medición: tickets creados en el período con el seguimiento ya leído
+  const delPeriodo = lista.filter((t) => t.creado && Date.parse(t.creado) >= desde);
+  const sinLeer = delPeriodo.filter((t) => !t.seg_leido).length;
+  const sinPrimera = delPeriodo.filter((t) => t.seg_leido && !t.primera_resp).length;
   const hoy = new Date(ahora).toLocaleDateString("en-CA", { timeZone: TZ });
 
   const exportar = async () => {
     await exportarExcel(`helpdesk-reporte-resumen-${hoy}`, ["Grupo", "Nombre", ...columnas],
-      [["Total", ...aFila(total)], ...porSector.map((f) => ["Sector", ...aFila(f)]), ...porPersona.map((f) => ["Persona", ...aFila(f)])],
+      [["Total", ...aFila(total)], ...porSector.map((f) => ["Sector", ...aFila(f)]), ...porPersona.map((f) => ["Persona asignada", ...aFila(f)]),
+        ...porRespondio.map((f) => ["Quién respondió primero", ...aFila(f)])],
       { Nombre: 30 });
     await exportarExcel(`helpdesk-reporte-detalle-${hoy}`,
-      ["Ticket", "Título", "Tipo", "Estado", "SLA", "Sector", "Prioridad", "Solicitante", "Asignado a", "Creado", "Días abierto", "Último movimiento", "Días sin movimiento", "Respuesta", "Último mensaje de", "Recorrido"],
+      ["Ticket", "Título", "Tipo", "Estado", "SLA", "Sector", "Prioridad", "Solicitante", "Asignado a", "Creado", "Días abierto", "Último movimiento", "Días sin movimiento", "Respuesta", "Último mensaje de", "Primera respuesta (horas)", "Primera respuesta de", "Recorrido"],
       sinCerrar.map((t) => [t.numero || t.id, t.titulo, t.tipo, t.estado, t.sla, t.sector, t.prioridad, t.solicitante, t.asignado, fecha(t.creado), dias(tiempo(t)),
-        fecha(t.actualizado), quieto(t) == null ? "" : Math.floor((quieto(t) as number) / DIA), respuesta(t), t.ult_msj_autor, t.recorrido]),
+        fecha(t.actualizado), quieto(t) == null ? "" : Math.floor((quieto(t) as number) / DIA), respuesta(t), t.ult_msj_autor, horas(demoraResp(t)), t.primera_resp_autor, t.recorrido]),
       { "Título": 40, Sector: 24, Solicitante: 26, "Asignado a": 26, Respuesta: 28, Recorrido: 50 });
   };
 
@@ -142,7 +172,9 @@ export default function ReporteHelpdesk() {
           <table className="data w-full text-sm">
             <thead>
               <tr>
-                <th>{primera}</th><th>Abiertos</th><th>En espera</th><th title="Falta la respuesta de quien atiende">Sin responder</th><th>SLA vencido</th>
+                <th>{primera}</th><th>Abiertos</th><th>En espera</th><th title="Falta la respuesta de quien atiende">Sin responder</th>
+                <th title="Tiempo desde el último mensaje del solicitante en el ticket que más espera">Mayor espera</th>
+                <th title="Promedio desde la creación hasta la primera respuesta, tickets creados en el período">1.ª respuesta</th><th>SLA vencido</th>
                 <th title={`Sin modificaciones hace más de ${diasQuieto} días`}>Sin movimiento</th><th>Creados</th><th>Cerrados</th><th>Resolución promedio</th><th>Más antiguo</th>
               </tr>
             </thead>
@@ -153,6 +185,8 @@ export default function ReporteHelpdesk() {
                   <td className="tabular-nums">{f.abiertos}</td>
                   <td className="tabular-nums">{f.espera}</td>
                   <td className={`tabular-nums ${f.falta ? "text-red-600" : ""}`}>{haySeg ? f.falta : "—"}</td>
+                  <td className={`whitespace-nowrap ${esperaLarga(f.esperaMax) ? "text-red-600 font-semibold" : ""}`}>{duracion(f.esperaMax)}</td>
+                  <td className={`whitespace-nowrap ${lento(f.resp) ? "text-red-600 font-semibold" : ""}`}>{duracion(f.resp)}</td>
                   <td className={`tabular-nums ${f.vencidos ? "text-red-600" : ""}`}>{haySla ? f.vencidos : "—"}</td>
                   <td className={`tabular-nums ${f.quietos ? "text-amber-700" : ""}`}>{f.quietos}</td>
                   <td className="tabular-nums">{f.creados}</td>
@@ -216,7 +250,7 @@ export default function ReporteHelpdesk() {
 
       {lista.length === 0 ? <p className="text-sm text-ink/60">No hay tickets leídos para esta bandeja.</p> : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {([
               ["Sin cerrar", total.abiertos + total.espera, `${total.abiertos} abiertos · ${total.espera} en espera`, false],
               [txtFalta, haySeg ? total.falta : "—", "el último mensaje es del solicitante", total.falta > 0 && haySeg],
@@ -225,6 +259,7 @@ export default function ReporteHelpdesk() {
               [`Creados en ${periodo} días`, total.creados, "", false],
               [`Cerrados en ${periodo} días`, total.cerrados, "", false],
               ["Saldo del período", saldo > 0 ? `+${saldo}` : saldo, saldo > 0 ? "el pendiente creció" : saldo < 0 ? "el pendiente bajó" : "sin cambios", saldo > 0],
+              ["Primera respuesta", duracion(total.resp), total.respN ? `promedio · mediana ${duracion(total.respMed)}` : "todavía sin datos", false],
               ["Resolución promedio", duracion(total.resolucion), `de los cerrados en ${periodo} días`, false],
             ] as [string, string | number, string, boolean][]).map(([t, v, d, rojo]) => (
               <div key={t} className="card p-4">
@@ -233,6 +268,51 @@ export default function ReporteHelpdesk() {
                 {d && <div className="text-xs text-ink/50 mt-1">{d}</div>}
               </div>
             ))}
+          </div>
+
+          <div className="card p-5 border-2 border-red-500/40">
+            <h2 className="font-medium text-ink">Tiempo de primera respuesta</h2>
+            <p className="text-sm text-ink/60 mt-1 mb-3">
+              Cuánto se tarda en contestarle por primera vez a quien pidió el ticket: desde que se crea hasta el primer mensaje público de quien lo atiende.
+              Tickets creados en los últimos {periodo} días. En rojo, lo que supera en más de un 50 % el promedio general ({duracion(total.resp)}).
+            </p>
+            {total.respN === 0 ? (
+              <p className="text-sm text-ink/60">Todavía no hay datos: el seguimiento de los tickets se está leyendo. Se completa solo en las próximas horas.</p>
+            ) : (
+              <div className="grid lg:grid-cols-2 gap-6 print:block print:space-y-4">
+                {([["Por sector", "Sector", [...porSector].filter((f) => f.respN > 0).sort((a, b) => (b.resp ?? 0) - (a.resp ?? 0))],
+                   ["Por quién respondió primero", "Persona", porRespondio]] as [string, string, Fila[]][]).map(([tit, col, filas]) => (
+                  <div key={tit}>
+                    <h3 className="text-sm font-medium text-ink mb-2">{tit} (del más lento al más rápido)</h3>
+                    <div className="overflow-x-auto">
+                      <table className="data w-full text-sm">
+                        <thead><tr><th>{col}</th><th>Promedio</th><th>Mediana</th><th>La más lenta</th><th>Tickets</th></tr></thead>
+                        <tbody>
+                          {filas.map((f) => (
+                            <tr key={f.clave} className={lento(f.resp) ? "bg-red-50" : ""}>
+                              <td className={lento(f.resp) ? "text-red-600 font-semibold" : "text-ink"}>{f.clave}</td>
+                              <td className={`whitespace-nowrap ${lento(f.resp) ? "text-red-600 font-semibold" : ""}`}>{duracion(f.resp)}</td>
+                              <td className="whitespace-nowrap">{duracion(f.respMed)}</td>
+                              <td className="whitespace-nowrap">{duracion(f.respMax)}</td>
+                              <td className="tabular-nums">{f.respN}{f.respN < 5 && <span className="text-xs text-ink/40"> · pocos casos</span>}</td>
+                            </tr>
+                          ))}
+                          <tr className="font-medium border-t-2 border-line/20">
+                            <td>Total</td><td className="whitespace-nowrap">{duracion(total.resp)}</td><td className="whitespace-nowrap">{duracion(total.respMed)}</td>
+                            <td className="whitespace-nowrap">{duracion(total.respMax)}</td><td className="tabular-nums">{total.respN}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-ink/50 mt-3">
+              Es tiempo corrido: incluye noches, fines de semana y feriados. Las notas internas no cuentan como respuesta. El promedio sube mucho con pocos tickets muy demorados; la mediana muestra el caso típico.
+              {sinLeer > 0 && <b className="text-amber-700"> Medición incompleta: {sinLeer} de los {delPeriodo.length} tickets del período todavía no tienen leído su seguimiento; se completa solo en las próximas horas.</b>}
+              {sinPrimera > 0 && ` ${sinPrimera} ${sinPrimera === 1 ? "ticket del período no tiene" : "tickets del período no tienen"} ninguna respuesta pública registrada y no entran en el promedio.`}
+            </p>
           </div>
 
           <Tabla titulo="Por sector" primera="Sector" filas={porSector} conTotal />
@@ -254,7 +334,7 @@ export default function ReporteHelpdesk() {
             <h2 className="font-medium text-ink mb-3">Detalle de los {sinCerrar.length} tickets sin cerrar (del más antiguo al más nuevo)</h2>
             <div className="overflow-x-auto">
               <table className="data w-full text-sm">
-                <thead><tr><th>Ticket</th><th>Título</th><th>Sector</th><th>Asignado a</th><th>Estado</th><th>Respuesta</th><th>SLA</th><th>Creado</th><th>Lleva</th><th>Sin movimiento</th></tr></thead>
+                <thead><tr><th>Ticket</th><th>Título</th><th>Sector</th><th>Asignado a</th><th>Estado</th><th>Respuesta</th><th title="Tiempo desde el último mensaje del solicitante">Espera desde hace</th><th>SLA</th><th>Creado</th><th>Lleva</th><th>Sin movimiento</th></tr></thead>
                 <tbody>
                   {sinCerrar.map((t) => (
                     <tr key={`${t.bandeja}-${t.id}`}>
@@ -264,6 +344,10 @@ export default function ReporteHelpdesk() {
                       <td>{t.asignado ?? "Sin asignar"}</td>
                       <td className="whitespace-nowrap">{t.estado ?? "—"}</td>
                       <td className={t.respuesta_de === "atencion" ? "text-red-600" : "text-ink/60"}>{respuesta(t) || "—"}</td>
+                      {(() => {
+                        const e = t.respuesta_de === "atencion" && (t.ult_msj_fecha ?? t.creado) ? ahora - Date.parse(t.ult_msj_fecha ?? t.creado) : null;
+                        return <td className={`whitespace-nowrap ${esperaLarga(e) ? "text-red-600 font-semibold" : ""}`}>{duracion(e)}</td>;
+                      })()}
                       <td className={slaVencidoRe.test(t.sla ?? "") ? "text-red-600" : ""}>{t.sla ?? "—"}</td>
                       <td className="whitespace-nowrap">{fecha(t.creado)}</td>
                       <td className="whitespace-nowrap">{duracion(tiempo(t))}</td>

@@ -5,7 +5,8 @@
 --   * Seguimiento de cada ticket: se leen de la Helpdesk Dashboard API sus mensajes y su recorrido
 --     (asignaciones, cambios de estado y de subárea). Con eso se sabe:
 --       - de dónde a dónde fue el ticket,
---       - quién escribió último y, por lo tanto, a quién le falta responder.
+--       - quién escribió último y, por lo tanto, a quién le falta responder,
+--       - cuánto se tardó en dar la primera respuesta (primer mensaje público que no es del solicitante).
 --   * Solo lectura: Accusys Cyber no escribe nada en el helpdesk.
 --   * Las notas internas (mensajes privados) se guardan sin su texto, salvo que un administrador
 --     active "Incluir notas internas".
@@ -56,7 +57,9 @@ alter table public.tickets_ext
   add column if not exists ult_msj_autor text,
   add column if not exists ult_msj_fecha timestamptz,
   add column if not exists mensajes int,
-  add column if not exists recorrido text;                 -- subáreas por las que pasó: "A → B → C"
+  add column if not exists recorrido text,                 -- subáreas por las que pasó: "A → B → C"
+  add column if not exists primera_resp timestamptz,       -- primer mensaje público de alguien que no es quien pidió el ticket
+  add column if not exists primera_resp_autor text;
 
 create table if not exists public.tickets_eventos (
   id_ticket text not null,
@@ -99,6 +102,7 @@ declare
   j_met jsonb;
   v_solicitante text;
   u record;
+  pr record;
   v_respuesta text;
   v_recorrido text;
   n_msj int;
@@ -167,8 +171,17 @@ begin
            where e.id_ticket = p_id and e.origen = 'metrica' and coalesce(e.subarea, '') <> '') q
    where q.subarea is distinct from q.anterior;
 
+  -- Primera respuesta: el primer mensaje público que no es de quien pidió el ticket (ni su descripción)
+  select e.usuario, e.fecha into pr
+    from tickets_eventos e
+   where e.id_ticket = p_id and e.origen = 'mensaje' and not e.privado and e.ext_id <> '0' and e.fecha is not null
+     and tickets_norm(e.usuario) <> tickets_norm(v_solicitante)
+   order by e.fecha, e.ext_id::bigint
+   limit 1;
+
   update tickets_ext set seg_leido = now(), seg_actualizado = actualizado, respuesta_de = v_respuesta,
-         ult_msj_autor = u.usuario, ult_msj_fecha = u.fecha, mensajes = n_msj, recorrido = left(v_recorrido, 1000)
+         ult_msj_autor = u.usuario, ult_msj_fecha = u.fecha, mensajes = n_msj, recorrido = left(v_recorrido, 1000),
+         primera_resp = pr.fecha, primera_resp_autor = pr.usuario
    where id = p_id;
   return jsonb_build_object('ok', true);
 end $$;
@@ -192,10 +205,13 @@ begin
 
   for v_id in
     select t.id from tickets_ext t
-     where t.grupo <> 'cerrado'
-       and (t.seg_leido is null or t.actualizado is distinct from t.seg_actualizado or t.seg_leido < now() - interval '6 hours')
+     where (t.grupo <> 'cerrado'
+            and (t.seg_leido is null or t.actualizado is distinct from t.seg_actualizado or t.seg_leido < now() - interval '6 hours'))
+        -- La tarea programada completa además, una sola vez, los cerrados de los últimos 90 días:
+        -- hacen falta para medir el tiempo de primera respuesta
+        or (auth.uid() is null and t.grupo = 'cerrado' and t.seg_leido is null and t.cerrado > now() - interval '90 days')
      group by t.id
-     order by min(t.seg_leido) nulls first
+     order by bool_or(t.grupo <> 'cerrado') desc, min(t.seg_leido) nulls first, max(t.cerrado) desc nulls last
      limit greatest(1, least(coalesce(p_max, 3), 60))
   loop
     r := tickets_seguimiento_leer_uno(v_id, case when auth.uid() is null then 10000 else 3000 end);
@@ -247,6 +263,16 @@ end $$;
 revoke all on function public.tickets_seguimiento(text) from public, anon;
 grant execute on function public.tickets_seguimiento(text) to authenticated;
 
+-- Tickets cuyo seguimiento ya estaba leído antes de sumar la primera respuesta: se calcula con lo guardado
+update public.tickets_ext t set (primera_resp, primera_resp_autor) = (
+  select e.fecha, e.usuario
+    from public.tickets_eventos e
+   where e.id_ticket = t.id and e.origen = 'mensaje' and not e.privado and e.ext_id <> '0' and e.fecha is not null
+     and public.tickets_norm(e.usuario) <> public.tickets_norm(t.solicitante)
+   order by e.fecha, e.ext_id::bigint
+   limit 1)
+ where t.seg_leido is not null and t.primera_resp is null;
+
 -- Configuración del seguimiento (solo administradores). Sin parámetro, devuelve la actual.
 create or replace function public.tickets_seguimiento_config(p jsonb default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -262,7 +288,9 @@ begin
   end if;
   select * into c from tickets_config where id = 1;
   return jsonb_build_object('activo', c.seg_activo, 'privados', c.seg_privados, 'ultima', c.seg_ultima, 'error', c.seg_error,
-    'pendientes', (select count(distinct id) from tickets_ext where grupo <> 'cerrado' and (seg_leido is null or actualizado is distinct from seg_actualizado)));
+    'pendientes', (select count(distinct id) from tickets_ext where grupo <> 'cerrado' and (seg_leido is null or actualizado is distinct from seg_actualizado)),
+    -- cerrados de los últimos 90 días que la tarea programada todavía no leyó (para el tiempo de primera respuesta)
+    'cerrados_pendientes', (select count(distinct id) from tickets_ext where grupo = 'cerrado' and seg_leido is null and cerrado > now() - interval '90 days'));
 end $$;
 revoke all on function public.tickets_seguimiento_config(jsonb) from public, anon;
 grant execute on function public.tickets_seguimiento_config(jsonb) to authenticated;

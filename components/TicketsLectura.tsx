@@ -14,7 +14,7 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
   const [sectores, setSectores] = useState("");
   const [generados, setGenerados] = useState(true);
   // Seguimiento (mensajes y recorrido de cada ticket): se configura aparte, con helpdesk.sql
-  const [seg, setSeg] = useState<{ activo: boolean; privados: boolean; pendientes: number; error: string | null } | null>(null);
+  const [seg, setSeg] = useState<{ activo: boolean; privados: boolean; pendientes: number; cerrados_pendientes?: number; error: string | null } | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [falta, setFalta] = useState(false);
@@ -116,6 +116,7 @@ https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&ti
           <p className="text-xs text-ink/50">
             Las notas internas las ve cualquier persona con acceso a la solapa HelpDesk. Si lo desactivás, se borra el texto de las ya guardadas.
             {seg.pendientes > 0 && ` Tickets con seguimiento pendiente de leer: ${seg.pendientes}.`}
+            {(seg.cerrados_pendientes ?? 0) > 0 && ` Para medir el tiempo de primera respuesta falta leer ${seg.cerrados_pendientes} tickets cerrados de los últimos 90 días; se completan solos, unos 40 cada 15 minutos.`}
           </p>
           {seg.error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2 break-words">Último error de seguimiento: {seg.error}</p>}
         </div>
