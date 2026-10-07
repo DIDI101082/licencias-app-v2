@@ -67,9 +67,15 @@ $$;
 
 alter table public.tickets_ext enable row level security;
 revoke insert, update, delete on public.tickets_ext from anon, authenticated;
-drop policy if exists tickets_ext_select on public.tickets_ext;
-create policy tickets_ext_select on public.tickets_ext for select to authenticated
-  using (mi_rol() is not null and puede_ver('auditoria'));   -- helpdesk.sql lo pasa al permiso de la solapa HelpDesk
+-- La política se crea solo si no existe: helpdesk.sql la reemplaza por el permiso de la solapa HelpDesk,
+-- y volver a ejecutar este archivo no tiene que deshacer ese cambio.
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'tickets_ext' and policyname = 'tickets_ext_select') then
+    create policy tickets_ext_select on public.tickets_ext for select to authenticated
+      using (mi_rol() is not null and puede_ver('auditoria'));
+  end if;
+end $$;
 
 -- Estado del sistema de tickets → abierto / en espera / cerrado
 create or replace function public.tickets_grupo(p_estado text, p_cerrado timestamptz)
@@ -163,7 +169,7 @@ begin
     return jsonb_build_object('ok', false, 'error', v_error);
   end if;
 
-  with crudo as (
+  with crudo as materialized (
     -- Asignados de cada ticket: personas (tipo 1) y subáreas o grupos (tipo 2 y 3)
     select x,
            coalesce((select array_agg(a ->> 'nombre') from jsonb_array_elements(
@@ -175,7 +181,8 @@ begin
            nullif(trim(coalesce(x ->> 'sector', x ->> 'area', x ->> 'departamento', x ->> 'cola')), '') as sector_dado
       from jsonb_array_elements(v_lista) x
      where jsonb_typeof(x) = 'object'
-  ), mapa as (
+  ), mapa as materialized (
+    -- (materialized: se calcula una sola vez; si no, se repetiría por cada ticket y la lectura no termina a tiempo)
     -- Sector habitual de cada persona: aquel con el que más veces aparece asignada en un mismo ticket.
     -- Sirve para clasificar los tickets asignados solo a personas, sin sector.
     select distinct on (q.persona) q.persona, q.subarea

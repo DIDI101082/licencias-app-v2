@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/FiltroColumna";
@@ -263,12 +264,11 @@ export default function Tickets() {
           <h1 className="font-display text-2xl text-ink">HelpDesk</h1>
           <p className="text-ink/60 text-sm mt-1">Tickets del área en el helpdesk, con su seguimiento. Se leen cada 15 minutos; desde acá no se modifican.</p>
         </div>
-        {esAdmin && (
-          <div className="flex gap-2 flex-wrap">
-            <button className="btn-secondary" onClick={actualizarSeguimientos} disabled={seg.ocupado}>Actualizar seguimientos</button>
-            <button className="btn-secondary" onClick={() => setVerConfig(!verConfig)} aria-expanded={verConfig}>Configurar lectura</button>
-          </div>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          <Link href="/helpdesk/reporte" className="btn-secondary">Reporte</Link>
+          {esAdmin && <button className="btn-secondary" onClick={actualizarSeguimientos} disabled={seg.ocupado}>Actualizar seguimientos</button>}
+          {esAdmin && <button className="btn-secondary" onClick={() => setVerConfig(!verConfig)} aria-expanded={verConfig}>Configurar lectura</button>}
+        </div>
       </div>
       {seg.texto && <p className="text-sm text-ink/60" role="status">{seg.texto}</p>}
       {!seg.texto && todos.length > 0 && sinSeguimiento > 0 && (

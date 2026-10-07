@@ -70,6 +70,7 @@ export const TEMAS: Tema[] = [
   ] },
   { id: "helpdesk", label: "HelpDesk", titulo: "Tickets del área en el helpdesk", paginas: [
     { href: "/helpdesk", label: "Tickets" },
+    { href: "/helpdesk/reporte", label: "Reporte" },
   ] },
   { id: "gobierno", label: "Gobierno", titulo: "Cumplimiento, normativa, incidentes y registros", paginas: [
     { href: "/inventario/cumplimiento", label: "Cumplimiento" },
