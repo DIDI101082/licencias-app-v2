@@ -4,8 +4,9 @@
 --     tickets y guarda una copia: número, título, estado, sector, asignado y fechas.
 --   * Con eso la pantalla Gobierno → Tickets muestra abiertos, en espera, cerrados y cuánto
 --     tiempo lleva cada uno. Accusys Cyber nunca modifica tickets por esta vía.
---   * Se puede limitar a uno o más sectores (por ejemplo, solo los tickets de Ciberseguridad):
---     se piden con ?sector=... y, además, se descarta cualquier ticket de otro sector que llegue.
+--   * Se puede limitar a uno o más sectores (por ejemplo: Ciberseguridad, CAU Servidores): se guardan solo
+--     los tickets asignados a esos sectores. Un ticket asignado solo a personas se clasifica por el sector
+--     habitual de esas personas. En el filtro también se puede nombrar a una persona.
 --   * La dirección y el token son secretos: nunca se muestran en la app ni en Logs.
 --   * El formato que tiene que devolver el endpoint está en docs/integracion-tickets.md.
 -- Requiere las extensiones "http" y "pg_cron" (ya activas por alertas.sql).
@@ -54,7 +55,15 @@ begin
     alter table public.tickets_ext add primary key (id, bandeja);
   end if;
 end $$;
+alter table public.tickets_ext
+  add column if not exists sector_inferido boolean not null default false;   -- sector deducido por la persona asignada
 create index if not exists idx_tickets_ext_grupo on public.tickets_ext(grupo);
+
+-- Nombre comparable: sin mayúsculas, acentos, espacios ni signos ("CAU - Servidores" = "cau servidores")
+create or replace function public.tickets_norm(p text)
+returns text language sql immutable as $$
+  select regexp_replace(lower(translate(coalesce(p, ''), 'áéíóúüñÁÉÍÓÚÜÑ', 'aeiouunAEIOUUN')), '[^a-z0-9]', '', 'g')
+$$;
 
 alter table public.tickets_ext enable row level security;
 revoke insert, update, delete on public.tickets_ext from anon, authenticated;
@@ -101,15 +110,16 @@ declare
   v_lista jsonb;
   v_headers http_header[] := '{}';
   v_error text;
-  v_sectores text[];
+  v_sectores text[];   -- nombres a leer, normalizados (null = todos)
+  v_nombres text[];    -- los mismos, como se escribieron
   v_url text;
   n int := 0;
   n_quitados int := 0;
 begin
   select * into c from tickets_config where id = 1;
   -- Sectores a leer, en minúsculas y sin espacios de más (null = todos)
-  select array_agg(lower(trim(x))) into v_sectores
-    from unnest(string_to_array(coalesce(c.lectura_sectores, ''), ',')) x where trim(x) <> '';
+  select array_agg(tickets_norm(x)), array_agg(trim(x)) into v_sectores, v_nombres
+    from unnest(string_to_array(coalesce(c.lectura_sectores, ''), ',')) x where tickets_norm(x) <> '';
   if p_url is null then
     v_error := 'Falta configurar la dirección de lectura del sistema de tickets';
   else
@@ -121,10 +131,6 @@ begin
     begin
       begin perform http_set_curlopt('CURLOPT_TIMEOUT_MS', '20000'); exception when others then null; end;
       v_url := p_url;
-      if v_sectores is not null then
-        v_url := v_url || case when v_url like '%?%' then '&' else '?' end || 'sector='
-                 || (select string_agg(urlencode(trim(x)), ',') from unnest(string_to_array(c.lectura_sectores, ',')) x where trim(x) <> '');
-      end if;
       select * into r from http(('GET', v_url, v_headers, null, null)::http_request);
       if r.status between 200 and 299 then
         begin
@@ -157,51 +163,80 @@ begin
     return jsonb_build_object('ok', false, 'error', v_error);
   end if;
 
-  with datos as (
+  with crudo as (
+    -- Asignados de cada ticket: personas (tipo 1) y subáreas o grupos (tipo 2 y 3)
+    select x,
+           coalesce((select array_agg(a ->> 'nombre') from jsonb_array_elements(
+                       case when jsonb_typeof(x -> 'asignados') = 'array' then x -> 'asignados' else '[]'::jsonb end) a
+                      where a ->> 'tipo' = '1' and coalesce(a ->> 'nombre', '') <> ''), '{}') as personas,
+           coalesce((select array_agg(a ->> 'nombre' order by a ->> 'tipo') from jsonb_array_elements(
+                       case when jsonb_typeof(x -> 'asignados') = 'array' then x -> 'asignados' else '[]'::jsonb end) a
+                      where a ->> 'tipo' in ('2', '3') and coalesce(a ->> 'nombre', '') <> ''), '{}') as subareas,
+           nullif(trim(coalesce(x ->> 'sector', x ->> 'area', x ->> 'departamento', x ->> 'cola')), '') as sector_dado
+      from jsonb_array_elements(v_lista) x
+     where jsonb_typeof(x) = 'object'
+  ), mapa as (
+    -- Sector habitual de cada persona: aquel con el que más veces aparece asignada en un mismo ticket.
+    -- Sirve para clasificar los tickets asignados solo a personas, sin sector.
+    select distinct on (q.persona) q.persona, q.subarea
+      from (select p as persona, sa as subarea, count(*) as veces
+              from crudo k, unnest(k.personas) p, unnest(k.subareas) sa
+             group by 1, 2) q
+     order by q.persona, q.veces desc, q.subarea
+  ), datos as (
     -- Nombres de campo aceptados: los del formato propio y los de la Helpdesk Dashboard API
     -- (bandeja por subárea: idTicket, fechaAlta, asignados[], estadoSla, fechaUltimoCambioEstado…)
     select coalesce(x ->> 'id', x ->> 'idTicket', x ->> 'ticket_id', x ->> 'numero') as id,
            coalesce(x ->> 'numero', x ->> 'number', x ->> 'codigo') as numero,
            coalesce(x ->> 'titulo', x ->> 'asunto', x ->> 'title', x ->> 'subject') as titulo,
            coalesce(x ->> 'estado', x ->> 'status') as estado,
-           -- sector: el informado o, si no viene, la subárea (tipo 2) o el grupo (tipo 3) al que está asignado
-           coalesce(x ->> 'sector', x ->> 'area', x ->> 'departamento', x ->> 'cola',
-                    (select string_agg(a ->> 'nombre', ', ' order by a ->> 'tipo') from jsonb_array_elements(
-                       case when jsonb_typeof(x -> 'asignados') = 'array' then x -> 'asignados' else '[]'::jsonb end) a
-                      where a ->> 'tipo' in ('2', '3'))) as sector,
+           k.personas,
+           case when k.sector_dado is not null then array[k.sector_dado]
+                when cardinality(k.subareas) > 0 then k.subareas
+                else coalesce((select array_agg(distinct m.subarea) from mapa m where m.persona = any(k.personas)), '{}') end as sectores,
+           (k.sector_dado is null and cardinality(k.subareas) = 0) as inferido,
            coalesce(x ->> 'prioridad', x ->> 'priority') as prioridad,
            coalesce(x ->> 'solicitante', x ->> 'usuario', x ->> 'requester', x ->> 'autor') as solicitante,
-           -- asignado: el informado o, si no viene, las personas (tipo 1) de la lista de asignados
            coalesce(x ->> 'asignado', x ->> 'asignado_a', x ->> 'responsable', x ->> 'assignee',
-                    (select string_agg(a ->> 'nombre', ', ') from jsonb_array_elements(
-                       case when jsonb_typeof(x -> 'asignados') = 'array' then x -> 'asignados' else '[]'::jsonb end) a
-                      where a ->> 'tipo' = '1')) as asignado,
+                    nullif(array_to_string(k.personas, ', '), '')) as asignado,
            tickets_fecha(coalesce(x ->> 'creado', x ->> 'fecha_creacion', x ->> 'created_at', x ->> 'fechaAlta')) as creado,
            tickets_fecha(coalesce(x ->> 'actualizado', x ->> 'fecha_actualizacion', x ->> 'updated_at', x ->> 'fechaUltimaModificacion')) as actualizado,
            tickets_fecha(coalesce(x ->> 'cerrado', x ->> 'fecha_cierre', x ->> 'closed_at', x ->> 'fechaCierre')) as cerrado,
            -- la bandeja no informa fecha de cierre: para un ticket cerrado se usa su último cambio de estado
            tickets_fecha(x ->> 'fechaUltimoCambioEstado') as cambio_estado,
            coalesce(x ->> 'tipo', x ->> 'tipoTicket') as tipo,
-           coalesce(x ->> 'sla', x ->> 'estadoSla') as sla,
+           coalesce(x ->> 'sla', x ->> 'estadoSla', x ->> 'estadoSLA') as sla,
            nullif(trim(x ->> 'cliente'), '') as cliente,
            x ->> 'url' as url
-      from jsonb_array_elements(v_lista) x
-     where jsonb_typeof(x) = 'object'
+      from crudo k
+  ), elegidos as (
+    -- Con filtro: del ticket quedan solo los sectores pedidos (con el nombre tal como se cargó en la
+    -- configuración). También entra un ticket asignado a una persona nombrada en el filtro.
+    select d.*,
+           case when v_sectores is null then d.sectores
+                else coalesce((select array_agg(l.nombre order by l.ord)
+                                 from unnest(v_nombres) with ordinality l(nombre, ord)
+                                where tickets_norm(l.nombre) in (select tickets_norm(sn) from unnest(d.sectores) sn)), '{}') end as sectores_ok,
+           (v_sectores is not null and exists (select 1 from unnest(d.personas) pn where tickets_norm(pn) = any(v_sectores))) as persona_ok
+      from datos d
   ), ins as (
-    insert into tickets_ext as t (id, numero, titulo, estado, grupo, sector, prioridad, solicitante, asignado, creado, actualizado, cerrado, url, tipo, sla, cliente, bandeja, visto)
+    insert into tickets_ext as t (id, numero, titulo, estado, grupo, sector, sector_inferido, prioridad, solicitante, asignado, creado, actualizado, cerrado, url, tipo, sla, cliente, bandeja, visto)
     select distinct on (d.id)
            left(d.id, 100), left(d.numero, 100), left(d.titulo, 500), left(d.estado, 100), tickets_grupo(d.estado, d.cerrado),
-           left(d.sector, 150), left(d.prioridad, 60), left(d.solicitante, 200), left(d.asignado, 200),
+           left(nullif(array_to_string(case when cardinality(d.sectores_ok) > 0 then d.sectores_ok else d.sectores end, ', '), ''), 150),
+           d.inferido and cardinality(d.sectores) > 0,
+           left(d.prioridad, 60), left(d.solicitante, 200), left(d.asignado, 200),
            d.creado, d.actualizado, case when tickets_grupo(d.estado, d.cerrado) = 'cerrado' then coalesce(d.cerrado, d.cambio_estado) end,
            case when d.url ~* '^https?://' then left(d.url, 500) end, left(d.tipo, 100), left(d.sla, 60), left(d.cliente, 200), p_bandeja, v_ahora
-      from datos d
+      from elegidos d
      where coalesce(d.id, '') <> ''
        -- los cerrados hace más de un año no se guardan
        and not (tickets_grupo(d.estado, d.cerrado) = 'cerrado' and coalesce(d.cerrado, d.cambio_estado) < v_ahora - interval '365 days')
-       and (v_sectores is null or lower(trim(d.sector)) = any(v_sectores))
+       and (v_sectores is null or cardinality(d.sectores_ok) > 0 or d.persona_ok)
     on conflict (id, bandeja) do update set
       numero = excluded.numero, titulo = excluded.titulo, estado = excluded.estado, grupo = excluded.grupo,
-      sector = excluded.sector, prioridad = excluded.prioridad, solicitante = excluded.solicitante, asignado = excluded.asignado,
+      sector = excluded.sector, sector_inferido = excluded.sector_inferido,
+      prioridad = excluded.prioridad, solicitante = excluded.solicitante, asignado = excluded.asignado,
       creado = coalesce(excluded.creado, t.creado), actualizado = excluded.actualizado,
       cerrado = case when excluded.grupo = 'cerrado' then coalesce(excluded.cerrado, t.cerrado) end,
       url = excluded.url, tipo = excluded.tipo, sla = excluded.sla, cliente = excluded.cliente, visto = excluded.visto
@@ -219,7 +254,7 @@ begin
     get diagnostics n_quitados = row_count;
     -- Si se limitó a ciertos sectores, no queda guardado nada de los demás
     if v_sectores is not null then
-      delete from tickets_ext where bandeja = p_bandeja and (sector is null or not (lower(trim(sector)) = any(v_sectores)));
+      delete from tickets_ext where bandeja = p_bandeja and visto < v_ahora;
     end if;
     delete from tickets_ext where grupo = 'cerrado' and coalesce(cerrado, actualizado, visto) < v_ahora - interval '365 days';
   end if;

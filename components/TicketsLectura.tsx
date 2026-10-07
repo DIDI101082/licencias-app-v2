@@ -84,8 +84,9 @@ https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&ti
         <label className="block text-sm md:col-span-2">Sectores a leer
           <input className="input mt-1" value={sectores} onChange={(e) => setSectores(e.target.value)} placeholder="Vacío: todos los sectores" />
           <span className="text-xs text-ink/50">
-            Escribilos igual que figuran en el sistema de tickets, separados por coma. Vacío = todos los sectores.
-            Solo se guardan los tickets de estos sectores. Con la Helpdesk Dashboard API dejalo vacío: la bandeja ya viene filtrada por subárea.
+            Separados por coma, por ejemplo: <code>Ciberseguridad, CAU Servidores, CAU Microinformática</code>. No importan mayúsculas, acentos ni guiones.
+            Vacío = todo lo que trae la bandeja. Un ticket asignado solo a personas se clasifica por el sector habitual de esas personas;
+            también podés agregar el nombre de una persona a la lista.
           </span>
         </label>
       </div>
@@ -108,7 +109,7 @@ https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&ti
           Leer ahora
         </button>
         <span className="text-xs text-ink/50">
-          {cfg.ultima ? `Última lectura: ${new Date(cfg.ultima).toLocaleString("es-AR")} · ${cfg.total ?? 0} tickets` : "Todavía no se hizo ninguna lectura"}
+          {cfg.ultima ? `Última lectura: ${new Date(cfg.ultima).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour12: false })} · ${cfg.total ?? 0} tickets` : "Todavía no se hizo ninguna lectura"}
         </span>
       </div>
       {msg && <p className={`text-sm rounded-md px-3 py-2 break-words ${msg.ok ? "text-emerald-700 bg-emerald-50" : "text-red-600 bg-red-50"}`}>{msg.texto}</p>}

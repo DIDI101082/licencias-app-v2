@@ -41,6 +41,8 @@ function duracion(ms: number | null) {
   return d === 1 ? "1 día" : `${d} días`;
 }
 const fecha = (v: string | null) => (v ? new Date(v).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" }) : "—");
+// Un ticket puede estar asignado a más de un sector ("CAU Servidores, Ciberseguridad")
+const sectoresDe = (t: Ticket): string[] => (t.sector ? String(t.sector).split(", ").filter(Boolean) : []);
 const promedio = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 // Lunes de la semana (hora de Argentina) como AAAA-MM-DD
 function semanaDe(ms: number) {
@@ -74,6 +76,7 @@ export default function Tickets() {
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [falta, setFalta] = useState(false);
   const [bandeja, setBandeja] = useState<Bandeja>("asignado");
+  const [sector, setSector] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<Grupo | null>(null);
   const [quietos, setQuietos] = useState(false);
   const [diasQuieto, setDiasQuieto] = useState(7);
@@ -82,9 +85,21 @@ export default function Tickets() {
   const [pagina, setPagina] = useState(1);
   const [ahora, setAhora] = useState(Date.now());
 
-  const cargar = () =>
-    createClient().from("tickets_ext").select("*").order("creado", { ascending: true, nullsFirst: false }).limit(10000)
-      .then(({ data, error }) => { setFalta(!!error && /tickets_ext/.test(error.message)); setTickets(data ?? []); setAhora(Date.now()); });
+  // La base devuelve como máximo 1000 filas por consulta: se trae de a páginas hasta completar
+  const cargar = async () => {
+    const sb = createClient();
+    const todo: Ticket[] = [];
+    const PAGINA = 1000;
+    for (let desde = 0; desde < 50000; desde += PAGINA) {
+      const { data, error } = await sb.from("tickets_ext").select("*").order("bandeja").order("id").range(desde, desde + PAGINA - 1);
+      if (error) { setFalta(/tickets_ext/.test(error.message)); break; }
+      todo.push(...(data ?? []));
+      if ((data?.length ?? 0) < PAGINA) break;
+    }
+    // Del más antiguo al más nuevo; sin fecha de creación, al final
+    todo.sort((a, b) => (a.creado ? Date.parse(a.creado) : Infinity) - (b.creado ? Date.parse(b.creado) : Infinity));
+    setTickets(todo); setAhora(Date.now());
+  };
   useEffect(() => {
     cargar();
     const t = setInterval(cargar, 5 * 60000);
@@ -107,7 +122,16 @@ export default function Tickets() {
   const hayGenerados = todos.some((t) => t.bandeja === "generado");
   const hayAsignados = todos.some((t) => t.bandeja !== "generado");
   const bandejaActual: Bandeja = bandeja === "generado" && !hayGenerados ? "asignado" : bandeja === "asignado" && !hayAsignados && hayGenerados ? "generado" : bandeja;
-  const lista = todos.filter((t) => (t.bandeja ?? "asignado") === bandejaActual);
+  const enBandeja = todos.filter((t) => (t.bandeja ?? "asignado") === bandejaActual);
+  // Sectores presentes en la bandeja, con cuántos tickets sin cerrar tiene cada uno
+  const sectores = useMemo(() => {
+    const m = new Map<string, number>();
+    enBandeja.forEach((t) => sectoresDe(t).forEach((x) => m.set(x, (m.get(x) ?? 0) + (t.grupo !== "cerrado" ? 1 : 0))));
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "es"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickets, bandejaActual]);
+  const sectorActual = sector && sectores.some(([x]) => x === sector) ? sector : null;
+  const lista = sectorActual ? enBandeja.filter((t) => sectoresDe(t).includes(sectorActual)) : enBandeja;
   const sinCerrar = lista.filter((t) => t.grupo !== "cerrado");
   const cerrados30 = lista.filter((t) => t.grupo === "cerrado" && t.cerrado && ahora - Date.parse(t.cerrado) <= 30 * DIA);
   const cuenta: Record<Grupo, number> = {
@@ -121,22 +145,23 @@ export default function Tickets() {
   const haySla = lista.some((t) => t.sla);
   const sinMovimiento = sinCerrar.filter((t) => (quieto(t) ?? 0) >= diasQuieto * DIA);
 
-  // Sin cerrar: por sector si hay más de uno; si es la bandeja de un solo sector, por persona asignada
-  const porSector = new Set(sinCerrar.map((t) => t.sector).filter(Boolean)).size > 1;
+  // Sin cerrar, por persona asignada (un ticket con varias personas cuenta en cada una)
   const carga = useMemo(() => {
     const m = new Map<string, { clave: string; abierto: number; en_espera: number; vencidos: number; quietos: number; max: number }>();
     sinCerrar.forEach((t) => {
-      const k = porSector ? t.sector || "Sin sector" : t.asignado || "Sin asignar";
-      const x = m.get(k) ?? { clave: k, abierto: 0, en_espera: 0, vencidos: 0, quietos: 0, max: 0 };
-      x[t.grupo as "abierto" | "en_espera"]++;
-      if (slaVencidoRe.test(t.sla ?? "")) x.vencidos++;
-      if ((quieto(t) ?? 0) >= diasQuieto * DIA) x.quietos++;
-      x.max = Math.max(x.max, tiempo(t) ?? 0);
-      m.set(k, x);
+      const personas: string[] = t.asignado ? String(t.asignado).split(", ").filter(Boolean) : ["Sin asignar"];
+      personas.forEach((k) => {
+        const x = m.get(k) ?? { clave: k, abierto: 0, en_espera: 0, vencidos: 0, quietos: 0, max: 0 };
+        x[t.grupo as "abierto" | "en_espera"]++;
+        if (slaVencidoRe.test(t.sla ?? "")) x.vencidos++;
+        if ((quieto(t) ?? 0) >= diasQuieto * DIA) x.quietos++;
+        x.max = Math.max(x.max, tiempo(t) ?? 0);
+        m.set(k, x);
+      });
     });
     return Array.from(m.values()).sort((a, b) => b.abierto + b.en_espera - (a.abierto + a.en_espera));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickets, ahora, bandejaActual, diasQuieto]);
+  }, [tickets, ahora, bandejaActual, sectorActual, diasQuieto]);
 
   const contar = (f: (t: Ticket) => string) => {
     const m = new Map<string, number>();
@@ -159,7 +184,7 @@ export default function Tickets() {
     });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickets, ahora, bandejaActual]);
+  }, [tickets, ahora, bandejaActual, sectorActual]);
   const maxSemana = Math.max(1, ...semanas.map((s) => Math.max(s.creados, s.cerrados)));
   const haySemanas = semanas.some((s) => s.creados + s.cerrados > 0);
 
@@ -170,17 +195,17 @@ export default function Tickets() {
     return base.filter((t) => !q || [t.id, t.numero, t.titulo, t.estado, t.sector, t.asignado, t.solicitante, t.prioridad, t.tipo, t.sla, t.cliente]
       .some((v) => v && String(v).toLowerCase().includes(q)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickets, filtro, quietos, diasQuieto, texto, ahora, bandejaActual]);
+  }, [tickets, filtro, quietos, diasQuieto, texto, ahora, bandejaActual, sectorActual]);
 
   const fc = useFiltrosColumna(filas, {
     estado: (t) => t.estado || GRUPOS[t.grupo as Grupo].uno,
-    sector: (t) => t.sector || "Sin sector",
+    sector: (t) => (sectoresDe(t).length ? sectoresDe(t) : ["Sin sector"]),
     prioridad: (t) => t.prioridad || "—",
     asignado: (t) => t.asignado || "Sin asignar",
     sla: (t) => t.sla || "—",
   });
   const enTabla = fc.filtradas;
-  useEffect(() => { setPagina(1); }, [filtro, quietos, texto, bandejaActual, fc.filtros]);
+  useEffect(() => { setPagina(1); }, [filtro, quietos, texto, bandejaActual, sectorActual, fc.filtros]);
   const POR_PAGINA = 50;
   const paginas = Math.max(1, Math.ceil(enTabla.length / POR_PAGINA));
   const paginaActual = Math.min(pagina, paginas);
@@ -223,6 +248,19 @@ export default function Tickets() {
             ))}
           </div>
           <p className="text-xs text-ink/50 mt-2">{BANDEJAS[bandejaActual].detalle}</p>
+        </div>
+      )}
+
+      {sectores.length > 1 && (
+        <div className="flex gap-2 flex-wrap items-center" role="group" aria-label="Sector">
+          <span className="text-xs text-ink/50 mr-1">Sector:</span>
+          {[[null, enBandeja.filter((t) => t.grupo !== "cerrado").length] as [string | null, number], ...sectores].map(([x, n]) => (
+            <button key={x ?? "todos"} onClick={() => setSector(x)} aria-pressed={sectorActual === x}
+              className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${sectorActual === x ? "border-brand-500 bg-brand-50 text-brand-700 font-medium" : "border-line/20 text-ink/70 hover:border-brand-300"}`}>
+              {x ?? "Todos"} <span className="tabular-nums text-ink/50">{n}</span>
+            </button>
+          ))}
+          <span className="text-xs text-ink/40">El número es la cantidad de tickets sin cerrar.</span>
         </div>
       )}
 
@@ -284,11 +322,11 @@ export default function Tickets() {
           </div>
 
           <div className="card p-5">
-            <h2 className="font-medium text-ink mb-3">Sin cerrar, {porSector ? "por sector" : "por persona asignada"}</h2>
+            <h2 className="font-medium text-ink mb-3">Sin cerrar, por persona asignada</h2>
             {carga.length === 0 ? <p className="text-sm text-ink/50">No hay tickets sin cerrar.</p> : (
               <div className="overflow-x-auto">
                 <table className="data w-full">
-                  <thead><tr><th>{porSector ? "Sector" : "Asignado a"}</th><th>Abiertos</th><th>En espera</th><th>SLA vencido</th><th>Sin movimiento</th><th>El más antiguo</th></tr></thead>
+                  <thead><tr><th>Asignado a</th><th>Abiertos</th><th>Espera</th><th title="SLA vencido o escalado">SLA venc.</th><th title="Sin movimiento">Quietos</th><th>Más antiguo</th></tr></thead>
                   <tbody>
                     {carga.map((s) => (
                       <tr key={s.clave}>
@@ -347,7 +385,10 @@ export default function Tickets() {
                     {(t.tipo || t.solicitante) && <div className="text-xs text-ink/40">{[t.tipo, t.solicitante && `de ${t.solicitante}`].filter(Boolean).join(" · ")}</div>}
                   </td>
                   <td><span className={`pill ${GRUPOS[t.grupo as Grupo].pill}`}>{t.estado || GRUPOS[t.grupo as Grupo].uno}</span></td>
-                  <td className="text-ink/70">{t.sector ?? "—"}</td>
+                  <td className="text-ink/70">
+                    {t.sector ?? "—"}
+                    {t.sector_inferido && <div className="text-xs text-ink/40" title="El ticket está asignado solo a personas; el sector se deduce del sector habitual de esas personas.">por persona asignada</div>}
+                  </td>
                   <td className="text-ink/70">{t.prioridad ?? "—"}</td>
                   <td className="text-ink/70">{t.asignado ?? "Sin asignar"}</td>
                   <td>{t.sla ? <span className={`pill ${slaPill(t.sla)}`}>{t.sla}</span> : <span className="text-ink/40">—</span>}</td>
