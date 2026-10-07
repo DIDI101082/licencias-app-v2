@@ -68,6 +68,9 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/ubicacion/asistencia", label: "Asistencia semanal" },
     { href: "/inventario/ubicacion/ocupacion", label: "Ocupación por piso" },
   ] },
+  { id: "helpdesk", label: "HelpDesk", titulo: "Tickets del área en el helpdesk", paginas: [
+    { href: "/helpdesk", label: "Tickets" },
+  ] },
   { id: "gobierno", label: "Gobierno", titulo: "Cumplimiento, normativa, incidentes y registros", paginas: [
     { href: "/inventario/cumplimiento", label: "Cumplimiento" },
     { href: "/inventario/normativa", label: "Normativa" },
@@ -75,7 +78,6 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/incidentes", label: "Incidentes" },
     { href: "/auditoria/revision", label: "Revisión de accesos" },
     { href: "/auditoria/alertas", label: "Alertas" },
-    { href: "/auditoria/tickets", label: "Tickets" },
     { href: "/auditoria", label: "Cambios" },
     { href: "/auditoria/sesiones", label: "Inicios de sesión" },
   ] },
@@ -89,7 +91,7 @@ export const MENU: SeccionMenu[] = MODULOS.map((m) => ({
 }));
 
 // Páginas que solo coinciden con la dirección exacta (el resto abarca sus subpáginas)
-const EXACTAS = ["/", "/inicio", "/inventario", "/inventario/ubicacion", "/auditoria", "/servidores", "/red"];
+const EXACTAS = ["/", "/inicio", "/helpdesk", "/inventario", "/inventario/ubicacion", "/auditoria", "/servidores", "/red"];
 
 export function esActual(href: string, pathname: string) {
   if (EXACTAS.includes(href)) return pathname === href;

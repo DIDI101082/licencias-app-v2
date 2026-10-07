@@ -1,5 +1,5 @@
 // Solapas de la app y a qué módulo pertenece cada ruta.
-export const MODULOS = ["empleados", "licencias", "inventario", "seguridad", "ubicacion", "red", "servidores", "auditoria"] as const;
+export const MODULOS = ["empleados", "licencias", "inventario", "seguridad", "ubicacion", "red", "servidores", "helpdesk", "auditoria"] as const;
 export type Modulo = (typeof MODULOS)[number];
 
 export const NOMBRE_MODULO: Record<Modulo, string> = {
@@ -10,6 +10,7 @@ export const NOMBRE_MODULO: Record<Modulo, string> = {
   ubicacion: "Oficina / Home office",
   red: "Monitoreo de red",
   servidores: "Servidores",
+  helpdesk: "HelpDesk",
   auditoria: "Logs",
 };
 
@@ -21,6 +22,7 @@ export const INICIO_MODULO: Record<Modulo, string> = {
   ubicacion: "/inventario/ubicacion",
   red: "/red",
   servidores: "/servidores",
+  helpdesk: "/helpdesk",
   auditoria: "/auditoria",
 };
 
@@ -32,6 +34,7 @@ export function moduloDeRuta(pathname: string): Modulo | null {
   if (pathname.startsWith("/empleados")) return "empleados";
   if (pathname.startsWith("/red")) return "red";
   if (pathname.startsWith("/servidores")) return "servidores";
+  if (pathname.startsWith("/helpdesk")) return "helpdesk";
   if (pathname.startsWith("/auditoria")) return "auditoria";
   if (pathname.startsWith("/inventario/ubicacion")) return "ubicacion";
   if (RUTAS_SEGURIDAD.some((r) => pathname.startsWith(r))) return "seguridad";

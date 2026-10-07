@@ -13,6 +13,8 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
   const [token, setToken] = useState("");
   const [sectores, setSectores] = useState("");
   const [generados, setGenerados] = useState(true);
+  // Seguimiento (mensajes y recorrido de cada ticket): se configura aparte, con helpdesk.sql
+  const [seg, setSeg] = useState<{ activo: boolean; privados: boolean; pendientes: number; error: string | null } | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [falta, setFalta] = useState(false);
@@ -22,7 +24,8 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
     if (error) { setFalta(error.message.includes("tickets_lectura_ver")); return; }
     setCfg(data as Cfg); setActiva((data as Cfg).activa); setSectores((data as Cfg).sectores ?? ""); setGenerados((data as Cfg).generados !== false);
   };
-  useEffect(() => { cargar(); }, []);
+  const cargarSeg = () => createClient().rpc("tickets_seguimiento_config").then(({ data, error }) => setSeg(error ? null : data));
+  useEffect(() => { cargar(); cargarSeg(); }, []);
 
   async function correr(fn: () => PromiseLike<{ error: any; data?: any }>, ok: string, leido = false) {
     setOcupado(true); setMsg(null);
@@ -98,6 +101,25 @@ https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&ti
         <input type="checkbox" checked={generados} onChange={(e) => setGenerados(e.target.checked)} />
         Leer también los tickets generados por el área (la misma dirección con <code className="text-xs">tipoBandeja=1</code>)
       </label>
+
+      {seg && (
+        <div className="space-y-2 border-t border-line/10 pt-3">
+          <div className="text-sm font-medium text-ink">Seguimiento de cada ticket</div>
+          <label className="flex items-center gap-2 text-sm text-ink/80">
+            <input type="checkbox" checked={seg.activo} onChange={(e) => createClient().rpc("tickets_seguimiento_config", { p: { activo: e.target.checked } }).then(cargarSeg)} />
+            Leer mensajes y recorrido de los tickets sin cerrar (para saber a quién le falta responder)
+          </label>
+          <label className="flex items-center gap-2 text-sm text-ink/80">
+            <input type="checkbox" checked={seg.privados} onChange={(e) => createClient().rpc("tickets_seguimiento_config", { p: { privados: e.target.checked } }).then(cargarSeg)} />
+            Incluir el texto de las notas internas (mensajes privados del helpdesk)
+          </label>
+          <p className="text-xs text-ink/50">
+            Las notas internas las ve cualquier persona con acceso a la solapa HelpDesk. Si lo desactivás, se borra el texto de las ya guardadas.
+            {seg.pendientes > 0 && ` Tickets con seguimiento pendiente de leer: ${seg.pendientes}.`}
+          </p>
+          {seg.error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2 break-words">Último error de seguimiento: {seg.error}</p>}
+        </div>
+      )}
 
       <div className="flex items-center gap-3 flex-wrap">
         <button className="btn-primary" disabled={ocupado}

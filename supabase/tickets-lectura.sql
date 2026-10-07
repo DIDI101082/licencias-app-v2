@@ -69,7 +69,7 @@ alter table public.tickets_ext enable row level security;
 revoke insert, update, delete on public.tickets_ext from anon, authenticated;
 drop policy if exists tickets_ext_select on public.tickets_ext;
 create policy tickets_ext_select on public.tickets_ext for select to authenticated
-  using (mi_rol() is not null and puede_ver('auditoria'));
+  using (mi_rol() is not null and puede_ver('auditoria'));   -- helpdesk.sql lo pasa al permiso de la solapa HelpDesk
 
 -- Estado del sistema de tickets → abierto / en espera / cerrado
 create or replace function public.tickets_grupo(p_estado text, p_cerrado timestamptz)
