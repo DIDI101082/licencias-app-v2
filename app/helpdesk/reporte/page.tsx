@@ -18,6 +18,8 @@ const slaVencidoRe = /vencido|escalado/i;
 const sectoresDe = (t: Ticket): string[] => (t.sector ? String(t.sector).split(", ").filter(Boolean) : []);
 // Varias personas asignadas vienen separadas con "; " (cada nombre es "Apellido, Nombre")
 const personasDe = (t: Ticket): string[] => (t.asignado ? String(t.asignado).split("; ").map((x) => x.trim()).filter(Boolean) : []);
+// Para comparar nombres de personas sin que importen mayúsculas, acentos, comas ni el orden ("Apellido, Nombre" o "Nombre Apellido")
+const clavePersona = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").sort().join(" ");
 const fecha = (v: string | number | null) => (v ? new Date(v).toLocaleDateString("es-AR", { timeZone: TZ }) : "—");
 const promedio = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 function duracion(ms: number | null) {
@@ -51,6 +53,7 @@ export default function ReporteHelpdesk() {
   const [bandeja, setBandeja] = useState<Bandeja>("asignado");
   const [periodo, setPeriodo] = useState(30);
   const [diasQuieto, setDiasQuieto] = useState(7);
+  const [sectorResp, setSectorResp] = useState<string | null>(null);   // sector elegido en "Tiempo de primera respuesta"
   const [ahora] = useState(Date.now());
 
   useEffect(() => {
@@ -110,7 +113,7 @@ export default function ReporteHelpdesk() {
     };
   };
 
-  const { total, porSector, porPersona, porRespondio, porEstado, sinCerrar } = useMemo(() => {
+  const { total, porSector, porPersona, porEstado, sinCerrar } = useMemo(() => {
     const agrupar = (claves: (t: Ticket) => string[]) => {
       const m = new Map<string, Ticket[]>();
       lista.forEach((t) => claves(t).forEach((k) => { const a = m.get(k) ?? []; a.push(t); m.set(k, a); }));
@@ -126,14 +129,33 @@ export default function ReporteHelpdesk() {
       total: medir("Total", lista),
       porSector: agrupar((t) => (sectoresDe(t).length ? sectoresDe(t) : ["Sin sector"])),
       porPersona: agrupar((t) => (personasDe(t).length ? personasDe(t) : ["Sin asignar"])),
-      // Por quién dio la primera respuesta (no por quién está asignado), del más lento al más rápido
-      porRespondio: agrupar((t) => (t.primera_resp_autor ? [String(t.primera_resp_autor)] : [])).filter((f) => f.respN > 0)
-        .sort((a, b) => (b.resp ?? 0) - (a.resp ?? 0)),
       porEstado: Array.from(est.entries()).sort((a, b) => b[1] - a[1]),
       sinCerrar: sin,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tickets, bandeja, periodo, diasQuieto]);
+
+  // Tiempo de primera respuesta: solo los sectores del área, con la opción de ver uno solo.
+  // En "por quién respondió primero" entran únicamente las personas de esos sectores (las que tienen tickets asignados ahí).
+  const sectoresResp = porSector.map((f) => f.clave).filter((k) => k !== "Sin sector").sort((a, b) => a.localeCompare(b, "es"));
+  const sectorR = sectorResp && sectoresResp.includes(sectorResp) ? sectorResp : null;
+  const { totalR, sectoresR, respondieron, ajenos } = useMemo(() => {
+    const listaR = sectorR ? lista.filter((t) => sectoresDe(t).includes(sectorR)) : lista;
+    const delArea = new Set(listaR.filter((t) => sectoresDe(t).length > 0).flatMap(personasDe).map(clavePersona));
+    const m = new Map<string, Ticket[]>();
+    listaR.forEach((t) => { if (t.primera_resp_autor) { const k = String(t.primera_resp_autor); const a = m.get(k) ?? []; a.push(t); m.set(k, a); } });
+    // Por quién dio la primera respuesta (no por quién está asignado), del más lento al más rápido
+    const todosResp = Array.from(m.entries()).map(([k, xs]) => medir(k, xs)).filter((f) => f.respN > 0).sort((a, b) => (b.resp ?? 0) - (a.resp ?? 0));
+    const fuera = todosResp.filter((f) => !delArea.has(clavePersona(f.clave)));
+    return {
+      totalR: sectorR ? medir("Total", listaR) : total,
+      sectoresR: porSector.filter((f) => f.respN > 0 && f.clave !== "Sin sector" && (!sectorR || f.clave === sectorR)).sort((a, b) => (b.resp ?? 0) - (a.resp ?? 0)),
+      respondieron: todosResp.filter((f) => delArea.has(clavePersona(f.clave))),
+      ajenos: { personas: fuera.length, tickets: fuera.reduce((n, f) => n + f.respN, 0) },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickets, bandeja, periodo, diasQuieto, sectorR]);
+  const lentoR = (v: number | null) => v != null && totalR.resp != null && v > Math.max(totalR.resp * 1.5, 4 * 3600000);
 
   const txtFalta = bandeja === "asignado" ? "Falta nuestra respuesta" : "Falta respuesta del otro sector";
   const respuesta = (t: Ticket) => (t.respuesta_de === "atencion" ? txtFalta : t.respuesta_de === "solicitante" ? "Espera al solicitante" : "");
@@ -155,7 +177,7 @@ export default function ReporteHelpdesk() {
   const exportar = async () => {
     await exportarExcel(`helpdesk-reporte-resumen-${hoy}`, ["Grupo", "Nombre", ...columnas],
       [["Total", ...aFila(total)], ...porSector.map((f) => ["Sector", ...aFila(f)]), ...porPersona.map((f) => ["Persona asignada", ...aFila(f)]),
-        ...porRespondio.map((f) => ["Quién respondió primero", ...aFila(f)])],
+        ...respondieron.map((f) => [sectorR ? `Quién respondió primero (${sectorR})` : "Quién respondió primero", ...aFila(f)])],
       { Nombre: 30 });
     await exportarExcel(`helpdesk-reporte-detalle-${hoy}`,
       ["Ticket", "Título", "Tipo", "Estado", "SLA", "Sector", "Prioridad", "Solicitante", "Asignado a", "Creado", "Días abierto", "Último movimiento", "Días sin movimiento", "Respuesta", "Último mensaje de", "Primera respuesta (horas)", "Primera respuesta de", "Recorrido"],
@@ -271,35 +293,47 @@ export default function ReporteHelpdesk() {
           </div>
 
           <div className="card p-5 border-2 border-red-500/40">
-            <h2 className="font-medium text-ink">Tiempo de primera respuesta</h2>
+            <h2 className="font-medium text-ink">Tiempo de primera respuesta{sectorR ? ` · ${sectorR}` : ""}</h2>
             <p className="text-sm text-ink/60 mt-1 mb-3">
               Cuánto se tarda en contestarle por primera vez a quien pidió el ticket: desde que se crea hasta el primer mensaje público de quien lo atiende.
-              Tickets creados en los últimos {periodo} días. En rojo, lo que supera en más de un 50 % el promedio general ({duracion(total.resp)}).
+              Tickets creados en los últimos {periodo} días. En rojo, lo que supera en más de un 50 % el promedio {sectorR ? `de ${sectorR}` : "general"} ({duracion(totalR.resp)}).
             </p>
-            {total.respN === 0 ? (
-              <p className="text-sm text-ink/60">Todavía no hay datos: el seguimiento de los tickets se está leyendo. Se completa solo en las próximas horas.</p>
+            {sectoresResp.length > 1 && (
+              <div className="flex gap-2 flex-wrap items-center mb-4 print:hidden" role="group" aria-label="Sector">
+                <span className="text-xs text-ink/50 mr-1">Sector:</span>
+                {[null, ...sectoresResp].map((x) => (
+                  <button key={x ?? "todos"} onClick={() => setSectorResp(x)} aria-pressed={sectorR === x}
+                    className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${sectorR === x ? "border-brand-500 bg-brand-50 text-brand-700 font-medium" : "border-line/20 text-ink/70 hover:border-brand-300"}`}>
+                    {x ?? "Todos"}
+                  </button>
+                ))}
+              </div>
+            )}
+            {totalR.respN === 0 ? (
+              <p className="text-sm text-ink/60">{sectorR ? `Todavía no hay primeras respuestas medidas para ${sectorR} en este período.` : "Todavía no hay datos: el seguimiento de los tickets se está leyendo. Se completa solo en las próximas horas."}</p>
             ) : (
               <div className="grid lg:grid-cols-2 gap-6 print:block print:space-y-4">
-                {([["Por sector", "Sector", [...porSector].filter((f) => f.respN > 0).sort((a, b) => (b.resp ?? 0) - (a.resp ?? 0))],
-                   ["Por quién respondió primero", "Persona", porRespondio]] as [string, string, Fila[]][]).map(([tit, col, filas]) => (
+                {([["Por sector", "Sector", sectoresR],
+                   ["Por quién respondió primero", "Persona", respondieron]] as [string, string, Fila[]][]).map(([tit, col, filas]) => (
                   <div key={tit}>
                     <h3 className="text-sm font-medium text-ink mb-2">{tit} (del más lento al más rápido)</h3>
                     <div className="overflow-x-auto">
                       <table className="data w-full text-sm">
                         <thead><tr><th>{col}</th><th>Promedio</th><th>Mediana</th><th>La más lenta</th><th>Tickets</th></tr></thead>
                         <tbody>
+                          {filas.length === 0 && <tr><td colSpan={5} className="text-ink/50">Sin respuestas de personas del área en este período.</td></tr>}
                           {filas.map((f) => (
-                            <tr key={f.clave} className={lento(f.resp) ? "bg-red-50" : ""}>
-                              <td className={lento(f.resp) ? "text-red-600 font-semibold" : "text-ink"}>{f.clave}</td>
-                              <td className={`whitespace-nowrap ${lento(f.resp) ? "text-red-600 font-semibold" : ""}`}>{duracion(f.resp)}</td>
+                            <tr key={f.clave} className={lentoR(f.resp) ? "bg-red-50" : ""}>
+                              <td className={lentoR(f.resp) ? "text-red-600 font-semibold" : "text-ink"}>{f.clave}</td>
+                              <td className={`whitespace-nowrap ${lentoR(f.resp) ? "text-red-600 font-semibold" : ""}`}>{duracion(f.resp)}</td>
                               <td className="whitespace-nowrap">{duracion(f.respMed)}</td>
                               <td className="whitespace-nowrap">{duracion(f.respMax)}</td>
                               <td className="tabular-nums">{f.respN}{f.respN < 5 && <span className="text-xs text-ink/40"> · pocos casos</span>}</td>
                             </tr>
                           ))}
                           <tr className="font-medium border-t-2 border-line/20">
-                            <td>Total</td><td className="whitespace-nowrap">{duracion(total.resp)}</td><td className="whitespace-nowrap">{duracion(total.respMed)}</td>
-                            <td className="whitespace-nowrap">{duracion(total.respMax)}</td><td className="tabular-nums">{total.respN}</td>
+                            <td>Total</td><td className="whitespace-nowrap">{duracion(totalR.resp)}</td><td className="whitespace-nowrap">{duracion(totalR.respMed)}</td>
+                            <td className="whitespace-nowrap">{duracion(totalR.respMax)}</td><td className="tabular-nums">{totalR.respN}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -309,6 +343,7 @@ export default function ReporteHelpdesk() {
               </div>
             )}
             <p className="text-xs text-ink/50 mt-3">
+              {ajenos.tickets > 0 && `En la tabla por persona no se listan ${ajenos.personas === 1 ? "1 persona ajena" : `${ajenos.personas} personas ajenas`} al área, que ${ajenos.personas === 1 ? "dio" : "dieron"} la primera respuesta en ${ajenos.tickets} ${ajenos.tickets === 1 ? "ticket" : "tickets"}; esos tickets sí cuentan en el sector y en el total. `}
               Es tiempo corrido: incluye noches, fines de semana y feriados. Las notas internas no cuentan como respuesta. El promedio sube mucho con pocos tickets muy demorados; la mediana muestra el caso típico.
               {sinLeer > 0 && <b className="text-amber-700"> Medición incompleta: {sinLeer} de los {delPeriodo.length} tickets del período todavía no tienen leído su seguimiento; se completa solo en las próximas horas.</b>}
               {sinPrimera > 0 && ` ${sinPrimera} ${sinPrimera === 1 ? "ticket del período no tiene" : "tickets del período no tienen"} ninguna respuesta pública registrada y no entran en el promedio.`}
