@@ -21,7 +21,7 @@ const parecido = (v: string, nombres: (string | null | undefined)[]) =>
   v.length >= 3 && nombres.map(norm).some((n) => n.length >= 3 && (v === n || v.includes(n) || n.includes(v)));
 
 export default function EsquemaFisico() {
-  const [d, setD] = useState<{ fgs: any[]; wans: Wan[]; ifs: any[]; sws: any[]; puertos: any[]; disp: any[]; unifi: any[]; srvs: any[] } | null>(null);
+  const [d, setD] = useState<{ fgs: any[]; wans: Wan[]; ifs: any[]; sws: any[]; puertos: any[]; disp: any[]; unifi: any[]; srvs: any[]; manual: Record<string, string> } | null>(null);
   const [avisos, setAvisos] = useState<string[]>([]);
   const [sel, setSel] = useState<number | null>(null);
   const [escala, setEscala] = useState(1);
@@ -37,13 +37,14 @@ export default function EsquemaFisico() {
       sb.from("sw_dispositivos_vista").select("mac,switch_id,ifindex,puerto,dispositivo_id,agente_hostname,unifi_nombre,conocido_descripcion"),
       sb.from("unifi_equipos").select("mac,nombre,modelo,tipo,ip,estado,clientes"),
       sb.from("srv_servidores").select("nombre,rol,dispositivo_id,activo"),
-    ]).then(([fg, en, ifs, sw, pu, di, un, sr]) => {
+      sb.from("red_esquema").select("clave,padre"),
+    ]).then(([fg, en, ifs, sw, pu, di, un, sr, ma]) => {
       const a: string[] = [];
       if (fg.error) a.push("No se pudo leer el FortiGate (falta el puente o el permiso de la solapa).");
       if (sw.error || pu.error) a.push("No se pudieron leer los switches (falta el puente SNMP o el permiso de la solapa).");
       if (sr.error) a.push("No se pudieron leer los servidores: se muestran solo como equipos conectados.");
       setAvisos(a);
-      setD({ fgs: fg.data ?? [], wans: (en.data ?? []) as Wan[], ifs: ifs.data ?? [], sws: sw.data ?? [], puertos: pu.data ?? [], disp: di.data ?? [], unifi: un.data ?? [], srvs: sr.data ?? [] });
+      setD({ fgs: fg.data ?? [], wans: (en.data ?? []) as Wan[], ifs: ifs.data ?? [], sws: sw.data ?? [], puertos: pu.data ?? [], disp: di.data ?? [], unifi: un.data ?? [], srvs: sr.data ?? [], manual: Object.fromEntries((ma.data ?? []).map((r: any) => [r.clave, r.padre])) });
     });
   }, []);
 
@@ -63,7 +64,9 @@ export default function EsquemaFisico() {
       return d.ifs.filter((i) => i.equipo === eq && (i.rol === "wan" || /^wan\d*$/i.test(i.nombre ?? "")))
         .map((i) => ({ equipo: eq, interfaz: i.nombre, nombre: i.alias || null, bajada_mbps: null, subida_mbps: null, respaldo: false, conectado: i.estado ? /up/i.test(i.estado) : null }));
     };
-    const fgs = [...d.fgs].sort((a, b) => wansDe(b.nombre).length - wansDe(a.nombre).length || a.nombre.localeCompare(b.nombre));
+    // Mismo orden que el Esquema: la sede principal (más enlaces, modelo más grande) es la sede por defecto
+    const num = (f: any) => Number(String(f.modelo ?? "").match(/\d+/)?.[0] ?? 0);
+    const fgs = [...d.fgs].sort((a, b) => wansDe(b.nombre).length - wansDe(a.nombre).length || num(b) - num(a) || a.nombre.localeCompare(b.nombre));
     const idFg = new Map<string, number>();
     fgs.forEach((f, i) => {
       idFg.set(f.nombre, i + 1); padre.set(i + 1, INTERNET);
@@ -139,8 +142,27 @@ export default function EsquemaFisico() {
         }
       }
     };
+    // Lo que un administrador ubicó a mano en el Esquema manda: se sigue la cadena hasta llegar a un FortiGate u otro switch monitoreado
+    const sinAcento = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const aMano = (sw: any): number | null => {
+      let k = d.manual[`sw:${sw.id}`];
+      for (let i = 0; i < 25 && k; i++) {
+        if (k.startsWith("fg:")) return idFg.get(k.slice(3)) ?? null;
+        if (k.startsWith("sw:") && d.sws.some((x) => `sw:${x.id}` === k && x.id !== sw.id)) return idSw(Number(k.slice(3)));
+        k = d.manual[k];
+      }
+      return null;
+    };
+    // Sin dato: Córdoba/CBA en el nombre o la zona va al FortiGate de Córdoba; el resto, a la sede principal
+    const sedePorNombre = (sw: any) => {
+      const t = sinAcento(`${sw.nombre} ${sw.zona ?? ""} ${sw.notas ?? ""}`);
+      const f = /cordoba|cba/.test(t) ? fgs.find((x) => /cordoba|cba|60f/.test(sinAcento(`${x.nombre} ${x.hostname ?? ""} ${x.modelo ?? ""}`))) : undefined;
+      return f ? idFg.get(f.nombre)! : fgDefecto;
+    };
+    for (const s of d.sws) { const p = aMano(s); if (p !== null && p < 1000 && !puesto.has(s.id)) colgar(s, p, "ubicado a mano en el Esquema", false); }
     for (const s of d.sws) { const f = haciaFg.get(s.id); if (f && !puesto.has(s.id)) colgar(s, f.fg, f.puerto, false); }
-    for (const s of [...d.sws].sort((a, b) => (vecinos.get(b.id)?.length ?? 0) - (vecinos.get(a.id)?.length ?? 0))) if (!puesto.has(s.id)) colgar(s, fgDefecto, "", true);
+    for (let vuelta = 0; vuelta < 10; vuelta++) for (const s of d.sws) { const p = aMano(s); if (p !== null && p >= 1000 && !puesto.has(s.id) && puesto.has(p - 1000)) colgar(s, p, "ubicado a mano en el Esquema", false); }
+    for (const s of [...d.sws].sort((a, b) => (vecinos.get(b.id)?.length ?? 0) - (vecinos.get(a.id)?.length ?? 0))) if (!puesto.has(s.id)) colgar(s, sedePorNombre(s), "", true);
 
     for (const s of d.sws) {
       for (const h of Array.from(hojas.get(s.id)?.values() ?? [])) { nodos.set(h.id, h); padre.set(h.id, idSw(s.id)); }
