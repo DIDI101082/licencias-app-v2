@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 
-// Mapa de conectividad (carga manual): desde dónde se conectan los equipos, por dónde pasan y a qué servidores llegan.
+// Mapa de conectividad: desde dónde se conectan los equipos, por dónde pasan y a qué servidores llegan.
+// Tres vistas: lo que permite el firewall (políticas del FortiGate), lo que se usó (accesos a servidores) y la carga manual.
 type Columna = "origen" | "paso" | "destino";
 type Estado = "permitido" | "restringido" | "revisar";
 type Nodo = { id: number; columna: Columna; nombre: string; detalle: string | null; grupo: string | null; orden: number };
@@ -22,12 +23,59 @@ const ESTADOS: Record<Estado, { texto: string; color: string; pill: string }> = 
 };
 const N = { w: 210, h: 50, gy: 12, gcol: 150, titulo: 34, grupo: 22 };
 const corto = (t: string, n: number) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+type Modo = "firewall" | "accesos" | "manual";
+const MODOS: { id: Modo; titulo: string; ayuda: string }[] = [
+  { id: "firewall", titulo: "Permitido por el firewall", ayuda: "Se arma solo con las políticas activas de cada FortiGate. En rojo, las que dejan pasar cualquier servicio (ALL)." },
+  { id: "accesos", titulo: "Accesos observados", ayuda: "Se arma solo con los inicios de sesión de los últimos 30 días en los servidores que tienen el agente." },
+  { id: "manual", titulo: "Manual", ayuda: "Lo que cargó un administrador." },
+];
+type Politica = { equipo: string; id: number; nombre: string | null; desde: string | null; hacia: string | null; origen: string | null; destino: string | null; servicio: string | null; hits: number | null };
+type Acceso = { hostname: string | null; usuario: string; logon_type: number | null; ip: string | null; origen: string | null };
+type Red = { nombre: string; sede: string; cidr: string; tipo: string };
+
+const ipNum = (ip: string) => { const p = ip.split(".").map(Number); return p.length === 4 && p.every((x) => x >= 0 && x <= 255) ? ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0 : null; };
+function enRed(ip: string, cidr: string) {
+  const [base, bits] = cidr.split("/"); const a = ipNum(ip), b = ipNum(base); const n = Number(bits ?? 32);
+  if (a === null || b === null) return false;
+  const masc = n === 0 ? 0 : (~0 << (32 - n)) >>> 0;
+  return ((a & masc) >>> 0) === ((b & masc) >>> 0);
+}
+const unir = (l: string[], max: number) => { const u = Array.from(new Set(l.filter(Boolean))); return u.length > max ? `${u.slice(0, max).join(", ")} +${u.length - max}` : u.join(", "); };
+
+// Arma puntos y conexiones a partir de filas "origen → paso → destino" (se agrupan las repetidas)
+function armar(filas: { o: [string, string, string]; v: [string, string] | null; d: [string, string, string]; servicio: string; estado: Estado; peso: number }[], nota: (n: number, peso: number) => string) {
+  const nodos = new Map<string, Nodo>();
+  const nodo = (columna: Columna, nombre: string, detalle: string, grupo: string) => {
+    const k = `${columna}|${grupo}|${nombre}|${detalle}`;
+    if (!nodos.has(k)) nodos.set(k, { id: -(nodos.size + 1), columna, nombre, detalle: detalle || null, grupo: grupo || null, orden: 0 });
+    return nodos.get(k)!.id;
+  };
+  const grupos = new Map<string, { o: number; v: number | null; d: number; servicios: string[]; estado: Estado; n: number; peso: number }>();
+  for (const f of filas) {
+    const o = nodo("origen", ...f.o), v = f.v ? nodo("paso", f.v[0], f.v[1], "") : null, d = nodo("destino", ...f.d);
+    const k = `${o}|${v}|${d}`;
+    const g = grupos.get(k) ?? { o, v, d, servicios: [], estado: "permitido" as Estado, n: 0, peso: 0 };
+    g.servicios.push(f.servicio); g.n++; g.peso += f.peso; if (f.estado === "revisar") g.estado = "revisar";
+    grupos.set(k, g);
+  }
+  const enlaces: Enlace[] = Array.from(grupos.values()).map((g, i) => ({
+    id: -(i + 1), origen_id: g.o, via_id: g.v, destino_id: g.d, servicio: unir(g.servicios, 4) || null, estado: g.estado, nota: nota(g.n, g.peso),
+  }));
+  const lista = Array.from(nodos.values()).sort((a, b) => (a.grupo ?? "").localeCompare(b.grupo ?? "") || a.nombre.localeCompare(b.nombre));
+  return { nodos: lista, enlaces };
+}
+
 const falta = (m: string) => (m.includes("red_conect") ? "Falta ejecutar conectividad.sql en Supabase." : m);
 
 export default function MapaConectividad() {
   const { esAdmin } = usePerfil();
-  const [nodos, setNodos] = useState<Nodo[]>([]);
-  const [enlaces, setEnlaces] = useState<Enlace[]>([]);
+  const [nodosM, setNodos] = useState<Nodo[]>([]);
+  const [enlacesM, setEnlaces] = useState<Enlace[]>([]);
+  const [modo, setModo] = useState<Modo>("firewall");
+  const [politicas, setPoliticas] = useState<Politica[]>([]);
+  const [accesos, setAccesos] = useState<Acceso[]>([]);
+  const [redes, setRedes] = useState<Red[]>([]);
+  const [sinDatos, setSinDatos] = useState<Partial<Record<Modo, string>>>({});
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
@@ -40,15 +88,52 @@ export default function MapaConectividad() {
 
   async function cargar() {
     const sb = createClient();
-    const [n, e] = await Promise.all([
+    const desde = new Date(Date.now() - 30 * 86400000).toISOString();
+    const [n, e, pol, acc, red] = await Promise.all([
       sb.from("red_conect_nodos").select("*").order("grupo").order("orden").order("nombre"),
       sb.from("red_conect_enlaces").select("*").order("id"),
+      sb.from("fg_politicas").select("equipo,id,nombre,desde,hacia,origen,destino,servicio,hits").eq("estado", "enable").eq("accion", "accept").limit(2000),
+      sb.from("srv_accesos").select("hostname,usuario,logon_type,ip,origen").eq("tipo", "inicio").gte("fecha", desde).order("fecha", { ascending: false }).limit(5000),
+      sb.from("inv_redes").select("nombre,sede,cidr,tipo"),
     ]);
+    setPoliticas((pol.data ?? []) as Politica[]); setAccesos((acc.data ?? []) as Acceso[]); setRedes((red.data ?? []) as Red[]);
+    setSinDatos({
+      firewall: pol.error ? "No se pudieron leer las políticas del FortiGate (¿tenés la solapa de red y el puente del FortiGate configurado?)." : undefined,
+      accesos: acc.error ? "No se pudieron leer los accesos a servidores (hace falta tener habilitada la solapa Servidores)." : undefined,
+    });
     const err = n.error ?? e.error;
     if (err) setError(falta(err.message));
     setNodos((n.data ?? []) as Nodo[]); setEnlaces((e.data ?? []) as Enlace[]); setCargando(false);
   }
   useEffect(() => { cargar(); }, []);
+
+  // Vistas automáticas: se calculan con lo que la app ya tiene cargado
+  const auto = useMemo(() => {
+    const firewall = armar(politicas.map((p) => {
+      const todo = (v: string | null) => !v || /^all$/i.test(v.trim());
+      return {
+        o: [todo(p.origen) ? `Toda la red ${p.desde ?? ""}`.trim() : p.origen!, p.desde ?? "", p.equipo] as [string, string, string],
+        v: [p.equipo, "FortiGate"] as [string, string],
+        d: [todo(p.destino) ? `Toda la red ${p.hacia ?? ""}`.trim() : p.destino!, p.hacia ?? "", p.equipo] as [string, string, string],
+        servicio: p.servicio ?? "", estado: (/(^|,\s*)all($|,)/i.test(p.servicio ?? "") ? "revisar" : "permitido") as Estado, peso: Number(p.hits ?? 0),
+      };
+    }), (n, hits) => `${n} ${n === 1 ? "política" : "políticas"} · ${hits.toLocaleString("es-AR")} usos`);
+    const vpn = redes.find((r) => r.tipo === "vpn");
+    const observados = armar(accesos.filter((a) => a.hostname).map((a) => {
+      const ip = (a.ip ?? "").trim();
+      const red = ip ? redes.find((r) => enRed(ip, r.cidr)) : undefined;
+      const local = !ip || ip === "-" || ip === "127.0.0.1" || ip === "::1";
+      return {
+        o: (red ? [red.nombre, red.cidr, red.sede] : local ? ["Consola del servidor", "", "Sin red"] : ["Red no identificada", ip, "Sin red"]) as [string, string, string],
+        v: red?.tipo === "vpn" && vpn ? [vpn.nombre, "VPN"] as [string, string] : null,
+        d: [a.hostname!, "", "Servidores"] as [string, string, string],
+        servicio: a.logon_type === 10 ? "RDP" : a.logon_type === 2 ? "Consola" : a.logon_type === 11 ? "Credenciales en caché" : "", estado: (red || local ? "permitido" : "revisar") as Estado, peso: 1,
+      };
+    }), (n) => `${n} ${n === 1 ? "inicio de sesión" : "inicios de sesión"} en 30 días`);
+    return { firewall, accesos: observados };
+  }, [politicas, accesos, redes]);
+  const { nodos, enlaces } = modo === "manual" ? { nodos: nodosM, enlaces: enlacesM } : auto[modo];
+  const edita = esAdmin && editar && modo === "manual";
 
   const porId = useMemo(() => new Map(nodos.map((n) => [n.id, n])), [nodos]);
 
@@ -111,7 +196,7 @@ export default function MapaConectividad() {
     setFEnlace({ ...fEnlace, destino: "", servicio: "", nota: "" }); cargar();
   }
   async function quitarNodo(n: Nodo) {
-    const usados = enlaces.filter((e) => e.origen_id === n.id || e.destino_id === n.id).length;
+    const usados = enlacesM.filter((e) => e.origen_id === n.id || e.destino_id === n.id).length;
     if (!confirm(`¿Quitar "${n.nombre}" del mapa?${usados ? ` Se borran también sus ${usados} conexiones.` : ""}`)) return;
     const { error } = await createClient().from("red_conect_nodos").delete().eq("id", n.id);
     if (error) return setError(error.message);
@@ -157,20 +242,28 @@ export default function MapaConectividad() {
           <h1 className="font-display text-2xl text-ink">Mapa de conectividad</h1>
           <p className="text-ink/60 text-sm mt-1">Desde dónde se conectan los equipos, por dónde pasan y a qué servidores llegan.</p>
         </div>
-        {esAdmin && <button className="btn-secondary" onClick={() => setEditar(!editar)} aria-expanded={editar}>{editar ? "Cerrar edición" : "Editar mapa"}</button>}
+        {esAdmin && modo === "manual" && <button className="btn-secondary" onClick={() => setEditar(!editar)} aria-expanded={editar}>{editar ? "Cerrar edición" : "Editar mapa"}</button>}
       </div>
 
-      {error && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
+      <div role="tablist" className="flex gap-1 border-b border-line/[0.08] flex-wrap">
+        {MODOS.map((m) => (
+          <button key={m.id} role="tab" aria-selected={modo === m.id} onClick={() => { setModo(m.id); setSel(null); setFiltro(""); }}
+            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${modo === m.id ? "border-brand-600 text-brand-700" : "border-transparent text-ink/60 hover:text-ink"}`}>{m.titulo}</button>
+        ))}
+      </div>
+      <p className="text-sm text-ink/60">{MODOS.find((m) => m.id === modo)!.ayuda}</p>
+
+      {error && modo === "manual" && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
       {aviso && <p role="status" className="text-sm text-emerald-700 bg-emerald-50 rounded-md px-3 py-2">{aviso}</p>}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card p-4"><div className="text-xs text-ink/50">Conexiones</div><div className="font-display text-3xl mt-1 text-ink">{enlaces.length}</div></div>
         <div className="card p-4"><div className="text-xs text-ink/50">Permitidas</div><div className="font-display text-3xl mt-1 text-emerald-600">{cuenta("permitido")}</div></div>
-        <div className="card p-4"><div className="text-xs text-ink/50">Con aprobación</div><div className="font-display text-3xl mt-1 text-amber-600">{cuenta("restringido")}</div></div>
+        <div className="card p-4"><div className="text-xs text-ink/50">{modo === "manual" ? "Con aprobación" : "Puntos en el mapa"}</div><div className={`font-display text-3xl mt-1 ${modo === "manual" ? "text-amber-600" : "text-ink"}`}>{modo === "manual" ? cuenta("restringido") : nodos.length}</div></div>
         <div className="card p-4"><div className="text-xs text-ink/50">A revisar</div><div className={`font-display text-3xl mt-1 ${cuenta("revisar") ? "text-red-600" : "text-ink"}`}>{cuenta("revisar")}</div></div>
       </div>
 
-      {esAdmin && (editar || vacio) && (
+      {esAdmin && modo === "manual" && (editar || vacio) && (
         <div className="card p-5 space-y-5">
           <div>
             <h2 className="font-medium text-ink">1. Puntos del mapa</h2>
@@ -250,7 +343,9 @@ export default function MapaConectividad() {
         </div>
       )}
 
-      {vacio && !esAdmin && <div className="card p-6 text-sm text-ink/60">Todavía no hay nada cargado en el mapa. Un administrador lo arma desde esta pantalla.</div>}
+      {vacio && modo === "manual" && !esAdmin && <div className="card p-6 text-sm text-ink/60">Todavía no hay nada cargado en el mapa. Un administrador lo arma desde esta pantalla.</div>}
+      {vacio && modo === "firewall" && <div className="card p-6 text-sm text-ink/60">{sinDatos.firewall ?? "Todavía no hay políticas del FortiGate en la app. Llegan con el puente del FortiGate (Perímetro → FortiGate)."}</div>}
+      {vacio && modo === "accesos" && <div className="card p-6 text-sm text-ink/60">{sinDatos.accesos ?? "Todavía no hay inicios de sesión registrados. Los informa el agente instalado en cada servidor (Infraestructura → Accesos a servidores)."}</div>}
 
       {nodos.length > 0 && (
         <>
@@ -265,7 +360,7 @@ export default function MapaConectividad() {
 
           <div className="card overflow-hidden">
             <div className="flex items-center gap-3 px-4 py-2 border-b border-line/[0.06] text-xs text-ink/60 flex-wrap">
-              {(Object.keys(ESTADOS) as Estado[]).map((k) => (
+              {(Object.keys(ESTADOS) as Estado[]).filter((k) => modo === "manual" || k !== "restringido").map((k) => (
                 <span key={k} className="flex items-center gap-1"><i className="h-0.5 w-5 inline-block" style={{ background: ESTADOS[k].color }} aria-hidden />{ESTADOS[k].texto}</span>
               ))}
               <span className="flex items-center gap-1"><i className="w-5 inline-block border-t-2 border-dashed border-line/40" aria-hidden />Directo (sin paso intermedio)</span>
@@ -318,7 +413,7 @@ export default function MapaConectividad() {
                   {COLUMNAS.find((c) => c.id === elegido.columna)!.titulo}{elegido.detalle ? <> · <span className="font-mono">{elegido.detalle}</span></> : null}{elegido.grupo ? ` · ${elegido.grupo}` : ""}
                 </p>
               </div>
-              {esAdmin && editar && <button className="text-sm text-ink/50 hover:text-red-600" onClick={() => quitarNodo(elegido)}>Quitar del mapa</button>}
+              {edita && <button className="text-sm text-ink/50 hover:text-red-600" onClick={() => quitarNodo(elegido)}>Quitar del mapa</button>}
             </div>
           )}
 
@@ -330,7 +425,7 @@ export default function MapaConectividad() {
                   <th scope="col" className="px-4 py-2 font-medium">Desde</th><th scope="col" className="px-4 py-2 font-medium">Pasa por</th>
                   <th scope="col" className="px-4 py-2 font-medium">Llega a</th><th scope="col" className="px-4 py-2 font-medium">Servicio</th>
                   <th scope="col" className="px-4 py-2 font-medium">Estado</th><th scope="col" className="px-4 py-2 font-medium">Nota</th>
-                  {esAdmin && editar && <th scope="col" className="px-4 py-2"><span className="sr-only">Acciones</span></th>}
+                  {edita && <th scope="col" className="px-4 py-2"><span className="sr-only">Acciones</span></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-line/[0.05]">
@@ -341,14 +436,14 @@ export default function MapaConectividad() {
                     <td className="px-4 py-2 text-ink font-medium">{porId.get(e.destino_id)?.nombre ?? "—"}</td>
                     <td className="px-4 py-2 font-mono text-xs text-ink/70">{e.servicio ?? "—"}</td>
                     <td className="px-4 py-2">
-                      {esAdmin && editar ? (
+                      {edita ? (
                         <select className="input w-auto py-1" value={e.estado} onChange={(ev) => cambiarEstado(e.id, ev.target.value as Estado)} aria-label="Estado de la conexión">
                           {(Object.keys(ESTADOS) as Estado[]).map((k) => <option key={k} value={k}>{ESTADOS[k].texto}</option>)}
                         </select>
                       ) : <span className={`pill ${ESTADOS[e.estado]?.pill ?? ""}`}>{ESTADOS[e.estado]?.texto ?? e.estado}</span>}
                     </td>
                     <td className="px-4 py-2 text-ink/60">{e.nota ?? ""}</td>
-                    {esAdmin && editar && <td className="px-4 py-2 text-right"><button className="text-xs text-ink/40 hover:text-red-600" onClick={() => quitarEnlace(e.id)}>Quitar</button></td>}
+                    {edita && <td className="px-4 py-2 text-right"><button className="text-xs text-ink/40 hover:text-red-600" onClick={() => quitarEnlace(e.id)}>Quitar</button></td>}
                   </tr>
                 ))}
                 {visibles.length === 0 && (
