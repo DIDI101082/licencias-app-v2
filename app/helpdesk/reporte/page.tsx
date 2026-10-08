@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { exportarExcel } from "@/lib/excel";
+import { clavePersona, esAjena } from "@/lib/helpdesk-personas";
 
 // Reporte de estado de los tickets del helpdesk: resumen, por sector, por persona, por estado y
 // detalle de todo lo que sigue sin cerrar. Se puede imprimir o guardar como PDF, y exportar a Excel.
@@ -18,8 +19,6 @@ const slaVencidoRe = /vencido|escalado/i;
 const sectoresDe = (t: Ticket): string[] => (t.sector ? String(t.sector).split(", ").filter(Boolean) : []);
 // Varias personas asignadas vienen separadas con "; " (cada nombre es "Apellido, Nombre")
 const personasDe = (t: Ticket): string[] => (t.asignado ? String(t.asignado).split("; ").map((x) => x.trim()).filter(Boolean) : []);
-// Para comparar nombres de personas sin que importen mayúsculas, acentos, comas ni el orden ("Apellido, Nombre" o "Nombre Apellido")
-const clavePersona = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").sort().join(" ");
 const fecha = (v: string | number | null) => (v ? new Date(v).toLocaleDateString("es-AR", { timeZone: TZ }) : "—");
 const promedio = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 function duracion(ms: number | null) {
@@ -128,7 +127,8 @@ export default function ReporteHelpdesk() {
     return {
       total: medir("Total", lista),
       porSector: agrupar((t) => (sectoresDe(t).length ? sectoresDe(t) : ["Sin sector"])),
-      porPersona: agrupar((t) => (personasDe(t).length ? personasDe(t) : ["Sin asignar"])),
+      // Sin las personas ajenas a los sectores (lib/helpdesk-personas.ts)
+      porPersona: agrupar((t) => (personasDe(t).length ? personasDe(t).filter((p) => !esAjena(p)) : ["Sin asignar"])),
       porEstado: Array.from(est.entries()).sort((a, b) => b[1] - a[1]),
       sinCerrar: sin,
     };
@@ -136,7 +136,8 @@ export default function ReporteHelpdesk() {
   }, [tickets, bandeja, periodo, diasQuieto]);
 
   // Tiempo de primera respuesta: solo los sectores del área, con la opción de ver uno solo.
-  // En "por quién respondió primero" entran únicamente las personas de esos sectores (las que tienen tickets asignados ahí).
+  // En "por quién respondió primero" entran únicamente las personas de esos sectores (las que tienen tickets asignados ahí),
+  // menos las marcadas como ajenas en lib/helpdesk-personas.ts.
   const sectoresResp = porSector.map((f) => f.clave).filter((k) => k !== "Sin sector").sort((a, b) => a.localeCompare(b, "es"));
   const sectorR = sectorResp && sectoresResp.includes(sectorResp) ? sectorResp : null;
   const { totalR, sectoresR, respondieron, ajenos } = useMemo(() => {
@@ -146,11 +147,12 @@ export default function ReporteHelpdesk() {
     listaR.forEach((t) => { if (t.primera_resp_autor) { const k = String(t.primera_resp_autor); const a = m.get(k) ?? []; a.push(t); m.set(k, a); } });
     // Por quién dio la primera respuesta (no por quién está asignado), del más lento al más rápido
     const todosResp = Array.from(m.entries()).map(([k, xs]) => medir(k, xs)).filter((f) => f.respN > 0).sort((a, b) => (b.resp ?? 0) - (a.resp ?? 0));
-    const fuera = todosResp.filter((f) => !delArea.has(clavePersona(f.clave)));
+    const esDelArea = (f: Fila) => delArea.has(clavePersona(f.clave)) && !esAjena(f.clave);
+    const fuera = todosResp.filter((f) => !esDelArea(f));
     return {
       totalR: sectorR ? medir("Total", listaR) : total,
       sectoresR: porSector.filter((f) => f.respN > 0 && f.clave !== "Sin sector" && (!sectorR || f.clave === sectorR)).sort((a, b) => (b.resp ?? 0) - (a.resp ?? 0)),
-      respondieron: todosResp.filter((f) => delArea.has(clavePersona(f.clave))),
+      respondieron: todosResp.filter(esDelArea),
       ajenos: { personas: fuera.length, tickets: fuera.reduce((n, f) => n + f.respN, 0) },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
