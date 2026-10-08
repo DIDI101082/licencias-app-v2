@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
+import EsquemaFisico from "@/components/EsquemaFisico";
 
 // Mapa de conectividad: desde dónde se conectan los equipos, por dónde pasan y a qué servidores llegan.
-// Tres vistas: lo que permite el firewall (políticas del FortiGate), lo que se usó (accesos a servidores) y la carga manual.
+// Cuatro vistas: el esquema físico (WAN → FortiGate → switches → servidores y antenas), lo que permite el firewall (políticas del FortiGate), lo que se usó (accesos a servidores) y la carga manual.
 type Columna = "origen" | "paso" | "destino";
 type Estado = "permitido" | "restringido" | "revisar";
 type Nodo = { id: number; columna: Columna; nombre: string; detalle: string | null; grupo: string | null; orden: number };
@@ -23,8 +24,9 @@ const ESTADOS: Record<Estado, { texto: string; color: string; pill: string }> = 
 };
 const N = { w: 210, h: 50, gy: 12, gcol: 150, titulo: 34, grupo: 22 };
 const corto = (t: string, n: number) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
-type Modo = "firewall" | "accesos" | "manual";
+type Modo = "fisico" | "firewall" | "accesos" | "manual";
 const MODOS: { id: Modo; titulo: string; ayuda: string }[] = [
+  { id: "fisico", titulo: "Esquema físico", ayuda: "Qué enlaces WAN entran a cada FortiGate, a qué switches baja y qué servidores y antenas cuelgan de cada switch. Se arma solo con lo que informan el FortiGate, los switches y UniFi." },
   { id: "firewall", titulo: "Permitido por el firewall", ayuda: "Se arma solo con las políticas activas de cada FortiGate. En rojo, las que dejan pasar cualquier servicio (ALL)." },
   { id: "accesos", titulo: "Accesos observados", ayuda: "Se arma solo con los inicios de sesión de los últimos 30 días en los servidores que tienen el agente." },
   { id: "manual", titulo: "Manual", ayuda: "Lo que cargó un administrador." },
@@ -71,7 +73,7 @@ export default function MapaConectividad() {
   const { esAdmin } = usePerfil();
   const [nodosM, setNodos] = useState<Nodo[]>([]);
   const [enlacesM, setEnlaces] = useState<Enlace[]>([]);
-  const [modo, setModo] = useState<Modo>("firewall");
+  const [modo, setModo] = useState<Modo>("fisico");
   const [politicas, setPoliticas] = useState<Politica[]>([]);
   const [accesos, setAccesos] = useState<Acceso[]>([]);
   const [redes, setRedes] = useState<Red[]>([]);
@@ -132,7 +134,7 @@ export default function MapaConectividad() {
     }), (n) => `${n} ${n === 1 ? "inicio de sesión" : "inicios de sesión"} en 30 días`);
     return { firewall, accesos: observados };
   }, [politicas, accesos, redes]);
-  const { nodos, enlaces } = modo === "manual" ? { nodos: nodosM, enlaces: enlacesM } : auto[modo];
+  const { nodos, enlaces } = modo === "manual" ? { nodos: nodosM, enlaces: enlacesM } : modo === "fisico" ? { nodos: [] as Nodo[], enlaces: [] as Enlace[] } : auto[modo];
   const edita = esAdmin && editar && modo === "manual";
 
   const porId = useMemo(() => new Map(nodos.map((n) => [n.id, n])), [nodos]);
@@ -240,7 +242,7 @@ export default function MapaConectividad() {
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-display text-2xl text-ink">Mapa de conectividad</h1>
-          <p className="text-ink/60 text-sm mt-1">Desde dónde se conectan los equipos, por dónde pasan y a qué servidores llegan.</p>
+          <p className="text-ink/60 text-sm mt-1">Cómo está conectada la red y desde dónde se llega a los servidores.</p>
         </div>
         {esAdmin && modo === "manual" && <button className="btn-secondary" onClick={() => setEditar(!editar)} aria-expanded={editar}>{editar ? "Cerrar edición" : "Editar mapa"}</button>}
       </div>
@@ -256,12 +258,14 @@ export default function MapaConectividad() {
       {error && modo === "manual" && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">{error}</p>}
       {aviso && <p role="status" className="text-sm text-emerald-700 bg-emerald-50 rounded-md px-3 py-2">{aviso}</p>}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {modo === "fisico" && <EsquemaFisico />}
+
+      {modo !== "fisico" && <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card p-4"><div className="text-xs text-ink/50">Conexiones</div><div className="font-display text-3xl mt-1 text-ink">{enlaces.length}</div></div>
         <div className="card p-4"><div className="text-xs text-ink/50">Permitidas</div><div className="font-display text-3xl mt-1 text-emerald-600">{cuenta("permitido")}</div></div>
         <div className="card p-4"><div className="text-xs text-ink/50">{modo === "manual" ? "Con aprobación" : "Puntos en el mapa"}</div><div className={`font-display text-3xl mt-1 ${modo === "manual" ? "text-amber-600" : "text-ink"}`}>{modo === "manual" ? cuenta("restringido") : nodos.length}</div></div>
         <div className="card p-4"><div className="text-xs text-ink/50">A revisar</div><div className={`font-display text-3xl mt-1 ${cuenta("revisar") ? "text-red-600" : "text-ink"}`}>{cuenta("revisar")}</div></div>
-      </div>
+      </div>}
 
       {esAdmin && modo === "manual" && (editar || vacio) && (
         <div className="card p-5 space-y-5">
