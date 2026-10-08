@@ -35,9 +35,10 @@ type Enlace = {
 type Top = { equipo: string; tipo: string; nombre: string; bytes: number | null; sesiones: number | null; bps: number | null };
 type Sdwan = { equipo: string; chequeo: string; enlace: string; estado: string | null; latencia: number | null; jitter: number | null; perdida: number | null };
 
-type Vista = "resumen" | "configuracion" | "cambios" | "vpn" | "amenazas" | "licencias" | "sdwan";
+type Vista = "resumen" | "configuracion" | "cambios" | "vpn" | "accesos" | "amenazas" | "licencias" | "sdwan";
+type Acceso = { id: number; equipo: string; fecha: string; tipo: "inicio" | "fallo" | "cierre"; usuario: string; ip: string; via: string | null; motivo: string | null };
 const VISTAS: [Vista, string][] = [
-  ["resumen", "Resumen"], ["configuracion", "Configuración"], ["cambios", "Cambios"], ["vpn", "VPN"],
+  ["resumen", "Resumen"], ["configuracion", "Configuración"], ["cambios", "Cambios"], ["vpn", "VPN"], ["accesos", "Inicios de sesión"],
   ["amenazas", "Amenazas"], ["licencias", "Licencias y certificados"], ["sdwan", "Enlaces y consumo"],
 ];
 
@@ -90,6 +91,10 @@ function Contenido() {
   const [vpn, setVpn] = useState<Vpn[]>([]);
   const [fallos, setFallos] = useState<Fallo[]>([]);
   const [amenazas, setAmenazas] = useState<Amenaza[]>([]);
+  const [accesos, setAccesos] = useState<Acceso[]>([]);
+  const [faltaAccesos, setFaltaAccesos] = useState(false);
+  const [alertarLogins, setAlertarLogins] = useState<boolean | null>(null);
+  const [verCierres, setVerCierres] = useState(false);
   const [licencias, setLicencias] = useState<Licencia[]>([]);
   const [certificados, setCertificados] = useState<Certificado[]>([]);
   const [sdwan, setSdwan] = useState<Sdwan[]>([]);
@@ -115,7 +120,7 @@ function Contenido() {
   const cargar = useCallback(async () => {
     const sb = createClient();
     const desde = new Date(Date.now() - 7 * 86400000).toISOString();
-    const [e, q, h, p, c, v, f, a, l, ce, s, en, tp, it] = await Promise.all([
+    const [e, q, h, p, c, v, f, a, l, ce, s, en, tp, it, ac, al] = await Promise.all([
       sb.rpc("fg_estado"),
       sb.from("fg_equipos_vista").select("*").order("nombre"),
       sb.from("fg_hallazgos").select("*"),
@@ -130,6 +135,8 @@ function Contenido() {
       sb.from("fg_enlaces").select("equipo,interfaz,nombre,bajada_mbps,subida_mbps,respaldo,velocidad_puerto,conectado,rx_bps,tx_bps,actualizado").order("interfaz"),
       sb.from("fg_top").select("*").order("bytes", { ascending: false }),
       sb.from("fg_interfaces").select("equipo,nombre,alias,rol"),
+      sb.from("fg_admin_logins").select("*").gte("fecha", new Date(Date.now() - 30 * 86400000).toISOString()).order("fecha", { ascending: false }).limit(2000),
+      sb.rpc("fg_logins_config"),
     ]);
     const err = e.error ?? q.error;
     setError(err ? (/fg_/.test(err.message) ? "Falta ejecutar supabase/fortigate.sql en Supabase." : err.message) : null);
@@ -141,6 +148,8 @@ function Contenido() {
     setVpn((v.data ?? []) as Vpn[]);
     setFallos((f.data ?? []) as Fallo[]);
     setAmenazas((a.data ?? []) as Amenaza[]);
+    setAccesos((ac.data ?? []) as Acceso[]); setFaltaAccesos(!!ac.error);
+    setAlertarLogins(al.error ? null : (al.data as boolean | null));
     setLicencias((l.data ?? []) as Licencia[]);
     setCertificados((ce.data ?? []) as Certificado[]);
     setSdwan((s.data ?? []) as Sdwan[]);
@@ -171,6 +180,7 @@ function Contenido() {
     { t: "Vulnerabilidades explotadas (KEV)", n: kev, c: kev ? "text-red-600" : "text-ink", ir: "" },
     { t: "Configuración riesgosa (crítica o alta)", n: graves.length, c: graves.length ? "text-red-600" : "text-ink", ir: "vista=configuracion" },
     { t: "Intentos fallidos de VPN (24 h)", n: fallos24.length, c: fallos24.length >= (estado?.umbral_fallos ?? 10) ? "text-amber-700" : "text-ink", ir: "vista=vpn" },
+    { t: "Inicios de sesión de administración (24 h)", n: accesos.filter((x) => x.tipo === "inicio" && Date.parse(x.fecha) > ahora - 86400000).length, c: "text-ink", ir: "vista=accesos" },
     { t: "Amenazas no bloqueadas (24 h)", n: noBloqueadas.length, c: noBloqueadas.length ? "text-red-600" : "text-ink", ir: "vista=amenazas" },
     { t: "Licencias y certificados por vencer", n: porVencer.length, c: porVencer.length ? "text-amber-700" : "text-ink", ir: "vista=licencias" },
   ];
@@ -616,6 +626,59 @@ function Contenido() {
           </p>
         </div>
       )}
+
+      {/* Inicios de sesión de administración */}
+      {vista === "accesos" && (() => {
+        const lista = accesos.filter((x) => deEquipo(x.equipo) && (verCierres || x.tipo !== "cierre") && coincide(x.usuario, x.ip, x.via, x.equipo, x.motivo));
+        const dia = accesos.filter((x) => deEquipo(x.equipo) && Date.parse(x.fecha) > ahora - 86400000);
+        const PILL = { inicio: ["Inició sesión", "bg-emerald-50 text-emerald-700"], fallo: ["Falló", "bg-red-50 text-red-600"], cierre: ["Cerró sesión", "bg-line/[0.05] text-ink/60"] } as const;
+        return (
+          <div className="space-y-4">
+            {faltaAccesos && <p role="alert" className="text-sm text-amber-800 bg-amber-500/10 rounded-md px-3 py-2">Falta ejecutar supabase/fortigate-accesos.sql en Supabase.</p>}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="card p-4"><div className="text-xs text-ink/50">Inicios de sesión (24 h)</div><div className="font-display text-3xl mt-1 text-ink">{dia.filter((x) => x.tipo === "inicio").length}</div></div>
+              <div className="card p-4"><div className="text-xs text-ink/50">Intentos fallidos (24 h)</div><div className={`font-display text-3xl mt-1 ${dia.some((x) => x.tipo === "fallo") ? "text-red-600" : "text-ink"}`}>{dia.filter((x) => x.tipo === "fallo").length}</div></div>
+              <div className="card p-4"><div className="text-xs text-ink/50">Usuarios distintos (30 días)</div><div className="font-display text-3xl mt-1 text-ink">{new Set(accesos.filter((x) => deEquipo(x.equipo) && x.tipo === "inicio").map((x) => x.usuario)).size}</div></div>
+              <div className="card p-4"><div className="text-xs text-ink/50">Orígenes distintos (30 días)</div><div className="font-display text-3xl mt-1 text-ink">{new Set(accesos.filter((x) => deEquipo(x.equipo) && x.tipo === "inicio" && x.ip).map((x) => x.ip)).size}</div></div>
+            </div>
+            <div className="card overflow-x-auto">
+              <div className="px-4 pt-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="font-medium text-ink">Quién entró a la administración <span className="text-sm font-normal text-ink/50">(últimos 30 días)</span></div>
+                <div className="flex flex-wrap items-center gap-4 text-sm text-ink/70">
+                  <label className="flex items-center gap-1.5"><input type="checkbox" checked={verCierres} onChange={(e) => setVerCierres(e.target.checked)} /> Mostrar cierres de sesión</label>
+                  {esAdmin && alertarLogins !== null && (
+                    <label className="flex items-center gap-1.5">
+                      <input type="checkbox" checked={alertarLogins} onChange={async (e) => { const v = e.target.checked; setAlertarLogins(v); await createClient().rpc("fg_logins_config_guardar", { p_alertar: v }); }} />
+                      Avisar cada inicio de sesión
+                    </label>
+                  )}
+                </div>
+              </div>
+              <table className="data w-full">
+                <thead><tr><th>Fecha</th><th>FortiGate</th><th>Usuario</th><th>Resultado</th><th>Desde</th><th>Por</th><th>Detalle</th></tr></thead>
+                <tbody>
+                  {!lista.length && vacio(7, accesos.length ? "Nada coincide con el filtro." : "Sin datos todavía. Hace falta el puente 1.5 (generá el instalador de nuevo) y que el usuario de API pueda leer Log & Report.")}
+                  {lista.slice(0, 500).map((x) => (
+                    <tr key={x.id}>
+                      <td className="text-sm whitespace-nowrap">{new Date(x.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} <span className="text-xs text-ink/50">· {hace(x.fecha, ahora)}</span></td>
+                      <td className="text-sm">{x.equipo}</td>
+                      <td className="text-sm font-medium">{x.usuario || "—"}</td>
+                      <td><span className={`pill ${PILL[x.tipo][1]}`}>{PILL[x.tipo][0]}</span></td>
+                      <td className="text-sm font-mono">{x.ip || "—"}</td>
+                      <td className="text-sm text-ink/70">{x.via || "—"}</td>
+                      <td className="text-xs text-ink/60 max-w-sm">{x.motivo || ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-ink/50">
+              Se leen del log de eventos de cada FortiGate en cada reporte del puente. No se cuentan las consultas por API (las hace el propio puente).
+              El aviso de cada inicio de sesión se envía solo si las alertas del FortiGate están activadas en «Configurar».
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Amenazas */}
       {vista === "amenazas" && (

@@ -7,7 +7,7 @@
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_FORTIGATE_VERSION = "1.4";
+export const PUENTE_FORTIGATE_VERSION = "1.5";
 
 export type EquipoFortiGate = {
   nombre: string;       // cómo se va a ver en la app (ej. "Reconquista")
@@ -297,6 +297,20 @@ function Consultar-FortiGate($eq) {
     [ordered]@{ fecha = (Prop $_ 'eventtime'); fecha_txt = ([string](Prop $_ 'date') + ' ' + [string](Prop $_ 'time')); usuario = [string](Prop $_ 'user'); ip = [string](Prop $_ 'remip'); motivo = [string](Prop $_ 'reason'); accion = [string](Prop $_ 'action') }
   })
 
+  # Administracion: inicios de sesion, intentos fallidos y cierres de las ultimas 2 horas (log de eventos del sistema).
+  # No se cuentan las consultas por API (las hace este mismo puente).
+  $la = Logs $eq 'event/system' 2000 $desde
+  $usuariosApi = @()
+  try { $usuariosApi = @(@(Prop (Api $eq '/api/v2/cmdb/system/api-user') 'results') | ForEach-Object { [string](Prop $_ 'name') } | Where-Object { $_ }) } catch {}
+  $r.admin_logins = @($la.filas | Where-Object { ($usuariosApi -notcontains [string](Prop $_ 'user')) -and ([string](Prop $_ 'logdesc') -match '^Admin (login|logout)' -or [string](Prop $_ 'logid') -match '^01000320(01|02|03|21)$') -and [string](Prop $_ 'ui') -notmatch '^api' -and [string](Prop $_ 'method') -notmatch '^api' } | Select-Object -First 300 | ForEach-Object {
+    $desc = [string](Prop $_ 'logdesc'); $lid = [string](Prop $_ 'logid'); $tipo = 'inicio'
+    if ($desc -match 'logout' -or $lid -match '32003$') { $tipo = 'cierre' } elseif ($desc -match 'fail|disabled' -or $lid -match '320(02|21)$' -or [string](Prop $_ 'status') -match 'fail') { $tipo = 'fallo' }
+    $ui = [string](Prop $_ 'ui'); $ip = [string](Prop $_ 'srcip'); $via = $ui
+    if ($ui -match '^([^()]+)[(]([^()]+)[)]') { $via = $Matches[1]; if (-not $ip) { $ip = $Matches[2] } }
+    $motivo = [string](Prop $_ 'reason'); if (-not $motivo -or $motivo -eq 'none') { $motivo = [string](Prop $_ 'msg') }
+    [ordered]@{ fecha = (Prop $_ 'eventtime'); fecha_txt = ([string](Prop $_ 'date') + ' ' + [string](Prop $_ 'time')); tipo = $tipo; usuario = [string](Prop $_ 'user'); ip = $ip; via = $via; motivo = $motivo }
+  })
+
   # Amenazas (IPS y antivirus) de las ultimas 2 horas
   $am = New-Object System.Collections.ArrayList
   foreach ($x in (Logs $eq @('ips', 'utm/ips') 300 $desde).filas) { [void]$am.Add([ordered]@{ tipo = 'IPS'; fecha = (Prop $x 'eventtime'); fecha_txt = ([string](Prop $x 'date') + ' ' + [string](Prop $x 'time')); severidad = [string](Prop $x 'severity'); nombre = [string](Prop $x 'attack'); accion = [string](Prop $x 'action'); origen = [string](Prop $x 'srcip'); destino = [string](Prop $x 'dstip'); usuario = [string](Prop $x 'user') }) }
@@ -382,6 +396,8 @@ try {
   $datos = [ordered]@{ version = $Version; equipos = $resultados }
   $cuerpo = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_datos":' + (ConvertTo-Json -InputObject $datos -Depth 8 -Compress) + '}'
   Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/fg_reportar') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpo)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 120 | Out-Null
+  # Inicios de sesion de administracion (si la app todavia no tiene fortigate-accesos.sql, se ignora)
+  try { Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/fg_reportar_logins') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpo)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 60 | Out-Null } catch {}
   $linea = 'OK ' + (Get-Date).ToString('s') + ' ' + (@($resultados | ForEach-Object { $_.nombre + ': ' + $(if ($_.ok) { 'responde' + $(if (@($_.avisos).Count) { ' (avisos: ' + (@($_.avisos) -join '; ') + ')' } else { '' }) } else { 'ERROR ' + $_.error }) }) -join ' | ')
   Set-Content -Path (Join-Path $Carpeta 'ultimo-envio.txt') -Value $linea
 }
