@@ -55,9 +55,12 @@ export default function EsquemaFisico() {
 
     // FortiGate (los que tienen más enlaces WAN primero) y sus WAN
     const wansDe = (eq: string): Wan[] => {
-      const l = d.wans.filter((w) => w.equipo === eq);
+      // Solo los enlaces a Internet: fg_enlaces también trae VLAN internas y túneles
+      const itf = (w: Wan) => d.ifs.find((i) => i.equipo === eq && i.nombre === w.interfaz);
+      const l = d.wans.filter((w) => w.equipo === eq && (itf(w)?.rol === "wan" || w.bajada_mbps != null || w.respaldo))
+        .map((w) => ({ ...w, nombre: w.nombre || itf(w)?.alias || null }));
       if (l.length) return l;
-      return d.ifs.filter((i) => i.equipo === eq && /wan/i.test(`${i.rol ?? ""} ${i.nombre ?? ""}`))
+      return d.ifs.filter((i) => i.equipo === eq && (i.rol === "wan" || /^wan\d*$/i.test(i.nombre ?? "")))
         .map((i) => ({ equipo: eq, interfaz: i.nombre, nombre: i.alias || null, bajada_mbps: null, subida_mbps: null, respaldo: false, conectado: i.estado ? /up/i.test(i.estado) : null }));
     };
     const fgs = [...d.fgs].sort((a, b) => wansDe(b.nombre).length - wansDe(a.nombre).length || a.nombre.localeCompare(b.nombre));

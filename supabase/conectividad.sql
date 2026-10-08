@@ -1,7 +1,7 @@
 -- ==========================================================
 -- Mapa de conectividad: desde dónde se conectan los equipos y a qué servidores llegan.
 --   Carga manual desde la app (Infraestructura → Mapa de conectividad).
--- Ejecutar UNA VEZ en el SQL Editor, DESPUÉS de red.sql.
+-- Ejecutar UNA VEZ en el SQL Editor, DESPUÉS de red.sql y switches.sql. Se puede repetir.
 -- ==========================================================
 
 -- Puntos del mapa: orígenes (desde dónde), pasos (por dónde) y destinos (a qué)
@@ -49,3 +49,6 @@ drop policy if exists red_conect_enlaces_admin on public.red_conect_enlaces;
 create policy red_conect_enlaces_admin on public.red_conect_enlaces for all to authenticated
   using (mi_rol() = 'administrador' and puede_ver('red'))
   with check (mi_rol() = 'administrador' and puede_ver('red'));
+
+-- Esquema: rol de cada switch (core o piso). Vacío = automático (nombre con "core" o vecino del FortiGate).
+alter table public.sw_switches add column if not exists rol text check (rol in ('core', 'piso'));
