@@ -70,8 +70,9 @@ function Dibujo({ tipo, color }: { tipo: Icono; color: string }) {
 
 // ---------- Árbol: de dónde cuelga cada equipo ----------
 // Claves: "fg:<nombre>" (FortiGate; lo que cuelga directo de él es el core), "sw:<id>" (switch SNMP), "u:<mac>" (UniFi), "vm" (VMware).
-type Eq = { key: string; tipo: "sw" | "usw" | "ap" | "vm"; nombre: string; sub: string; caido: boolean; pista: string; zona: string };
-type Rama = { id: string; icono: Icono; color: string; nombre: string; sub: string; caido: boolean; titulo?: string; hijos: Rama[] };
+type Eq = { key: string; tipo: "sw" | "usw" | "ap" | "vm"; nombre: string; sub: string; caido: boolean; pista: string; zona: string; aMano?: boolean; hoja?: boolean };
+type Rama = { id: string; icono: Icono; color: string; nombre: string; sub: string; caido: boolean; sinEstado?: boolean; titulo?: string; hijos: Rama[] };
+type Fila = { clave: string; padre: string; nombre?: string | null; tipo?: string | null; detalle?: string | null };
 
 const sinAcento = (s?: string | null) => (s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const GENERICAS = /^(fg|fgt|fgvm|forti|fortigate|fw|firewall|ha|cluster|accusys|\d+[a-z]?)$/;
@@ -79,7 +80,8 @@ const PASO = 150, ALTO_NIVEL = 150;
 
 export default function EsquemaSimple() {
   const { esAdmin } = usePerfil();
-  const [d, setD] = useState<{ fgs: any[]; wans: any[]; ifs: any[]; sws: any[]; puertos: any[]; disp: any[]; hosts: any[]; unifi: any[]; manual: Record<string, string> } | null>(null);
+  const [d, setD] = useState<{ fgs: any[]; wans: any[]; ifs: any[]; sws: any[]; puertos: any[]; disp: any[]; hosts: any[]; unifi: any[]; filas: Fila[]; manual: Record<string, string> } | null>(null);
+  const [nuevo, setNuevo] = useState({ nombre: "", detalle: "", tipo: "sw", padre: "" });
   const [editar, setEditar] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recarga, setRecarga] = useState(0);
@@ -95,10 +97,10 @@ export default function EsquemaSimple() {
       sb.from("sw_dispositivos_vista").select("mac,switch_id,unifi_nombre"),
       sb.from("virt_hosts").select("nombre,modelo,cluster,estado,salud").order("nombre"),
       sb.from("unifi_equipos").select("*").order("nombre"),
-      sb.from("red_esquema").select("clave,padre"),
+      sb.from("red_esquema").select("*"),
     ]).then(([fg, en, ifs, sw, pu, di, ho, un, ma]) =>
       setD({ fgs: fg.data ?? [], wans: en.data ?? [], ifs: ifs.data ?? [], sws: sw.data ?? [], puertos: pu.data ?? [], disp: di.data ?? [], hosts: ho.data ?? [], unifi: un.data ?? [],
-        manual: Object.fromEntries((ma.data ?? []).map((r: any) => [r.clave, r.padre])) }));
+        filas: (ma.data ?? []) as Fila[], manual: Object.fromEntries((ma.data ?? []).filter((r: any) => !String(r.clave).startsWith("wan:")).map((r: any) => [r.clave, r.padre])) }));
   }, [recarga]);
 
   async function guardar(clave: string, padre: string) {
@@ -109,16 +111,47 @@ export default function EsquemaSimple() {
     setRecarga((n) => n + 1);
   }
 
+  const falta = (msg: string) => (/red_esquema|nombre|tipo|detalle/.test(msg) ? "Falta ejecutar conectividad.sql en Supabase (versión nueva) para poder ajustar el esquema a mano." : msg);
+  // Equipo que no está monitoreado (por ejemplo, un switch sin SNMP): se dibuja igual, sin estado
+  async function agregar(ev: React.FormEvent) {
+    ev.preventDefault(); setError(null);
+    if (!nuevo.padre) return setError("Elegí de dónde cuelga el equipo.");
+    const { error } = await createClient().from("red_esquema").insert({ clave: `m:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, padre: nuevo.padre, nombre: nuevo.nombre.trim(), tipo: nuevo.tipo, detalle: nuevo.detalle.trim() || null });
+    if (error) return setError(falta(error.message));
+    setNuevo({ ...nuevo, nombre: "", detalle: "" }); setRecarga((n) => n + 1);
+  }
+  async function quitar(clave: string, nombre: string) {
+    if (!confirm(`¿Quitar "${nombre}" del esquema? Lo que colgaba de él vuelve a ubicarse solo.`)) return;
+    const sb = createClient();
+    await sb.from("red_esquema").delete().eq("padre", clave);
+    const { error } = await sb.from("red_esquema").delete().eq("clave", clave);
+    if (error) return setError(error.message);
+    setRecarga((n) => n + 1);
+  }
+  async function mover(clave: string, padre: string) {
+    const { error } = await createClient().from("red_esquema").update({ padre }).eq("clave", clave);
+    if (error) return setError(falta(error.message));
+    setRecarga((n) => n + 1);
+  }
+  // Nombre con el que se dibuja un enlace de Internet (vacío = el que informa el FortiGate)
+  async function nombrarWan(equipo: string, interfaz: string, nombre: string) {
+    const sb = createClient(); const clave = `wan:${equipo}:${interfaz}`;
+    const { error } = nombre.trim() ? await sb.from("red_esquema").upsert({ clave, padre: "wan", nombre: nombre.trim() }) : await sb.from("red_esquema").delete().eq("clave", clave);
+    if (error) return setError(falta(error.message));
+    setRecarga((n) => n + 1);
+  }
+
   const m = useMemo(() => {
     if (!d) return null;
+    const apodo = (eq: string, i: string) => d.filas.find((f) => f.clave === `wan:${eq}:${i}`)?.nombre || "";
     const itf = (eq: string, n: string) => d.ifs.find((i) => i.equipo === eq && i.nombre === n);
     // Solo los enlaces a Internet (igual que la pantalla del FortiGate): rol WAN, o con lo contratado cargado
     const wansDe = (eq: string): Item[] => {
       const l = d.wans.filter((w) => w.equipo === eq && (itf(eq, w.interfaz)?.rol === "wan" || w.bajada_mbps != null || w.respaldo));
-      if (l.length) return l.map((w) => ({ id: w.interfaz, nombre: w.nombre || itf(eq, w.interfaz)?.alias || w.interfaz, caido: w.conectado === false,
+      if (l.length) return l.map((w) => ({ id: w.interfaz, nombre: apodo(eq, w.interfaz) || w.nombre || itf(eq, w.interfaz)?.alias || w.interfaz, caido: w.conectado === false,
         sub: [w.nombre ? w.interfaz : "", w.bajada_mbps ? `${w.bajada_mbps}/${w.subida_mbps ?? "?"} Mb` : "", w.respaldo ? "respaldo" : ""].filter(Boolean).join(" · ") }));
       return d.ifs.filter((i) => i.equipo === eq && (i.rol === "wan" || /^wan\d*$/i.test(i.nombre ?? "")))
-        .map((i) => ({ id: i.nombre, nombre: i.alias || i.nombre, sub: i.alias ? i.nombre : "", caido: i.estado ? !/up/i.test(i.estado) : false }));
+        .map((i) => ({ id: i.nombre, nombre: apodo(eq, i.nombre) || i.alias || i.nombre, sub: i.alias || apodo(eq, i.nombre) ? i.nombre : "", caido: i.estado ? !/up/i.test(i.estado) : false }));
     };
     const num = (f: any) => Number(String(f.modelo ?? "").match(/\d+/)?.[0] ?? 0);
     const fgs = [...d.fgs].sort((a, b) => wansDe(b.nombre).length - wansDe(a.nombre).length || num(b) - num(a) || a.nombre.localeCompare(b.nombre));
@@ -139,6 +172,8 @@ export default function EsquemaSimple() {
       ...d.sws.map((s) => ({ key: `sw:${s.id}`, tipo: "sw" as const, nombre: s.nombre, sub: s.ip ?? "", caido: s.responde === false, pista: `${s.nombre} ${s.sys_nombre ?? ""} ${s.zona ?? ""} ${s.notas ?? ""}`, zona: norm(s.zona) })),
       ...d.unifi.filter((u) => u.tipo === "usw" || u.tipo === "uap").map((u) => ({ key: `u:${u.mac}`, tipo: (u.tipo === "usw" ? "usw" : "ap") as "usw" | "ap", nombre: u.nombre || u.modelo || u.mac, sub: u.modelo ?? "", caido: u.estado !== 1, pista: `${u.nombre ?? ""} ${u.sitio ?? ""} ${u.zona ?? ""}`, zona: norm(u.zona) })),
       ...(d.hosts.length ? [{ key: "vm", tipo: "vm" as const, nombre: "Servidores VMware", sub: `${d.hosts.length} ${d.hosts.length === 1 ? "host" : "hosts"}`, caido: d.hosts.some((h) => /disconn|notresp|not_resp|red/i.test(`${h.estado ?? ""} ${h.salud ?? ""}`)), pista: "", zona: "" }] : []),
+      // Agregados a mano (no monitoreados)
+      ...d.filas.filter((f) => f.clave.startsWith("m:") && f.nombre).map((f) => ({ key: f.clave, tipo: "sw" as const, nombre: f.nombre!, sub: f.detalle ?? "", caido: false, pista: "", zona: norm(f.nombre), aMano: true, hoja: f.tipo === "srv" })),
     ];
     const porKey = new Map(eqs.map((e) => [e.key, e]));
 
@@ -168,14 +203,14 @@ export default function EsquemaSimple() {
       const sw = vistoEn.get(u.mac) ?? lldp?.switch_id;
       const zona = norm(u.zona);
       // Una antena prefiere el switch UniFi de su zona; si no hay, el switch de piso de esa zona
-      const deZona = (t: Eq["tipo"]) => eqs.find((e) => e.key !== k && e.tipo === t && e.zona === zona);
+      const deZona = (t: Eq["tipo"]) => eqs.find((e) => e.key !== k && e.tipo === t && !e.hoja && (e.zona === zona || (!!e.aMano && e.zona.includes(zona))));
       const mismo = zona ? (u.tipo === "uap" ? deZona("usw") : undefined) ?? deZona("sw") : undefined;
       auto.set(k, sw != null ? `sw:${sw}` : mismo ? mismo.key : coreDe(sedeDe(`${u.nombre ?? ""} ${u.sitio ?? ""} ${u.zona ?? ""}`) ?? defecto));
     }
     if (porKey.has("vm") && defecto) auto.set("vm", coreDe(defecto));
 
     // ---- Manual por encima del automático (si arma un ciclo o apunta a algo que ya no existe, se ignora) ----
-    const valido = (k: string) => k.startsWith("fg:") ? fgs.some((f) => fgKey(f) === k) : porKey.has(k) && porKey.get(k)!.tipo !== "ap" && porKey.get(k)!.tipo !== "vm";
+    const valido = (k: string) => k.startsWith("fg:") ? fgs.some((f) => fgKey(f) === k) : porKey.has(k) && porKey.get(k)!.tipo !== "ap" && porKey.get(k)!.tipo !== "vm" && !porKey.get(k)!.hoja;
     const padre = new Map<string, string>(auto);
     const esManual = new Set<string>();
     for (const [k, p] of Object.entries(d.manual)) if (porKey.has(k) && p !== k && valido(p)) { padre.set(k, p); esManual.add(k); }
@@ -184,8 +219,8 @@ export default function EsquemaSimple() {
 
     const hijosDe = (k: string) => eqs.filter((e) => padre.get(e.key) === k);
     const rama = (e: Eq): Rama => ({
-      id: e.key, icono: e.tipo === "vm" ? "srv" : "sw", color: e.tipo === "vm" ? "#8B5CF6" : e.tipo === "usw" ? "#0EA5E9" : "rgb(var(--c-brand))",
-      nombre: e.nombre, sub: e.sub, caido: e.caido, titulo: e.tipo === "vm" ? d.hosts.map((h) => h.nombre.split(".")[0]).join(", ") : undefined, hijos: ramas([e.key]),
+      id: e.key, icono: e.tipo === "vm" || e.hoja ? "srv" : "sw", color: e.tipo === "vm" || e.hoja ? "#8B5CF6" : e.tipo === "usw" ? "#0EA5E9" : "rgb(var(--c-brand))",
+      nombre: e.nombre, sub: e.sub, caido: e.caido, sinEstado: e.aMano, titulo: e.tipo === "vm" ? d.hosts.map((h) => h.nombre.split(".")[0]).join(", ") : undefined, hijos: ramas([e.key]),
     });
     // Lo que cuelga de uno o varios padres: switches y VMware de a uno; las antenas, agrupadas en un solo ícono
     const ramas = (padres: string[]): Rama[] => {
@@ -199,25 +234,25 @@ export default function EsquemaSimple() {
       ];
     };
     const sedes = fgs.map((f) => {
-      const core = hijosDe(fgKey(f)).filter((e) => e.tipo === "sw" || e.tipo === "usw");
-      const sueltos = hijosDe(fgKey(f)).filter((e) => e.tipo === "ap" || e.tipo === "vm").map((e) => e.key);
+      const core = hijosDe(fgKey(f)).filter((e) => (e.tipo === "sw" || e.tipo === "usw") && !e.hoja);
+      const sueltos = hijosDe(fgKey(f)).filter((e) => e.tipo === "ap" || e.tipo === "vm" || e.hoja).map((e) => e.key);
       return {
-        fg: f, wans: acotar(wansDe(f.nombre), "enlaces"), core,
+        fg: f, wans: acotar(wansDe(f.nombre), "enlaces"), wansTodas: wansDe(f.nombre), core,
         unidades: Math.max(1, Array.isArray(f.ha_miembros) ? f.ha_miembros.length : 0, Array.isArray(f.ha_peers) ? f.ha_peers.length : 0),
         bajada: Array.from(new Set(d.puertos.filter((p) => p.vecino && p.vecino_puerto && parecido(norm(p.vecino), [f.hostname, f.nombre])).map((p) => String(p.vecino_puerto)))),
         ramas: ramas([...core.map((c) => c.key), ...(sueltos.length ? [fgKey(f)] : [])].filter((k, i, l) => l.indexOf(k) === i)).filter((r) => !core.some((c) => c.key === r.id)),
       };
     });
     const destinos = [...fgs.map((f) => ({ key: fgKey(f), texto: `Core de ${f.nombre} (directo al FortiGate)` })),
-      ...eqs.filter((e) => e.tipo === "sw" || e.tipo === "usw").map((e) => ({ key: e.key, texto: e.nombre }))];
+      ...eqs.filter((e) => (e.tipo === "sw" || e.tipo === "usw") && !e.hoja).map((e) => ({ key: e.key, texto: e.nombre }))];
     const nombreDe = (k?: string) => (k ? destinos.find((x) => x.key === k)?.texto ?? "—" : "sin ubicar");
-    return { sedes, eqs, padre, auto, esManual, destinos, nombreDe, sinFg: !fgs.length };
+    return { sedes, eqs, padre, auto, esManual, destinos, nombreDe, apodo, sinFg: !fgs.length };
   }, [d]);
 
   if (!d || !m) return <div className="card p-6 text-sm text-ink/50">Cargando…</div>;
   if (m.sinFg) return <div className="card p-6 text-sm text-ink/60">Todavía no hay ningún FortiGate informando a la app. El esquema se arma a partir del puente del FortiGate (Perímetro → FortiGate).</div>;
 
-  const grupos: [string, Eq[]][] = [["Switches", m.eqs.filter((e) => e.tipo === "sw")], ["Switches UniFi", m.eqs.filter((e) => e.tipo === "usw")], ["Servidores", m.eqs.filter((e) => e.tipo === "vm")], ["Antenas", m.eqs.filter((e) => e.tipo === "ap")]];
+  const grupos: [string, Eq[]][] = [["Switches", m.eqs.filter((e) => e.tipo === "sw" && !e.aMano)], ["Switches UniFi", m.eqs.filter((e) => e.tipo === "usw")], ["Servidores", m.eqs.filter((e) => e.tipo === "vm")], ["Antenas", m.eqs.filter((e) => e.tipo === "ap")]];
 
   return (
     <div className="space-y-5">
@@ -232,6 +267,48 @@ export default function EsquemaSimple() {
           {editar && (
             <div className="mt-3 space-y-4">
               <p className="text-xs text-ink/50">«Automático» usa lo que informan los puentes (vecinos LLDP/CDP, tabla MAC, zona). Lo que cuelga directo del FortiGate es el core de esa sede.</p>
+              <div>
+                <h3 className="text-xs uppercase tracking-wide font-semibold text-ink/50 mb-1.5">Agregar un equipo que la app no monitorea</h3>
+                <p className="text-xs text-ink/50 mb-2">Por ejemplo los switches de core o de piso que no están cargados en la solapa Switches. Se dibujan igual, sin estado (punto gris). Después podés colgar de ellos el resto.</p>
+                <form onSubmit={agregar} className="grid md:grid-cols-12 gap-2 items-end">
+                  <div className="md:col-span-3"><label className="label" htmlFor="eq-nom">Nombre</label><input id="eq-nom" className="input" required value={nuevo.nombre} onChange={(e) => setNuevo({ ...nuevo, nombre: e.target.value })} placeholder="DCN Core 1" /></div>
+                  <div className="md:col-span-3"><label className="label" htmlFor="eq-det">Detalle (IP, marca)</label><input id="eq-det" className="input" value={nuevo.detalle} onChange={(e) => setNuevo({ ...nuevo, detalle: e.target.value })} placeholder="DCN · 192.168.99.2" /></div>
+                  <div className="md:col-span-2"><label className="label" htmlFor="eq-tip">Tipo</label>
+                    <select id="eq-tip" className="input" value={nuevo.tipo} onChange={(e) => setNuevo({ ...nuevo, tipo: e.target.value })}><option value="sw">Switch</option><option value="srv">Servidor / otro</option></select></div>
+                  <div className="md:col-span-3"><label className="label" htmlFor="eq-pad">Cuelga de</label>
+                    <select id="eq-pad" className="input" required value={nuevo.padre} onChange={(e) => setNuevo({ ...nuevo, padre: e.target.value })}><option value="">Elegir…</option>{m.destinos.map((x) => <option key={x.key} value={x.key}>{x.texto}</option>)}</select></div>
+                  <div className="md:col-span-1"><button className="btn-primary w-full">Agregar</button></div>
+                </form>
+                {m.eqs.some((e) => e.aMano) && (
+                  <ul className="mt-3 grid md:grid-cols-2 gap-x-6 gap-y-1.5">
+                    {m.eqs.filter((e) => e.aMano).map((e) => (
+                      <li key={e.key} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="truncate text-ink">{e.nombre}{e.sub ? <span className="text-ink/50 text-xs"> · {e.sub}</span> : null}</span>
+                        <span className="flex items-center gap-2 max-w-[60%]">
+                          <select className="input w-auto py-1 min-w-0" value={m.padre.get(e.key) ?? ""} onChange={(ev) => mover(e.key, ev.target.value)} aria-label={`De dónde cuelga ${e.nombre}`}>
+                            {!m.padre.get(e.key) && <option value="">Sin ubicar</option>}
+                            {m.destinos.filter((x) => x.key !== e.key).map((x) => <option key={x.key} value={x.key}>{x.texto}</option>)}
+                          </select>
+                          <button type="button" className="text-xs text-ink/40 hover:text-red-600 shrink-0" onClick={() => quitar(e.key, e.nombre)}>Quitar</button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <h3 className="text-xs uppercase tracking-wide font-semibold text-ink/50 mb-1.5">Nombres de los enlaces de Internet</h3>
+                <ul className="grid md:grid-cols-3 gap-x-6 gap-y-1.5">
+                  {m.sedes.flatMap((s) => s.wansTodas.map((w) => (
+                    <li key={`${s.fg.nombre}-${w.id}`} className="flex items-center gap-2 text-sm">
+                      <label className="text-ink/60 text-xs shrink-0 w-28 truncate" htmlFor={`wan-${s.fg.nombre}-${w.id}`}>{s.fg.nombre} · {w.id}</label>
+                      <input id={`wan-${s.fg.nombre}-${w.id}`} className="input py-1" defaultValue={m.apodo(s.fg.nombre, w.id)} placeholder={w.nombre}
+                        onBlur={(ev) => { if (ev.target.value.trim() !== m.apodo(s.fg.nombre, w.id)) nombrarWan(s.fg.nombre, w.id, ev.target.value); }} />
+                    </li>
+                  )))}
+                </ul>
+                <p className="text-xs text-ink/50 mt-1">Escribí el proveedor (Metrotel, Claro, Telecom) y salí del campo para guardar.</p>
+              </div>
               {grupos.filter(([, l]) => l.length).map(([t, l]) => (
                 <div key={t}>
                   <h3 className="text-xs uppercase tracking-wide font-semibold text-ink/50 mb-1.5">{t}</h3>
@@ -252,13 +329,13 @@ export default function EsquemaSimple() {
           )}
         </div>
       )}
-      <p className="text-xs text-ink/50">Se arma solo con lo que informan el FortiGate, los switches, vCenter y UniFi. En rojo, lo que está caído. Pasá el mouse por las antenas o por VMware para ver la lista. El detalle boca por boca está en «Detalle por boca».</p>
+      <p className="text-xs text-ink/50">Se arma solo con lo que informan el FortiGate, los switches, vCenter y UniFi. En rojo, lo que está caído; con punto gris, los equipos agregados a mano (sin monitoreo). Pasá el mouse por las antenas o por VMware para ver la lista. El detalle boca por boca está en «Detalle por boca».</p>
     </div>
   );
 }
 
 // ---------- Dibujo de una sede ----------
-function Sede({ s }: { s: { fg: any; wans: Item[]; core: Eq[]; unidades: number; bajada: string[]; ramas: Rama[] } }) {
+function Sede({ s }: { s: { fg: any; wans: Item[]; wansTodas?: Item[]; core: Eq[]; unidades: number; bajada: string[]; ramas: Rama[] } }) {
   const ancho = (r: Rama): number => Math.max(PASO, r.hijos.reduce((t, h) => t + ancho(h), 0));
   const profundidad = (r: Rama): number => 1 + Math.max(0, ...r.hijos.map(profundidad));
   const anchoRamas = s.ramas.reduce((t, r) => t + ancho(r), 0);
@@ -289,11 +366,11 @@ function Sede({ s }: { s: { fg: any; wans: Item[]; core: Eq[]; unidades: number;
       </g>
     );
   };
-  const equipo = (x: number, y: number, tipo: Icono, color: string, it: { id: string; nombre: string; sub?: string; caido?: boolean; titulo?: string }, largo = 17) => (
+  const equipo = (x: number, y: number, tipo: Icono, color: string, it: { id: string; nombre: string; sub?: string; caido?: boolean; sinEstado?: boolean; titulo?: string }, largo = 17) => (
     <g key={`${tipo}-${it.id}`} transform={`translate(${x},${y})`}>
       <title>{it.titulo ?? `${it.nombre}${it.sub ? ` · ${it.sub}` : ""}${it.caido ? " · caído" : ""}`}</title>
       <Dibujo tipo={tipo} color={it.caido ? ROJO : color} />
-      <circle cx={ICO / 2 + 4} cy={-ICO / 2 + 6} r={4} fill={it.caido ? ROJO : VERDE} />
+      <circle cx={ICO / 2 + 4} cy={-ICO / 2 + 6} r={4} fill={it.sinEstado ? "#9CA3AF" : it.caido ? ROJO : VERDE} />
       <text y={ICO / 2 + 16} textAnchor="middle" fontSize={12} fontWeight={600} fill={INK}>{corto(it.nombre, largo)}</text>
       {it.sub && <text y={ICO / 2 + 30} textAnchor="middle" fontSize={10} fill={it.caido && tipo === "ap" ? ROJO : SUAVE}>{corto(it.sub, largo + 4)}</text>}
     </g>
@@ -343,7 +420,7 @@ function Sede({ s }: { s: { fg: any; wans: Item[]; core: Eq[]; unidades: number;
           {coreHa && <rect x={cCore.x} y={Y.core - 40} width={cCore.w} height={114} rx={14} fill="none" stroke={LINEA} strokeWidth={1.5} strokeDasharray="6 5" />}
           {coreHa && <text x={cCore.x + cCore.w - 10} y={Y.core - 26} textAnchor="end" fontSize={10} fontWeight={700} fill={SUAVE}>CORE · HA</text>}
           {coreHa && <line x1={xCore[0] + 30} x2={xCore[xCore.length - 1] - 30} y1={Y.core} y2={Y.core} stroke={LINEA} strokeWidth={2} strokeDasharray="3 3" />}
-          {s.core.map((c, i) => equipo(xCore[i], Y.core, "sw", c.tipo === "usw" ? "#0EA5E9" : "rgb(var(--c-brand))", { id: c.key, nombre: c.nombre, sub: c.sub, caido: c.caido }))}
+          {s.core.map((c, i) => equipo(xCore[i], Y.core, "sw", c.tipo === "usw" ? "#0EA5E9" : "rgb(var(--c-brand))", { id: c.key, nombre: c.nombre, sub: c.sub, caido: c.caido, sinEstado: c.aMano }))}
         </svg>
       </div>
     </section>

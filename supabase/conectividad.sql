@@ -58,6 +58,10 @@ create table if not exists public.red_esquema (
   actualizado timestamptz not null default now(),
   check (clave <> padre)
 );
+-- Equipos agregados a mano (clave "m:<id>", no monitoreados) y nombre de los enlaces de Internet (clave "wan:<fortigate>:<interfaz>")
+alter table public.red_esquema add column if not exists nombre text;
+alter table public.red_esquema add column if not exists tipo text;
+alter table public.red_esquema add column if not exists detalle text;
 alter table public.red_esquema enable row level security;
 drop policy if exists red_esquema_select on public.red_esquema;
 create policy red_esquema_select on public.red_esquema for select to authenticated
