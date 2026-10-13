@@ -30,8 +30,19 @@ export type AppEntra = {
   vencidas: number;
 };
 
+// Borradas que todavía se pueden restaurar (Entra las guarda 30 días en la papelera)
+export type AppBorrada = {
+  id: string;
+  app_id: string | null;
+  nombre: string;
+  objeto: "registro" | "empresarial";
+  borrada: string | null;
+  se_purga: string | null;       // fecha en que Entra la elimina definitivamente
+};
+
 export type ResultadoApps = {
   apps: AppEntra[];
+  borradas: AppBorrada[] | null; // null = no disponible (ver avisos)
   avisos: string[];
   disponibles: { uso: boolean; ingresos: boolean; delegados: boolean; aplicacion: boolean; credenciales: boolean };
   consultado: string;
@@ -89,17 +100,32 @@ export async function leerAppsEntra(): Promise<ResultadoApps> {
   }
 
   const ok = <T,>(p: Promise<T>) => p.then((v) => ({ v, e: null as unknown }), (e) => ({ v: null as T | null, e }));
-  const [regs, uso, resumen, grants, graph] = await Promise.all([
+  const [regs, uso, resumen, grants, graph, papReg, papEmp] = await Promise.all([
     ok(paginar(t, `${G}/v1.0/applications?$select=id,appId,passwordCredentials,keyCredentials&$top=999`)),
     ok(paginar(t, `${G}/beta/reports/servicePrincipalSignInActivities`)),
     ok(paginar(t, `${G}/beta/reports/getAzureADApplicationSignInSummary(period='D30')`)),
     ok(paginar(t, `${G}/v1.0/oauth2PermissionGrants?$top=999`)),
     ok(pedir(t, `${G}/v1.0/servicePrincipals(appId='${GRAPH_APP_ID}')?$select=id,appRoles`)),
+    ok(paginar(t, `${G}/v1.0/directory/deletedItems/microsoft.graph.application?$select=id,appId,displayName,deletedDateTime&$top=999`)),
+    ok(paginar(t, `${G}/v1.0/directory/deletedItems/microsoft.graph.servicePrincipal?$select=id,appId,displayName,deletedDateTime&$top=999`)),
   ]);
   if (regs.e) avisos.push(explicar(regs.e, "Secretos y certificados", "Application.Read.All"));
   if (uso.e) avisos.push(explicar(uso.e, "Último uso", "AuditLog.Read.All"));
   if (resumen.e) avisos.push(explicar(resumen.e, "Inicios de sesión de 30 días", "Reports.Read.All"));
   if (grants.e) avisos.push(explicar(grants.e, "Permisos delegados", "Directory.Read.All"));
+  if (papReg.e) avisos.push(explicar(papReg.e, "Aplicaciones borradas", "Application.Read.All"));
+
+  // Papelera: registros de aplicación y aplicaciones empresariales borradas en los últimos 30 días
+  const aBorrada = (x: any, objeto: AppBorrada["objeto"]): AppBorrada => ({
+    id: String(x.id), app_id: x.appId ? String(x.appId) : null, nombre: x.displayName ?? String(x.appId ?? x.id), objeto,
+    borrada: x.deletedDateTime ?? null,
+    se_purga: x.deletedDateTime ? new Date(Date.parse(x.deletedDateTime) + 30 * 86400000).toISOString() : null,
+  });
+  const borradas: AppBorrada[] | null = papReg.e ? null : [
+    ...(papReg.v ?? []).map((x) => aBorrada(x, "registro")),
+    // la papelera de aplicaciones empresariales no está en todos los tenants: si falla, se muestran solo los registros
+    ...(papEmp.v ?? []).map((x) => aBorrada(x, "empresarial")),
+  ].sort((a, b) => (b.borrada ?? "").localeCompare(a.borrada ?? ""));
 
   // Permisos de aplicación sobre Microsoft Graph (una sola consulta para todo el tenant)
   const deApp = new Map<string, string[]>();
@@ -159,7 +185,7 @@ export async function leerAppsEntra(): Promise<ResultadoApps> {
   });
 
   return {
-    apps, avisos,
+    apps, borradas, avisos,
     disponibles: { uso: !uso.e, ingresos: !resumen.e, delegados: !grants.e, aplicacion, credenciales: !regs.e },
     consultado: new Date().toISOString(),
   };

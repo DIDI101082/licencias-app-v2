@@ -6,6 +6,7 @@ import { entraConfigurado, leerUsuariosEntra } from "@/lib/entra";
 import { leerAuditoriaEntra } from "@/lib/entra-auditoria";
 import { leerLicenciasM365 } from "@/lib/entra-licencias";
 import { leerRegistroMfa } from "@/lib/identidad-mfa";
+import { leerCambiosAppsEntra } from "@/lib/entra-apps-cambios";
 import { calcularPlan, type EmpleadoActual } from "@/lib/empleados-sync";
 
 export const dynamic = "force-dynamic";
@@ -99,14 +100,37 @@ async function mfa(clave: string) {
   }
 }
 
+// Aplicaciones de Entra: quién borra, deshabilita, reactiva o restaura aplicaciones (auditoría de Entra).
+// Lee desde la última lectura (con 10 minutos de margen); la primera vez, los últimos 30 días.
+async function appsCambios(clave: string) {
+  const sb = clienteAnonimo(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
+  const { data: ini, error } = await sb.rpc("entra_apps_auto_inicio", { p_token: clave });
+  if (error) return { omitido: /entra_apps_auto_inicio/.test(error.message) ? "Falta ejecutar supabase/entra-apps-cambios.sql" : msj(error) };
+  try {
+    if (!entraConfigurado()) throw new Error("Faltan las variables de Entra ID en Vercel");
+    const hasta = new Date();
+    const leido = (ini as { leido_hasta?: string | null })?.leido_hasta;
+    const desde = leido
+      ? new Date(Math.max(new Date(leido).getTime() - 10 * 60000, hasta.getTime() - 30 * 86400000))
+      : new Date(hasta.getTime() - 30 * 86400000);
+    const cambios = await leerCambiosAppsEntra(desde);
+    const { data, error: e2 } = await sb.rpc("entra_apps_auto_aplicar", { p_token: clave, p: { cambios, hasta: hasta.toISOString() } });
+    if (e2) throw new Error(e2.message);
+    return data;
+  } catch (e) {
+    await sb.rpc("entra_apps_auto_error", { p_token: clave, p_error: msj(e) });
+    return { error: msj(e) };
+  }
+}
+
 async function todo(clave: string) {
   let empleados: any, fallo = false;
   try { empleados = await ejecutar(clave); }
   catch (e) { empleados = { error: msj(e) }; fallo = true; }
   // Si falló la clave, no tiene sentido seguir
   if (fallo && /inválida/.test(empleados.error)) return { cuerpo: empleados, fallo };
-  const [m365, segundoFactor] = await Promise.all([licencias(clave), mfa(clave)]);
-  return { cuerpo: { ...empleados, licencias: m365, mfa: segundoFactor }, fallo };
+  const [m365, segundoFactor, aplicaciones] = await Promise.all([licencias(clave), mfa(clave), appsCambios(clave)]);
+  return { cuerpo: { ...empleados, licencias: m365, mfa: segundoFactor, aplicaciones }, fallo };
 }
 
 // Vercel Cron: llega con "Authorization: Bearer <CRON_SECRET>"

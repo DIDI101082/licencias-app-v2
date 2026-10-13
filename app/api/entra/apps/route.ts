@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPerfil } from "@/lib/supabase/server";
+import { createClient, getPerfil } from "@/lib/supabase/server";
 import { entraConfigurado } from "@/lib/entra";
 import { leerAppsEntra } from "@/lib/entra-apps";
 
@@ -15,7 +15,11 @@ export async function GET() {
   }
   if (!entraConfigurado()) return NextResponse.json({ configurado: false });
   try {
-    return NextResponse.json({ configurado: true, ...(await leerAppsEntra()) });
+    const r = await leerAppsEntra();
+    // Historial de borrados y deshabilitaciones que guarda la tarea de cada 15 minutos (si falta entra-apps-cambios.sql, se omite)
+    const { data: c, error } = await createClient().rpc("entra_apps_cambios_estado");
+    const cambios = error ? { falta: /entra_apps_cambios_estado/.test(error.message), error: error.message } : c;
+    return NextResponse.json({ configurado: true, ...r, cambios });
   } catch (e: any) {
     return NextResponse.json({ configurado: true, error: e.message }, { status: 500 });
   }
