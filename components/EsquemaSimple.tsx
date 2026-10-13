@@ -77,6 +77,8 @@ type Fila = { clave: string; padre: string; nombre?: string | null; tipo?: strin
 
 const sinAcento = (s?: string | null) => (s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const GENERICAS = /^(fg|fgt|fgvm|forti|fortigate|fw|firewall|ha|cluster|accusys|\d+[a-z]?)$/;
+// Número de piso en un nombre o zona: "Piso 7", "P7", "piso-5", "AP_P4_02" → "7", "5", "4"
+const pisoDe = (t?: string | null) => sinAcento(t).match(/(?:^|[^a-z0-9])(?:piso|p)\s*[-_]?\s*(\d{1,2})(?!\d)/)?.[1] ?? null;
 const PASO = 150, ALTO_NIVEL = 150;
 
 export default function EsquemaSimple() {
@@ -214,7 +216,11 @@ export default function EsquemaSimple() {
       // Una antena prefiere el switch UniFi de su zona; si no hay, el switch de piso de esa zona
       const deZona = (t: Eq["tipo"]) => eqs.find((e) => e.key !== k && e.tipo === t && !e.hoja && (e.zona === zona || (!!e.aMano && e.zona.includes(zona))));
       const mismo = zona ? (u.tipo === "uap" ? deZona("usw") : undefined) ?? deZona("sw") : undefined;
-      auto.set(k, sw != null ? `sw:${sw}` : mismo ? mismo.key : coreDe(sedeDe(`${u.nombre ?? ""} ${u.sitio ?? ""} ${u.zona ?? ""}`) ?? defecto));
+      // Si no, el switch del mismo piso (por el número de piso en el nombre o la zona de cada uno)
+      const piso = pisoDe(`${u.nombre ?? ""} ${u.zona ?? ""}`);
+      const dePiso = (t: Eq["tipo"]) => eqs.find((e) => e.key !== k && e.tipo === t && !e.hoja && pisoDe(`${e.nombre} ${e.pista}`) === piso);
+      const delPiso = piso ? (u.tipo === "uap" ? dePiso("usw") : undefined) ?? dePiso("sw") : undefined;
+      auto.set(k, sw != null ? `sw:${sw}` : mismo ? mismo.key : delPiso ? delPiso.key : coreDe(sedeDe(`${u.nombre ?? ""} ${u.sitio ?? ""} ${u.zona ?? ""}`) ?? defecto));
     }
     if (porKey.has("vm") && defecto) auto.set("vm", coreDe(defecto));
 
