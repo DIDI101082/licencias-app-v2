@@ -5,10 +5,11 @@ import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 
 // Esquema simple de la red, con íconos, uno por sede (por cada FortiGate):
-//   Internet → enlaces WAN → FortiGate (par en HA) → switches de core → switches de piso, VMware y antenas.
+//   Internet → enlaces WAN → [switch de distribución, si se cargó] → FortiGate (par en HA) → switches de core → switches de piso, VMware y antenas.
+// Un switch que un administrador ubica "entre los ISP y el FortiGate" (padre "wanfg:<fortigate>") se dibuja en esa fila.
 // Se arma solo (puentes del FortiGate, switches SNMP, vCenter y UniFi) y un administrador puede corregir de dónde
 // cuelga cada equipo (tabla red_esquema).
-type Item = { id: string; nombre: string; sub?: string; caido?: boolean; titulo?: string };
+type Item = { id: string; nombre: string; sub?: string; caido?: boolean; titulo?: string; oculto?: boolean };
 type Icono = "wan" | "fw" | "sw" | "srv" | "ap";
 
 const MAX = 7, ICO = 46;
@@ -133,10 +134,14 @@ export default function EsquemaSimple() {
     if (error) return setError(falta(error.message));
     setRecarga((n) => n + 1);
   }
-  // Nombre con el que se dibuja un enlace de Internet (vacío = el que informa el FortiGate)
-  async function nombrarWan(equipo: string, interfaz: string, nombre: string) {
+  // Nombre con el que se dibuja un enlace de Internet (vacío = el que informa el FortiGate) y si se oculta del esquema
+  // (por ejemplo una interfaz WAN configurada en el FortiGate que no tiene enlace). Se guarda como "wan:<fortigate>:<interfaz>";
+  // padre "oculto" = no se dibuja.
+  async function nombrarWan(equipo: string, interfaz: string, nombre: string, oculto = false) {
     const sb = createClient(); const clave = `wan:${equipo}:${interfaz}`;
-    const { error } = nombre.trim() ? await sb.from("red_esquema").upsert({ clave, padre: "wan", nombre: nombre.trim() }) : await sb.from("red_esquema").delete().eq("clave", clave);
+    const { error } = nombre.trim() || oculto
+      ? await sb.from("red_esquema").upsert({ clave, padre: oculto ? "oculto" : "wan", nombre: nombre.trim() || null })
+      : await sb.from("red_esquema").delete().eq("clave", clave);
     if (error) return setError(falta(error.message));
     setRecarga((n) => n + 1);
   }
@@ -144,9 +149,13 @@ export default function EsquemaSimple() {
   const m = useMemo(() => {
     if (!d) return null;
     const apodo = (eq: string, i: string) => d.filas.find((f) => f.clave === `wan:${eq}:${i}`)?.nombre || "";
+    const oculto = (eq: string, i: string) => d.filas.find((f) => f.clave === `wan:${eq}:${i}`)?.padre === "oculto";
     const itf = (eq: string, n: string) => d.ifs.find((i) => i.equipo === eq && i.nombre === n);
     // Solo los enlaces a Internet (igual que la pantalla del FortiGate): rol WAN, o con lo contratado cargado
-    const wansDe = (eq: string): Item[] => {
+    // todas = incluye las ocultas (para la lista de ajustes); el dibujo y los conteos usan solo las visibles
+    const wansDe = (eq: string, todas = false): Item[] => wansTodasDe(eq).filter((w) => todas || !w.oculto);
+    const wansTodasDe = (eq: string): Item[] => wansCrudas(eq).map((w) => ({ ...w, oculto: oculto(eq, w.id) }));
+    const wansCrudas = (eq: string): Item[] => {
       const l = d.wans.filter((w) => w.equipo === eq && (itf(eq, w.interfaz)?.rol === "wan" || w.bajada_mbps != null || w.respaldo));
       if (l.length) return l.map((w) => ({ id: w.interfaz, nombre: apodo(eq, w.interfaz) || w.nombre || itf(eq, w.interfaz)?.alias || w.interfaz, caido: w.conectado === false,
         sub: [w.nombre ? w.interfaz : "", w.bajada_mbps ? `${w.bajada_mbps}/${w.subida_mbps ?? "?"} Mb` : "", w.respaldo ? "respaldo" : ""].filter(Boolean).join(" · ") }));
@@ -210,14 +219,16 @@ export default function EsquemaSimple() {
     if (porKey.has("vm") && defecto) auto.set("vm", coreDe(defecto));
 
     // ---- Manual por encima del automático (si arma un ciclo o apunta a algo que ya no existe, se ignora) ----
-    const valido = (k: string) => k.startsWith("fg:") ? fgs.some((f) => fgKey(f) === k) : porKey.has(k) && porKey.get(k)!.tipo !== "ap" && porKey.get(k)!.tipo !== "vm" && !porKey.get(k)!.hoja;
+    const valido = (k: string) => k.startsWith("wanfg:") ? fgs.some((f) => `wanfg:${f.nombre}` === k) : k.startsWith("fg:") ? fgs.some((f) => fgKey(f) === k) : porKey.has(k) && porKey.get(k)!.tipo !== "ap" && porKey.get(k)!.tipo !== "vm" && !porKey.get(k)!.hoja;
     const padre = new Map<string, string>(auto);
     const esManual = new Set<string>();
     for (const [k, p] of Object.entries(d.manual)) if (porKey.has(k) && p !== k && valido(p)) { padre.set(k, p); esManual.add(k); }
-    const sedeFinal = (k: string): string | null => { let x = k; for (let i = 0; i < 25; i++) { const p = padre.get(x); if (!p) return null; if (p.startsWith("fg:")) return p; x = p; } return null; };
+    const sedeFinal = (k: string): string | null => { let x = k; for (let i = 0; i < 25; i++) { const p = padre.get(x); if (!p) return null; if (p.startsWith("fg:") || p.startsWith("wanfg:")) return p; x = p; } return null; };
     for (const k of Array.from(esManual)) if (!sedeFinal(k)) { esManual.delete(k); const a = auto.get(k); if (a) padre.set(k, a); else padre.delete(k); }
 
-    const hijosDe = (k: string) => eqs.filter((e) => padre.get(e.key) === k);
+    // Switches de distribución: entre los enlaces de Internet y el FortiGate (fuera del árbol de core)
+    const enWan = new Set(eqs.filter((e) => String(padre.get(e.key) ?? "").startsWith("wanfg:")).map((e) => e.key));
+    const hijosDe = (k: string) => eqs.filter((e) => padre.get(e.key) === k && !enWan.has(e.key));
     const rama = (e: Eq): Rama => ({
       id: e.key, icono: e.tipo === "vm" || e.hoja ? "srv" : "sw", color: e.tipo === "vm" || e.hoja ? "#8B5CF6" : e.tipo === "usw" ? "#0EA5E9" : "rgb(var(--c-brand))",
       nombre: e.nombre, sub: e.sub, caido: e.caido, sinEstado: e.aMano, titulo: e.tipo === "vm" ? d.hosts.map((h) => h.nombre.split(".")[0]).join(", ") : undefined, hijos: ramas([e.key]),
@@ -237,16 +248,17 @@ export default function EsquemaSimple() {
       const core = hijosDe(fgKey(f)).filter((e) => (e.tipo === "sw" || e.tipo === "usw") && !e.hoja);
       const sueltos = hijosDe(fgKey(f)).filter((e) => e.tipo === "ap" || e.tipo === "vm" || e.hoja).map((e) => e.key);
       return {
-        fg: f, wans: acotar(wansDe(f.nombre), "enlaces"), wansTodas: wansDe(f.nombre), core,
+        fg: f, dist: eqs.filter((e) => enWan.has(e.key) && padre.get(e.key) === `wanfg:${f.nombre}`), wans: acotar(wansDe(f.nombre), "enlaces"), wansTodas: wansDe(f.nombre, true), core,
         unidades: Math.max(1, Array.isArray(f.ha_miembros) ? f.ha_miembros.length : 0, Array.isArray(f.ha_peers) ? f.ha_peers.length : 0),
         bajada: Array.from(new Set(d.puertos.filter((p) => p.vecino && p.vecino_puerto && parecido(norm(p.vecino), [f.hostname, f.nombre])).map((p) => String(p.vecino_puerto)))),
         ramas: ramas([...core.map((c) => c.key), ...(sueltos.length ? [fgKey(f)] : [])].filter((k, i, l) => l.indexOf(k) === i)).filter((r) => !core.some((c) => c.key === r.id)),
       };
     });
     const destinos = [...fgs.map((f) => ({ key: fgKey(f), texto: `Core de ${f.nombre} (directo al FortiGate)` })),
+      ...fgs.map((f) => ({ key: `wanfg:${f.nombre}`, texto: `Distribución de ${f.nombre} (entre los ISP y el FortiGate)` })),
       ...eqs.filter((e) => (e.tipo === "sw" || e.tipo === "usw") && !e.hoja).map((e) => ({ key: e.key, texto: e.nombre }))];
     const nombreDe = (k?: string) => (k ? destinos.find((x) => x.key === k)?.texto ?? "—" : "sin ubicar");
-    return { sedes, eqs, padre, auto, esManual, destinos, nombreDe, apodo, sinFg: !fgs.length };
+    return { sedes, eqs, padre, auto, esManual, destinos, nombreDe, apodo, oculto, sinFg: !fgs.length };
   }, [d]);
 
   if (!d || !m) return <div className="card p-6 text-sm text-ink/50">Cargando…</div>;
@@ -302,12 +314,15 @@ export default function EsquemaSimple() {
                   {m.sedes.flatMap((s) => s.wansTodas.map((w) => (
                     <li key={`${s.fg.nombre}-${w.id}`} className="flex items-center gap-2 text-sm">
                       <label className="text-ink/60 text-xs shrink-0 w-28 truncate" htmlFor={`wan-${s.fg.nombre}-${w.id}`}>{s.fg.nombre} · {w.id}</label>
-                      <input id={`wan-${s.fg.nombre}-${w.id}`} className="input py-1" defaultValue={m.apodo(s.fg.nombre, w.id)} placeholder={w.nombre}
-                        onBlur={(ev) => { if (ev.target.value.trim() !== m.apodo(s.fg.nombre, w.id)) nombrarWan(s.fg.nombre, w.id, ev.target.value); }} />
+                      <input id={`wan-${s.fg.nombre}-${w.id}`} className={`input py-1 ${w.oculto ? "opacity-50" : ""}`} defaultValue={m.apodo(s.fg.nombre, w.id)} placeholder={w.nombre}
+                        onBlur={(ev) => { if (ev.target.value.trim() !== m.apodo(s.fg.nombre, w.id)) nombrarWan(s.fg.nombre, w.id, ev.target.value, !!w.oculto); }} />
+                      <label className="flex items-center gap-1 text-xs text-ink/60 shrink-0" title="No dibujar este enlace en el esquema (por ejemplo, una interfaz WAN sin enlace contratado)">
+                        <input type="checkbox" checked={!!w.oculto} onChange={(ev) => nombrarWan(s.fg.nombre, w.id, m.apodo(s.fg.nombre, w.id), ev.target.checked)} /> Ocultar
+                      </label>
                     </li>
                   )))}
                 </ul>
-                <p className="text-xs text-ink/50 mt-1">Escribí el proveedor (Metrotel, Claro, Telecom) y salí del campo para guardar.</p>
+                <p className="text-xs text-ink/50 mt-1">Escribí el proveedor (Metrotel, Claro, Telecom) y salí del campo para guardar. «Ocultar» saca del esquema una interfaz WAN que no tiene enlace (sigue en el FortiGate; se puede volver a mostrar).</p>
               </div>
               {grupos.filter(([, l]) => l.length).map(([t, l]) => (
                 <div key={t}>
@@ -335,13 +350,14 @@ export default function EsquemaSimple() {
 }
 
 // ---------- Dibujo de una sede ----------
-function Sede({ s }: { s: { fg: any; wans: Item[]; wansTodas?: Item[]; core: Eq[]; unidades: number; bajada: string[]; ramas: Rama[] } }) {
+function Sede({ s }: { s: { fg: any; dist: Eq[]; wans: Item[]; wansTodas?: Item[]; core: Eq[]; unidades: number; bajada: string[]; ramas: Rama[] } }) {
   const ancho = (r: Rama): number => Math.max(PASO, r.hijos.reduce((t, h) => t + ancho(h), 0));
   const profundidad = (r: Rama): number => 1 + Math.max(0, ...r.hijos.map(profundidad));
   const anchoRamas = s.ramas.reduce((t, r) => t + ancho(r), 0);
   const W = Math.max(820, anchoRamas + 80, s.wans.length * 200 + 120);
   const cx = W / 2;
-  const Y = { nube: 46, wan: 150, fw: 296, core: 446 };
+  const od = s.dist.length ? 146 : 0;   // fila extra para el switch de distribución
+  const Y = { nube: 46, wan: 150, dist: 296, fw: 296 + od, core: 446 + od };
   const niveles = Math.max(0, ...s.ramas.map(profundidad));
   const yRama = (n: number) => Y.core + 144 + n * ALTO_NIVEL;
   const H = (niveles ? yRama(niveles - 1) : s.core.length ? Y.core : Y.fw) + 96;
@@ -349,6 +365,9 @@ function Sede({ s }: { s: { fg: any; wans: Item[]; wansTodas?: Item[]; core: Eq[
   const xWan = repartir(s.wans.length, 120, W - 120, 220);
   const xFw = repartir(s.unidades, cx - 70, cx + 70, 96);
   const xCore = repartir(s.core.length, 60, W - 60, s.core.length === 2 ? 130 : 150);
+  const xDist = repartir(s.dist.length, 60, W - 60, s.dist.length === 2 ? 130 : 150);
+  const distHa = s.dist.length >= 2;
+  const cDist = { x: (xDist[0] ?? cx) - 96, w: (xDist[xDist.length - 1] ?? cx) - (xDist[0] ?? cx) + 192 };
   const coreHa = s.core.length >= 2;
   const caja = (xs: number[]) => ({ x: (xs[0] ?? cx) - 96, w: (xs[xs.length - 1] ?? cx) - (xs[0] ?? cx) + 192 });
   const cFw = caja(xFw), cCore = caja(xCore);
@@ -400,7 +419,12 @@ function Sede({ s }: { s: { fg: any; wans: Item[]; wansTodas?: Item[]; core: Eq[
         <svg viewBox={`0 0 ${W} ${H}`} role="img" className="block mx-auto" style={{ width: W, maxWidth: W > 1100 ? "none" : "100%", minWidth: Math.min(W, 760) }}
           aria-label={`Esquema de red de ${s.fg.nombre}: enlaces de Internet, FortiGate, switches de core y lo que cuelga de ellos`}>
           {peine([cx], Y.nube + 24, xWan, Y.wan - 14, "nube-wan")}
-          {peine(s.wans.length ? xWan : [cx], s.wans.length ? Y.wan + 62 : Y.nube + 24, [cx], Y.fw - 40, "wan-fw")}
+          {s.dist.length ? (
+            <>
+              {peine(s.wans.length ? xWan : [cx], s.wans.length ? Y.wan + 62 : Y.nube + 24, distHa ? [cx] : xDist, Y.dist - (distHa ? 40 : 16), "wan-dist")}
+              {peine(distHa ? [cx] : xDist, Y.dist + (distHa ? 74 : 60), [cx], Y.fw - 40, "dist-fw")}
+            </>
+          ) : peine(s.wans.length ? xWan : [cx], s.wans.length ? Y.wan + 62 : Y.nube + 24, [cx], Y.fw - 40, "wan-fw")}
           {peine([cx], Y.fw + 76, coreHa ? [cx] : xCore, Y.core - (coreHa ? 40 : 16), "fw-core", s.bajada.length ? `Trunk ${s.bajada.slice(0, 3).join(", ")}` : s.core.length ? "Trunk" : undefined)}
           {piezas}
 
@@ -409,6 +433,10 @@ function Sede({ s }: { s: { fg: any; wans: Item[]; wansTodas?: Item[]; core: Eq[
             <text y={5} textAnchor="middle" fontSize={13} fontWeight={700} fill="rgb(var(--c-brand))">Internet</text>
           </g>
           {s.wans.map((w, i) => equipo(xWan[i], Y.wan, "wan", "#F59E0B", w, 22))}
+
+          {distHa && <rect x={cDist.x} y={Y.dist - 40} width={cDist.w} height={114} rx={14} fill="none" stroke={LINEA} strokeWidth={1.5} strokeDasharray="6 5" />}
+          {distHa && <text x={cDist.x + cDist.w - 10} y={Y.dist - 26} textAnchor="end" fontSize={10} fontWeight={700} fill={SUAVE}>DISTRIBUCIÓN</text>}
+          {s.dist.map((c, i) => equipo(xDist[i], Y.dist, "sw", c.tipo === "usw" ? "#0EA5E9" : "rgb(var(--c-brand))", { id: c.key, nombre: c.nombre, sub: c.sub, caido: c.caido, sinEstado: c.aMano }))}
 
           {s.unidades > 1 && <rect x={cFw.x} y={Y.fw - 40} width={cFw.w} height={116} rx={14} fill="none" stroke={fwCaido ? ROJO : LINEA} strokeWidth={1.5} strokeDasharray="6 5" />}
           {s.unidades > 1 && <text x={cFw.x + cFw.w - 10} y={Y.fw - 26} textAnchor="end" fontSize={10} fontWeight={700} fill={s.fg.ha_sincronizado === false ? ROJO : SUAVE}>HA{s.fg.ha_sincronizado === false ? " sin sincronizar" : ""}</text>}
