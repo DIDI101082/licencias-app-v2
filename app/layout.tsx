@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Plus_Jakarta_Sans, Inter } from "next/font/google";
 import "./globals.css";
 import { getPerfil } from "@/lib/supabase/server";
@@ -28,11 +29,13 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const { perfil } = await getPerfil();
+  // Nonce que generó el middleware para este pedido (ver lib/csp.ts)
+  const nonce = headers().get("x-nonce") ?? undefined;
 
   return (
     <html lang="es" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA + ";" + SCRIPT_MENU + ";" + SCRIPT_ANCHO }} />
+        <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA + ";" + SCRIPT_MENU + ";" + SCRIPT_ANCHO }} />
       </head>
       <body className={`${display.variable} ${body.variable} font-sans`}>
         <PerfilProvider perfil={perfil}>

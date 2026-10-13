@@ -213,7 +213,7 @@ export default function Escanear() {
 
         {producto ? (
           <div className="card p-4 flex gap-3 items-center border-2 border-emerald-500/40">
-            {producto.imagen && <img src={producto.imagen} alt="" className="h-16 w-16 object-contain rounded bg-white shrink-0" />}
+            {producto.imagen && <img src={producto.imagen} alt="" onError={(e) => { e.currentTarget.style.display = "none"; }} className="h-16 w-16 object-contain rounded bg-white shrink-0" />}
             <div className="min-w-0 flex-1">
               <div className="text-xs text-emerald-700 font-medium">
                 {producto.origen === "catalogo" ? "Producto de tu catálogo" : "Producto identificado por el código de la caja"}
