@@ -87,6 +87,7 @@ function Contenido() {
   const [soloDesconocidos, setSoloDesconocidos] = useState(false);
   const [aprobando, setAprobando] = useState<string | null>(null);
   const [descripcion, setDescripcion] = useState("");
+  const [editSw, setEditSw] = useState<{ id: number; nombre: string; ip: string; zona: string; notas: string } | null>(null);
 
   const cargar = useCallback(async () => {
     const sb = createClient();
@@ -128,6 +129,15 @@ function Contenido() {
   async function cambiarSwitch(s: Switch, cambios: Partial<Switch>) {
     const { error } = await createClient().from("sw_switches").update(cambios).eq("id", s.id);
     if (error) setError(error.message); else cargar();
+  }
+  async function guardarSwitch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editSw || !editSw.nombre.trim() || !editSw.ip.trim()) return;
+    const { error } = await createClient().from("sw_switches").update({
+      nombre: editSw.nombre.trim(), ip: editSw.ip.trim(), zona: editSw.zona.trim() || null, notas: editSw.notas.trim() || null,
+    }).eq("id", editSw.id);
+    if (error) return setError(error.message);
+    setEditSw(null); cargar();
   }
   async function quitarSwitch(s: Switch) {
     const { error } = await createClient().from("sw_switches").delete().eq("id", s.id);
@@ -244,8 +254,25 @@ function Contenido() {
                 </div>
               )}
 
+              {esAdmin && editSw?.id === sw.id && (
+                <form onSubmit={guardarSwitch} className="grid md:grid-cols-12 gap-2 items-end border-t border-line/[0.08] pt-3">
+                  <div className="md:col-span-3"><label className="label" htmlFor="ed-sw-nombre">Nombre</label>
+                    <input id="ed-sw-nombre" required className="input" value={editSw.nombre} onChange={(e) => setEditSw({ ...editSw, nombre: e.target.value })} /></div>
+                  <div className="md:col-span-2"><label className="label" htmlFor="ed-sw-ip">IP</label>
+                    <input id="ed-sw-ip" required className="input" value={editSw.ip} onChange={(e) => setEditSw({ ...editSw, ip: e.target.value })} /></div>
+                  <div className="md:col-span-2"><label className="label" htmlFor="ed-sw-zona">Zona</label>
+                    <input id="ed-sw-zona" className="input" placeholder="Piso 5" value={editSw.zona} onChange={(e) => setEditSw({ ...editSw, zona: e.target.value })} /></div>
+                  <div className="md:col-span-3"><label className="label" htmlFor="ed-sw-notas">Notas</label>
+                    <input id="ed-sw-notas" className="input" value={editSw.notas} onChange={(e) => setEditSw({ ...editSw, notas: e.target.value })} /></div>
+                  <div className="md:col-span-2 flex gap-2">
+                    <button className="btn-primary flex-1">Guardar</button>
+                    <button type="button" className="btn-secondary" onClick={() => setEditSw(null)}>Cancelar</button>
+                  </div>
+                </form>
+              )}
               {esAdmin && (
                 <div className="flex flex-wrap gap-3 text-sm pt-1">
+                  <button className="text-brand-600 hover:underline" onClick={() => setEditSw({ id: sw.id, nombre: sw.nombre, ip: sw.ip ?? "", zona: sw.zona ?? "", notas: sw.notas ?? "" })}>Editar nombre, IP y zona</button>
                   <button className="text-ink/60 hover:text-ink" onClick={() => cambiarSwitch(sw, { activo: !sw.activo })}>{sw.activo ? "Dejar de consultar" : "Volver a consultar"}</button>
                   <button className="text-ink/40 hover:text-red-600" onClick={() => quitarSwitch(sw)}>Quitar switch</button>
                 </div>
