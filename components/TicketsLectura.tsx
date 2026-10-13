@@ -15,6 +15,9 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
   const [generados, setGenerados] = useState(true);
   // Seguimiento (mensajes y recorrido de cada ticket): se configura aparte, con helpdesk.sql
   const [seg, setSeg] = useState<{ activo: boolean; privados: boolean; pendientes: number; cerrados_pendientes?: number; error: string | null } | null>(null);
+  // Aviso a Teams de tickets nuevos (helpdesk-avisos.sql)
+  const [aviso, setAviso] = useState<{ activo: boolean; sectores: string } | null>(null);
+  const [avisoSectores, setAvisoSectores] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [falta, setFalta] = useState(false);
@@ -25,7 +28,13 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
     setCfg(data as Cfg); setActiva((data as Cfg).activa); setSectores((data as Cfg).sectores ?? ""); setGenerados((data as Cfg).generados !== false);
   };
   const cargarSeg = () => createClient().rpc("tickets_seguimiento_config").then(({ data, error }) => setSeg(error ? null : data));
-  useEffect(() => { cargar(); cargarSeg(); }, []);
+  const cargarAviso = () => createClient().rpc("helpdesk_aviso_ver").then(({ data, error }) => {
+    setAviso(error ? null : data); if (!error && data) setAvisoSectores(data.sectores ?? "");
+  });
+  const guardarAviso = (p: { activo?: boolean; sectores?: string }) => createClient().rpc("helpdesk_aviso_guardar", { p }).then(({ error }) => {
+    if (error) setMsg({ ok: false, texto: error.message }); else { setMsg({ ok: true, texto: "Aviso guardado" }); cargarAviso(); }
+  });
+  useEffect(() => { cargar(); cargarSeg(); cargarAviso(); }, []);
 
   async function correr(fn: () => PromiseLike<{ error: any; data?: any }>, ok: string, leido = false) {
     setOcupado(true); setMsg(null);
@@ -120,6 +129,23 @@ https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&ti
           </p>
           {seg.error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2 break-words">Último error de seguimiento: {seg.error}</p>}
         </div>
+      )}
+
+      {aviso ? (
+        <div className="space-y-2 border-t border-line/10 pt-3">
+          <div className="text-sm font-medium text-ink">Aviso a Teams de tickets nuevos</div>
+          <label className="flex items-center gap-2 text-sm text-ink/80">
+            <input type="checkbox" checked={aviso.activo} onChange={(e) => guardarAviso({ activo: e.target.checked })} />
+            Avisar por Teams cada ticket nuevo asignado a estos sectores
+          </label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input className="input max-w-md" value={avisoSectores} onChange={(e) => setAvisoSectores(e.target.value)} placeholder="Ciberseguridad" aria-label="Sectores para el aviso" />
+            <button className="btn-secondary" disabled={!avisoSectores.trim() || avisoSectores.trim() === aviso.sectores} onClick={() => guardarAviso({ sectores: avisoSectores })}>Guardar sectores</button>
+          </div>
+          <p className="text-xs text-ink/50">Separados por coma, con el nombre tal como figura en el sector del ticket. El aviso sale apenas termina cada lectura (cada 15 minutos) por el canal de Teams de Alertas.</p>
+        </div>
+      ) : (
+        <p className="text-xs text-ink/50 border-t border-line/10 pt-3">Para recibir en Teams los tickets nuevos de un sector, ejecutá supabase/helpdesk-avisos.sql en Supabase.</p>
       )}
 
       <div className="flex items-center gap-3 flex-wrap">
