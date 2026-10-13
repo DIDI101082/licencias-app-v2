@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 
@@ -356,6 +357,14 @@ export default function EsquemaSimple() {
 }
 
 // ---------- Dibujo de una sede ----------
+// A dónde lleva cada ícono al tocarlo
+const destinoDe = (tipo: Icono, id: string): string | undefined =>
+  tipo === "wan" ? "/red/fortigate?vista=sdwan"
+  : id.startsWith("sw:") ? `/red/switches?switch=${id.slice(3)}`
+  : id.startsWith("u:") || id.startsWith("aps-") ? "/inventario/wifi?vista=equipos"
+  : id === "vm" ? "/servidores/virtualizacion"
+  : undefined;
+
 function Sede({ s }: { s: { fg: any; dist: Eq[]; wans: Item[]; wansTodas?: Item[]; core: Eq[]; unidades: number; bajada: string[]; ramas: Rama[] } }) {
   const ancho = (r: Rama): number => Math.max(PASO, r.hijos.reduce((t, h) => t + ancho(h), 0));
   const profundidad = (r: Rama): number => 1 + Math.max(0, ...r.hijos.map(profundidad));
@@ -391,8 +400,14 @@ function Sede({ s }: { s: { fg: any; dist: Eq[]; wans: Item[]; wansTodas?: Item[
       </g>
     );
   };
+  const router = useRouter();
+  const abrir = (href?: string) => href ? {
+    role: "link", tabIndex: 0, style: { cursor: "pointer" },
+    onClick: (ev: React.MouseEvent) => { if (ev.ctrlKey || ev.metaKey) window.open(href, "_blank"); else router.push(href); },
+    onKeyDown: (ev: React.KeyboardEvent) => { if (ev.key === "Enter") router.push(href); },
+  } : {};
   const equipo = (x: number, y: number, tipo: Icono, color: string, it: { id: string; nombre: string; sub?: string; caido?: boolean; sinEstado?: boolean; titulo?: string }, largo = 17) => (
-    <g key={`${tipo}-${it.id}`} transform={`translate(${x},${y})`}>
+    <g key={`${tipo}-${it.id}`} transform={`translate(${x},${y})`} {...abrir(destinoDe(tipo, it.id))}>
       <title>{it.titulo ?? `${it.nombre}${it.sub ? ` · ${it.sub}` : ""}${it.caido ? " · caído" : ""}`}</title>
       <Dibujo tipo={tipo} color={it.caido ? ROJO : color} />
       <circle cx={ICO / 2 + 4} cy={-ICO / 2 + 6} r={4} fill={it.sinEstado ? "#9CA3AF" : it.caido ? ROJO : VERDE} />
@@ -446,7 +461,7 @@ function Sede({ s }: { s: { fg: any; dist: Eq[]; wans: Item[]; wansTodas?: Item[
 
           {s.unidades > 1 && <rect x={cFw.x} y={Y.fw - 40} width={cFw.w} height={116} rx={14} fill="none" stroke={fwCaido ? ROJO : LINEA} strokeWidth={1.5} strokeDasharray="6 5" />}
           {s.unidades > 1 && <text x={cFw.x + cFw.w - 10} y={Y.fw - 26} textAnchor="end" fontSize={10} fontWeight={700} fill={s.fg.ha_sincronizado === false ? ROJO : SUAVE}>HA{s.fg.ha_sincronizado === false ? " sin sincronizar" : ""}</text>}
-          {xFw.map((x, i) => <g key={i} transform={`translate(${x},${Y.fw})`}><Dibujo tipo="fw" color="#EF4444" /></g>)}
+          {xFw.map((x, i) => <g key={i} transform={`translate(${x},${Y.fw})`} {...abrir("/red/fortigate")}><title>Abrir FortiGate</title><Dibujo tipo="fw" color="#EF4444" /></g>)}
           {s.unidades > 1 && <line x1={xFw[0] + 26} x2={xFw[xFw.length - 1] - 26} y1={Y.fw} y2={Y.fw} stroke={LINEA} strokeWidth={2} strokeDasharray="3 3" />}
           <text x={cx} y={Y.fw + 36} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={INK}>{s.unidades > 1 ? `${s.unidades} × ` : ""}{corto(s.fg.nombre, 30)}</text>
           <text x={cx} y={Y.fw + 51} textAnchor="middle" fontSize={10.5} fill={SUAVE}>{[s.fg.modelo, s.fg.version && `FortiOS ${s.fg.version}`].filter(Boolean).join(" · ")}</text>

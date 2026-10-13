@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { COLOR, INTERNET, NODO, diagramar } from "@/lib/topologia";
 
@@ -8,7 +9,7 @@ import { COLOR, INTERNET, NODO, diagramar } from "@/lib/topologia";
 //   enlaces WAN y FortiGate (puente FortiGate) → switches (SNMP: vecinos LLDP/CDP) → servidores y antenas (tabla MAC + UniFi).
 type Tipo = "fg" | "sw" | "srv" | "ap" | "otro" | "resto";
 type Estado = "ok" | "caido" | "desconocido";
-type Nodo = { id: number; tipo: Tipo; nombre: string; sub: string; estado: Estado; lineas: string[]; supuesto?: boolean };
+type Nodo = { id: number; tipo: Tipo; nombre: string; sub: string; estado: Estado; lineas: string[]; supuesto?: boolean; href?: string };
 type Wan = { equipo: string; interfaz: string; nombre: string | null; bajada_mbps: number | null; subida_mbps: number | null; respaldo: boolean; conectado: boolean | null };
 
 const ROTULO: Record<Tipo, string> = { fg: "FortiGate", sw: "Switch", srv: "Servidor", ap: "Antena", otro: "Vecino", resto: "Otros equipos" };
@@ -21,7 +22,8 @@ const parecido = (v: string, nombres: (string | null | undefined)[]) =>
   v.length >= 3 && nombres.map(norm).some((n) => n.length >= 3 && (v === n || v.includes(n) || n.includes(v)));
 
 export default function EsquemaFisico() {
-  const [d, setD] = useState<{ fgs: any[]; wans: Wan[]; ifs: any[]; sws: any[]; puertos: any[]; disp: any[]; unifi: any[]; srvs: any[]; manual: Record<string, string> } | null>(null);
+  const router = useRouter();
+  const [d, setD] = useState<{ fgs: any[]; wans: Wan[]; ifs: any[]; sws: any[]; puertos: any[]; disp: any[]; unifi: any[]; srvs: any[]; invs: any[]; manual: Record<string, string> } | null>(null);
   const [avisos, setAvisos] = useState<string[]>([]);
   const [sel, setSel] = useState<number | null>(null);
   const [escala, setEscala] = useState(1);
@@ -38,13 +40,15 @@ export default function EsquemaFisico() {
       sb.from("unifi_equipos").select("mac,nombre,modelo,tipo,ip,estado,clientes"),
       sb.from("srv_servidores").select("nombre,rol,dispositivo_id,activo"),
       sb.from("red_esquema").select("clave,padre"),
-    ]).then(([fg, en, ifs, sw, pu, di, un, sr, ma]) => {
+      // Para abrir la ficha del equipo al tocarlo (si no hay acceso a Activos, simplemente no se enlaza)
+      sb.from("inv_dispositivos").select("id,equipo_id,hostname").not("equipo_id", "is", null),
+    ]).then(([fg, en, ifs, sw, pu, di, un, sr, ma, iv]) => {
       const a: string[] = [];
       if (fg.error) a.push("No se pudo leer el FortiGate (falta el puente o el permiso de la solapa).");
       if (sw.error || pu.error) a.push("No se pudieron leer los switches (falta el puente SNMP o el permiso de la solapa).");
       if (sr.error) a.push("No se pudieron leer los servidores: se muestran solo como equipos conectados.");
       setAvisos(a);
-      setD({ fgs: fg.data ?? [], wans: (en.data ?? []) as Wan[], ifs: ifs.data ?? [], sws: sw.data ?? [], puertos: pu.data ?? [], disp: di.data ?? [], unifi: un.data ?? [], srvs: sr.data ?? [], manual: Object.fromEntries((ma.data ?? []).map((r: any) => [r.clave, r.padre])) });
+      setD({ fgs: fg.data ?? [], wans: (en.data ?? []) as Wan[], ifs: ifs.data ?? [], sws: sw.data ?? [], puertos: pu.data ?? [], disp: di.data ?? [], unifi: un.data ?? [], srvs: sr.data ?? [], invs: iv.data ?? [], manual: Object.fromEntries((ma.data ?? []).map((r: any) => [r.clave, r.padre])) });
     });
   }, []);
 
@@ -170,6 +174,19 @@ export default function EsquemaFisico() {
       if (n) { const id = sig++; nodos.set(id, { id, tipo: "resto", nombre: `${n} ${n === 1 ? "equipo más" : "equipos más"}`, sub: "PC, impresoras, etc.", estado: "desconocido", lineas: ["Equipos en puertos de acceso. El detalle está en Infraestructura → Switches."] }); padre.set(id, idSw(s.id)); }
     }
 
+    // A dónde lleva cada equipo al tocarlo: su ficha en Activos si se identifica; si no, la pantalla que corresponde
+    const fichaDe = (nombre: string) => {
+      const v = norm(nombre);
+      const x = v.length >= 3 ? d.invs.find((i) => norm(i.hostname) === v) ?? d.invs.find((i) => parecido(v, [i.hostname])) : undefined;
+      return x ? `/inventario/equipos/${x.equipo_id}` : undefined;
+    };
+    for (const n of Array.from(nodos.values())) {
+      n.href = n.tipo === "fg" ? "/red/fortigate"
+        : n.tipo === "sw" ? `/red/switches?switch=${n.id - 1000}`
+        : n.tipo === "resto" ? ((padre.get(n.id) ?? 0) >= 1000 ? `/red/switches?switch=${(padre.get(n.id) ?? 0) - 1000}` : undefined)
+        : fichaDe(n.nombre) ?? (n.tipo === "ap" ? "/inventario/wifi?vista=equipos" : n.tipo === "srv" ? "/servidores" : undefined);
+    }
+
     const peso: Record<Tipo, number> = { fg: 0, sw: 1, srv: 2, ap: 3, otro: 4, resto: 5 };
     const dibujo = diagramar(padre, (a, b) => {
       const x = nodos.get(a), y = nodos.get(b);
@@ -282,7 +299,9 @@ export default function EsquemaFisico() {
               return (
                 <g key={n.id} transform={`translate(${n.x},${n.y})`} role="button" tabIndex={0} style={{ cursor: "pointer" }} aria-pressed={activo}
                   aria-label={`${ROTULO[e.tipo]} ${e.nombre}${e.estado === "caido" ? ", caído" : ""}`}
-                  onClick={() => setSel(activo ? null : n.id)} onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setSel(activo ? null : n.id); } }}>
+                  onClick={(ev) => { if (e.href && (ev.ctrlKey || ev.metaKey)) window.open(e.href, "_blank"); else if (e.href) router.push(e.href); else setSel(activo ? null : n.id); }}
+                  onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); if (e.href) router.push(e.href); else setSel(activo ? null : n.id); } }}>
+                  <title>{e.href ? `Abrir ${e.nombre}` : e.nombre}{e.lineas.length ? `\n${e.lineas.join("\n")}` : ""}</title>
                   <rect width={NODO.w} height={NODO.h} rx={10} fill="rgb(var(--c-surface))" stroke={activo ? "rgb(var(--c-brand))" : e.estado === "caido" ? COLOR.caido : "rgb(var(--c-line) / 0.16)"} strokeWidth={activo || e.estado === "caido" ? 2 : 1} />
                   <rect width={6} height={NODO.h} rx={3} fill={BORDE[e.tipo]} />
                   <text x={16} y={18} fontSize={9.5} fill="rgb(var(--c-ink) / 0.5)" style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}>{ROTULO[e.tipo]}</text>
