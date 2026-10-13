@@ -1,12 +1,11 @@
 -- ==========================================================
--- HELPDESK: AVISO A TEAMS CUANDO ENTRA UN TICKET NUEVO A UN SECTOR
---   * Cada ticket que aparece por primera vez en la lectura del sistema de tickets queda con su
---     hora de detección. Si está asignado a uno de los sectores elegidos (por defecto Ciberseguridad)
---     y no está cerrado, abre una alerta y sale una tarjeta a Teams (por el mismo canal de Alertas).
---   * El aviso sale apenas termina la lectura (cada 15 minutos), sin esperar la revisión de alertas.
---   * Los tickets que ya existían al ejecutar este archivo no avisan: solo los que entren desde ahora.
---   * Estas alertas nunca generan un ticket en el sistema de tickets (evita que un aviso cree un
---     ticket que a su vez vuelva a avisar).
+-- HELPDESK: AVISO A TEAMS CUANDO ENTRA UN TICKET NUEVO A UN SECTOR (canal propio)
+--   * Cada ticket que aparece por primera vez en la lectura del sistema de tickets queda con su hora
+--     de detección. Si está asignado a uno de los sectores elegidos (por defecto Ciberseguridad) y no
+--     está cerrado, se avisa a un canal de Teams PROPIO (otro webhook, distinto del de Alertas).
+--   * Sale apenas termina la lectura (cada 15 minutos): una tarjeta con todos los tickets nuevos.
+--   * Cada ticket se avisa una sola vez. Los que ya existían al ejecutar este archivo no avisan.
+--   * No pasa por Alertas: no abre alertas ni tickets.
 -- Ejecutar en el SQL Editor, DESPUÉS de alertas.sql, tickets.sql y tickets-lectura.sql.
 -- Se puede volver a ejecutar sin problema.
 -- ==========================================================
@@ -14,55 +13,127 @@
 -- Hora en que la lectura vio cada ticket por primera vez (las filas que ya existen quedan sin hora: no avisan)
 alter table public.tickets_ext add column if not exists detectado timestamptz;
 alter table public.tickets_ext alter column detectado set default now();
+alter table public.tickets_ext add column if not exists avisado timestamptz;
 
 alter table public.tickets_config
   add column if not exists aviso_activo boolean not null default true,
-  add column if not exists aviso_sectores text not null default 'Ciberseguridad';   -- separados por coma
+  add column if not exists aviso_sectores text not null default 'Ciberseguridad',   -- separados por coma
+  add column if not exists aviso_webhook text,                                      -- canal de Teams propio
+  add column if not exists aviso_ultimo timestamptz,
+  add column if not exists aviso_error text;
 
 -- ----------------------------------------------------------
--- Condición de alerta: ticket nuevo (detectado en las últimas 24 h y creado hace menos de 3 días)
+-- Envío de la tarjeta (al webhook propio). Devuelve null si salió bien, o el error.
 -- ----------------------------------------------------------
-create or replace function public.helpdesk_condiciones_alertas()
-returns void language plpgsql security definer set search_path = public as $$
-declare c tickets_config;
+create or replace function public.helpdesk_teams(p_titulo text, p_lineas text[], p_url text default null)
+returns text language plpgsql security definer set search_path = public, extensions as $$
+declare
+  c tickets_config;
+  v_app text := (select url_app from alertas_config where id = 1);
+  v_body jsonb := '[]'::jsonb;
+  v_acciones jsonb := '[]'::jsonb;
+  v_linea text;
+  r record;
 begin
   select * into c from tickets_config where id = 1;
-  if c.id is null or not coalesce(c.aviso_activo, false) or tickets_norm(c.aviso_sectores) = '' then return; end if;
+  if c.aviso_webhook is null then return 'Falta cargar el webhook del canal de Teams'; end if;
 
-  insert into _cond
-  select 'helpdesk:nuevo:' || t.id, 'helpdesk_nuevo', 'info',
-         'Ticket nuevo para ' || coalesce(nullif(t.sector, ''), 'el área') || ': '
-           || coalesce('#' || nullif(t.numero, '') || ' ', '#' || t.id || ' ') || coalesce(left(t.titulo, 120), '(sin título)'),
-         concat_ws(' · ', 'de ' || nullif(t.solicitante, ''), nullif(t.cliente, ''), nullif(t.tipo, ''),
-                   'prioridad ' || nullif(t.prioridad, ''), 'asignado a ' || nullif(t.asignado, ''),
-                   to_char(coalesce(t.creado, t.detectado) at time zone 'America/Argentina/Buenos_Aires', 'DD/MM HH24:MI')),
-         '/helpdesk'
-    from tickets_ext t
-   where t.bandeja = 'asignado' and t.grupo <> 'cerrado'
-     and t.detectado > now() - interval '24 hours'
-     and coalesce(t.creado, t.detectado) > now() - interval '3 days'
-     and exists (select 1
-                   from unnest(string_to_array(coalesce(t.sector, ''), ',')) ts,
-                        unnest(string_to_array(c.aviso_sectores, ',')) s
-                  where tickets_norm(s) <> '' and tickets_norm(ts) = tickets_norm(s))
-  on conflict do nothing;
+  v_body := v_body || jsonb_build_object('type', 'TextBlock', 'size', 'Medium', 'weight', 'Bolder', 'wrap', true, 'text', p_titulo);
+  foreach v_linea in array coalesce(p_lineas, '{}') loop
+    v_body := v_body || jsonb_build_object('type', 'TextBlock', 'wrap', true, 'spacing', 'Small', 'text', v_linea);
+  end loop;
+  if coalesce(p_url, '') ~ '^https?://' then
+    v_acciones := v_acciones || jsonb_build_object('type', 'Action.OpenUrl', 'title', 'Abrir el ticket', 'url', p_url);
+  end if;
+  if coalesce(v_app, '') ~ '^https://' then
+    v_acciones := v_acciones || jsonb_build_object('type', 'Action.OpenUrl', 'title', 'Ver en Accusys Cyber', 'url', rtrim(v_app, '/') || '/helpdesk');
+  end if;
+
+  begin
+    begin
+      perform http_set_curlopt('CURLOPT_TIMEOUT_MS', '8000');
+    exception when others then null;
+    end;
+    select * into r from http_post(c.aviso_webhook, jsonb_build_object(
+      'type', 'message',
+      'attachments', jsonb_build_array(jsonb_build_object(
+        'contentType', 'application/vnd.microsoft.card.adaptive', 'contentUrl', null,
+        'content', jsonb_build_object('$schema', 'http://adaptivecards.io/schemas/adaptive-card.json', 'type', 'AdaptiveCard', 'version', '1.4',
+                                      'msteams', jsonb_build_object('width', 'Full'), 'body', v_body, 'actions', v_acciones))))::text,
+      'application/json');
+    if r.status between 200 and 299 then
+      update tickets_config set aviso_ultimo = now(), aviso_error = null where id = 1;
+      return null;
+    end if;
+    update tickets_config set aviso_error = 'Teams respondió ' || r.status || ': ' || left(coalesce(r.content, ''), 200) where id = 1;
+    return 'Teams respondió ' || r.status;
+  exception when others then
+    update tickets_config set aviso_error = left(sqlerrm, 300) where id = 1;
+    return left(sqlerrm, 300);
+  end;
 end $$;
-revoke all on function public.helpdesk_condiciones_alertas() from public, anon, authenticated;
+revoke all on function public.helpdesk_teams(text, text[], text) from public, anon, authenticated;
 
 -- ----------------------------------------------------------
--- Lectura automática: después de leer, si entró algún ticket nuevo, avisar enseguida
+-- Tickets nuevos de los sectores elegidos, todavía sin avisar
+-- ----------------------------------------------------------
+create or replace function public.helpdesk_avisar()
+returns int language plpgsql security definer set search_path = public as $$
+declare
+  c tickets_config;
+  v_ids text[];
+  v_lineas text[];
+  v_url text;
+  v_n int;
+begin
+  select * into c from tickets_config where id = 1;
+  if c.id is null or not coalesce(c.aviso_activo, false) or c.aviso_webhook is null or tickets_norm(c.aviso_sectores) = '' then return 0; end if;
+
+  select array_agg(t.id order by coalesce(t.creado, t.detectado)),
+         array_agg('**' || coalesce('#' || nullif(t.numero, ''), '#' || t.id) || ' · ' || coalesce(left(t.titulo, 140), '(sin título)') || '**'
+                   || coalesce(' — ' || nullif(concat_ws(' · ', 'de ' || nullif(t.solicitante, ''), nullif(t.cliente, ''), nullif(t.tipo, ''),
+                                                    'prioridad ' || nullif(t.prioridad, ''), 'asignado a ' || nullif(t.asignado, ''),
+                                                    to_char(coalesce(t.creado, t.detectado) at time zone 'America/Argentina/Buenos_Aires', 'DD/MM HH24:MI')), ''), '')
+                   order by coalesce(t.creado, t.detectado)),
+         min(t.url)
+    into v_ids, v_lineas, v_url
+    from (select distinct on (x.id) x.* from tickets_ext x
+           where x.bandeja = 'asignado' and x.grupo <> 'cerrado' and x.avisado is null
+             and x.detectado > now() - interval '24 hours'
+             and coalesce(x.creado, x.detectado) > now() - interval '3 days'
+             and exists (select 1
+                           from unnest(string_to_array(coalesce(x.sector, ''), ',')) ts,
+                                unnest(string_to_array(c.aviso_sectores, ',')) s
+                          where tickets_norm(s) <> '' and tickets_norm(ts) = tickets_norm(s))
+           order by x.id) t;
+
+  v_n := coalesce(cardinality(v_ids), 0);
+  if v_n = 0 then return 0; end if;
+
+  if helpdesk_teams(
+       case when v_n = 1 then 'HelpDesk · Ticket nuevo para ' || trim(c.aviso_sectores)
+            else 'HelpDesk · ' || v_n || ' tickets nuevos para ' || trim(c.aviso_sectores) end,
+       v_lineas[1:20] || case when v_n > 20 then array['…y ' || (v_n - 20) || ' más.'] else '{}'::text[] end,
+       case when v_n = 1 then v_url end) is null then
+    update tickets_ext set avisado = now() where id = any(v_ids) and avisado is null;
+  end if;
+  return v_n;
+end $$;
+revoke all on function public.helpdesk_avisar() from public, anon, authenticated;
+
+-- ----------------------------------------------------------
+-- Lectura automática: después de leer, avisar los tickets nuevos
 -- ----------------------------------------------------------
 create or replace function public.tickets_leer_auto()
 returns void language plpgsql security definer set search_path = public as $$
-declare v_desde timestamptz := now();
 begin
   if (select lectura_activa and lectura_url is not null from tickets_config where id = 1) then
     perform tickets_leer();
-    if exists (select 1 from tickets_ext where detectado >= v_desde)
-       and to_regprocedure('public.alertas_evaluar(boolean)') is not null then
+    if to_regprocedure('public.helpdesk_avisar()') is not null then
       begin
-        perform alertas_evaluar(true);
-      exception when others then null;   -- un problema con Teams no puede frenar la lectura
+        perform helpdesk_avisar();
+      exception when others then
+        update tickets_config set aviso_error = left(sqlerrm, 300) where id = 1;   -- nunca frenar la lectura
       end;
     end if;
   end if;
@@ -75,15 +146,24 @@ create or replace function public.helpdesk_aviso_ver()
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 begin
   if mi_rol() is distinct from 'administrador' then raise exception 'Solo administradores'; end if;
-  return (select jsonb_build_object('activo', aviso_activo, 'sectores', aviso_sectores) from tickets_config where id = 1);
+  return (select jsonb_build_object('activo', aviso_activo, 'sectores', aviso_sectores,
+                                    'webhook', aviso_webhook is not null, 'ultimo', aviso_ultimo, 'error', aviso_error)
+            from tickets_config where id = 1);
 end $$;
 revoke all on function public.helpdesk_aviso_ver() from public, anon;
 grant execute on function public.helpdesk_aviso_ver() to authenticated;
 
+-- p: {activo?, sectores?, webhook?}   webhook: si no viene, no se toca; si viene vacío, se quita.
 create or replace function public.helpdesk_aviso_guardar(p jsonb)
 returns void language plpgsql security definer set search_path = public as $$
+declare v_url text;
 begin
   if mi_rol() is distinct from 'administrador' then raise exception 'Solo administradores'; end if;
+  if p ? 'webhook' then
+    v_url := nullif(trim(p ->> 'webhook'), '');
+    if v_url is not null and v_url !~* '^https://' then raise exception 'La dirección del webhook tiene que empezar con https://'; end if;
+    update tickets_config set aviso_webhook = v_url, aviso_error = null where id = 1;
+  end if;
   update tickets_config set
     aviso_activo = coalesce((p ->> 'activo')::boolean, aviso_activo),
     aviso_sectores = coalesce(nullif(trim(p ->> 'sectores'), ''), aviso_sectores)
@@ -92,46 +172,15 @@ end $$;
 revoke all on function public.helpdesk_aviso_guardar(jsonb) from public, anon;
 grant execute on function public.helpdesk_aviso_guardar(jsonb) to authenticated;
 
--- ----------------------------------------------------------
--- Enganches: condiciones de alertas y exclusión de la integración alerta → ticket
--- ----------------------------------------------------------
-do $$
-declare v_def text;
+create or replace function public.helpdesk_aviso_probar()
+returns text language plpgsql security definer set search_path = public as $$
+declare v_err text;
 begin
-  if to_regprocedure('public.alertas_condiciones_extra()') is null then
-    execute $f$
-      create function public.alertas_condiciones_extra()
-      returns void language plpgsql security definer set search_path = public as $b$
-      begin
-        null;
-      end $b$;
-    $f$;
-    revoke all on function public.alertas_condiciones_extra() from public, anon, authenticated;
-  end if;
-
-  v_def := pg_get_functiondef('public.alertas_condiciones_extra()'::regprocedure);
-  if position('helpdesk_condiciones_alertas' in v_def) = 0 then
-    v_def := regexp_replace(v_def, E'begin\\n',
-      E'begin\n  if to_regprocedure(''public.helpdesk_condiciones_alertas()'') is not null then perform helpdesk_condiciones_alertas(); end if;\n');
-    execute v_def;
-  end if;
-
-  if to_regprocedure('public.alertas_evaluar(boolean)') is not null then
-    v_def := pg_get_functiondef('public.alertas_evaluar(boolean)'::regprocedure);
-    if position('alertas_condiciones_extra' in v_def) = 0 and position('-- Abrir las nuevas' in v_def) > 0 then
-      v_def := replace(v_def, '-- Abrir las nuevas',
-        E'-- Condiciones de otros módulos\n  if to_regprocedure(''public.alertas_condiciones_extra()'') is not null then\n    perform alertas_condiciones_extra();\n  end if;\n\n  -- Abrir las nuevas');
-      execute v_def;
-    end if;
-  end if;
-
-  -- Un aviso de ticket nuevo nunca debe abrir otro ticket
-  if to_regprocedure('public.tickets_por_alerta()') is not null then
-    v_def := pg_get_functiondef('public.tickets_por_alerta()'::regprocedure);
-    if position('helpdesk_nuevo' in v_def) = 0 then
-      v_def := regexp_replace(v_def, E'begin\\n',
-        E'begin\n  if new.regla = ''helpdesk_nuevo'' then return new; end if;\n');
-      execute v_def;
-    end if;
-  end if;
+  if mi_rol() is distinct from 'administrador' then raise exception 'Solo administradores'; end if;
+  v_err := helpdesk_teams('HelpDesk · Prueba de aviso',
+                          array['Este canal va a recibir los tickets nuevos de: ' || (select aviso_sectores from tickets_config where id = 1)]);
+  if v_err is not null then raise exception '%', v_err; end if;
+  return 'Mensaje de prueba enviado';
 end $$;
+revoke all on function public.helpdesk_aviso_probar() from public, anon;
+grant execute on function public.helpdesk_aviso_probar() to authenticated;

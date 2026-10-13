@@ -15,9 +15,10 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
   const [generados, setGenerados] = useState(true);
   // Seguimiento (mensajes y recorrido de cada ticket): se configura aparte, con helpdesk.sql
   const [seg, setSeg] = useState<{ activo: boolean; privados: boolean; pendientes: number; cerrados_pendientes?: number; error: string | null } | null>(null);
-  // Aviso a Teams de tickets nuevos (helpdesk-avisos.sql)
-  const [aviso, setAviso] = useState<{ activo: boolean; sectores: string } | null>(null);
+  // Aviso a Teams de tickets nuevos, por un canal propio (helpdesk-avisos.sql)
+  const [aviso, setAviso] = useState<{ activo: boolean; sectores: string; webhook: boolean; ultimo: string | null; error: string | null } | null>(null);
   const [avisoSectores, setAvisoSectores] = useState("");
+  const [avisoWebhook, setAvisoWebhook] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [falta, setFalta] = useState(false);
@@ -31,8 +32,8 @@ export default function TicketsLectura({ alLeer }: { alLeer?: () => void }) {
   const cargarAviso = () => createClient().rpc("helpdesk_aviso_ver").then(({ data, error }) => {
     setAviso(error ? null : data); if (!error && data) setAvisoSectores(data.sectores ?? "");
   });
-  const guardarAviso = (p: { activo?: boolean; sectores?: string }) => createClient().rpc("helpdesk_aviso_guardar", { p }).then(({ error }) => {
-    if (error) setMsg({ ok: false, texto: error.message }); else { setMsg({ ok: true, texto: "Aviso guardado" }); cargarAviso(); }
+  const guardarAviso = (p: { activo?: boolean; sectores?: string; webhook?: string }) => createClient().rpc("helpdesk_aviso_guardar", { p }).then(({ error }) => {
+    if (error) setMsg({ ok: false, texto: error.message }); else { setMsg({ ok: true, texto: "Aviso guardado" }); setAvisoWebhook(""); cargarAviso(); }
   });
   useEffect(() => { cargar(); cargarSeg(); cargarAviso(); }, []);
 
@@ -136,13 +137,30 @@ https://workdesk.accusys.com.ar/api/dashboard/bandejas/subarea/50?idEmpresa=1&ti
           <div className="text-sm font-medium text-ink">Aviso a Teams de tickets nuevos</div>
           <label className="flex items-center gap-2 text-sm text-ink/80">
             <input type="checkbox" checked={aviso.activo} onChange={(e) => guardarAviso({ activo: e.target.checked })} />
-            Avisar por Teams cada ticket nuevo asignado a estos sectores
+            Avisar cada ticket nuevo asignado a estos sectores
           </label>
-          <div className="flex items-center gap-2 flex-wrap">
-            <input className="input max-w-md" value={avisoSectores} onChange={(e) => setAvisoSectores(e.target.value)} placeholder="Ciberseguridad" aria-label="Sectores para el aviso" />
-            <button className="btn-secondary" disabled={!avisoSectores.trim() || avisoSectores.trim() === aviso.sectores} onClick={() => guardarAviso({ sectores: avisoSectores })}>Guardar sectores</button>
+          <div className="grid md:grid-cols-12 gap-2 items-end">
+            <div className="md:col-span-4"><label className="label" htmlFor="av-sec">Sectores (separados por coma)</label>
+              <input id="av-sec" className="input" value={avisoSectores} onChange={(e) => setAvisoSectores(e.target.value)} placeholder="Ciberseguridad" /></div>
+            <div className="md:col-span-6"><label className="label" htmlFor="av-wh">Webhook del canal de Teams</label>
+              <input id="av-wh" className="input" value={avisoWebhook} onChange={(e) => setAvisoWebhook(e.target.value)}
+                placeholder={aviso.webhook ? "Configurado. Pegá otro para reemplazarlo" : "https://…logic.azure.com/… o https://…powerplatform.com/…"} /></div>
+            <div className="md:col-span-2">
+              <button className="btn-secondary w-full" disabled={!avisoSectores.trim() || (avisoSectores.trim() === aviso.sectores && !avisoWebhook.trim())}
+                onClick={() => guardarAviso({ sectores: avisoSectores, ...(avisoWebhook.trim() ? { webhook: avisoWebhook } : {}) })}>Guardar</button>
+            </div>
           </div>
-          <p className="text-xs text-ink/50">Separados por coma, con el nombre tal como figura en el sector del ticket. El aviso sale apenas termina cada lectura (cada 15 minutos) por el canal de Teams de Alertas.</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <button className="btn-secondary" disabled={ocupado || !aviso.webhook} onClick={() => correr(() => sb.rpc("helpdesk_aviso_probar"), "Mensaje de prueba enviado")}>Enviar prueba</button>
+            <span className="text-xs text-ink/50">
+              {!aviso.webhook ? "Falta cargar el webhook." : aviso.ultimo ? `Último aviso: ${new Date(aviso.ultimo).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour12: false })}` : "Todavía no se envió ningún aviso."}
+            </span>
+          </div>
+          <p className="text-xs text-ink/50">
+            Es un canal propio, distinto del de Alertas. En el canal de Teams elegido: <b>…</b> → <b>Flujos de trabajo</b> → <b>“Publicar en un canal cuando se reciba
+            una solicitud de webhook”</b>, y pegá acá la dirección que te da. El aviso sale apenas termina cada lectura (cada 15 minutos).
+          </p>
+          {aviso.error && <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2 break-words">Último error del aviso: {aviso.error}</p>}
         </div>
       ) : (
         <p className="text-xs text-ink/50 border-t border-line/10 pt-3">Para recibir en Teams los tickets nuevos de un sector, ejecutá supabase/helpdesk-avisos.sql en Supabase.</p>
