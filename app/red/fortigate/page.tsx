@@ -657,7 +657,7 @@ function Contenido() {
               <table className="data w-full">
                 <thead><tr><th>Fecha</th><th>FortiGate</th><th>Usuario</th><th>Resultado</th><th>Desde</th><th>Por</th><th>Detalle</th></tr></thead>
                 <tbody>
-                  {!lista.length && vacio(7, accesos.length ? "Nada coincide con el filtro." : "Sin datos todavía. Hace falta el puente 1.5 (generá el instalador de nuevo) y que el usuario de API pueda leer Log & Report.")}
+                  {!lista.length && vacio(7, accesos.length ? "Nada coincide con el filtro." : "Sin datos todavía. Hace falta el puente 1.6 (generá el instalador de nuevo) y que el usuario de API pueda leer Log & Report.")}
                   {lista.slice(0, 500).map((x) => (
                     <tr key={x.id}>
                       <td className="text-sm whitespace-nowrap">{new Date(x.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} <span className="text-xs text-ink/50">· {hace(x.fecha, ahora)}</span></td>

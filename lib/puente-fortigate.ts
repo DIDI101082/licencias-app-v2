@@ -7,7 +7,7 @@
 // y sin here-strings (va dentro del here-string del instalador).
 import { envolverEnCmd } from "./agente";
 
-export const PUENTE_FORTIGATE_VERSION = "1.5";
+export const PUENTE_FORTIGATE_VERSION = "1.6";
 
 export type EquipoFortiGate = {
   nombre: string;       // cómo se va a ver en la app (ej. "Reconquista")
@@ -167,20 +167,52 @@ function Revisar-Config($eq, $serial) {
 }
 
 # ---------- Logs (desde FortiAnalyzer a traves del FortiGate; si no, del disco o la memoria) ----------
-function Logs($eq, $tipos, $filas, $desdeMs) {
-  # $tipos: una o varias rutas posibles (ej. 'ips'); se prueba FortiAnalyzer, disco y memoria
-  $ultimo = ''
+function Logs($eq, $tipos, $filas, $desdeMs, $filtrosFaz) {
+  # $tipos: una o varias rutas posibles (ej. 'ips'); se prueba FortiAnalyzer, disco y memoria.
+  # FortiAnalyzer: el filtro por hora devuelve vacio y con mas de 500 filas no responde, asi que se piden
+  # las 500 mas recientes (primero con un filtro por contenido si se indica) y la app descarta las repetidas.
+  $ultimo = ''; $vacio = $null; $pendiente = ''
   foreach ($origen in @('fortianalyzer', 'disk', 'memory')) {
     foreach ($tipo in @($tipos)) {
-      try {
-        $r = Api $eq ('/api/v2/log/' + $origen + '/' + $tipo + '?rows=' + $filas + '&filter=' + [Uri]::EscapeDataString('_metadata.timestamp>=' + $desdeMs))
-        if ($null -ne $r -and $r.PSObject.Properties['results']) { return @{ origen = $origen; filas = @($r.results) } }
-      } catch {
-        $st = $null; try { $st = [int]$_.Exception.Response.StatusCode } catch {}
-        if ($st) { $ultimo = $origen + ' ' + $st } else { $ultimo = $origen + ' ' + $_.Exception.Message }
+      if ($origen -eq 'fortianalyzer') { $variantes = @(@($filtrosFaz) | Where-Object { $_ }) + @(''); $cant = [Math]::Min([int]$filas, 500) }
+      else { $variantes = @('_metadata.timestamp>=' + $desdeMs); $cant = $filas }
+      foreach ($fil in $variantes) {
+        try {
+          $ruta = '/api/v2/log/' + $origen + '/' + $tipo + '?rows=' + $cant
+          if ($fil) { $ruta = $ruta + '&filter=' + [Uri]::EscapeDataString($fil) }
+          $r = Api $eq $ruta
+          # FortiAnalyzer busca en segundo plano: se vuelve a preguntar con el session_id hasta completed = 100.
+          # Hasta 60 segundos si la busqueda avanza; si queda trabada (por ejemplo en 0%) se abandona a los pocos intentos.
+          $sid = Prop $r 'session_id'
+          if ($null -ne $sid -and [string]$sid -ne '') {
+            $n = 0; $prev = -1; $quieto = 0
+            while ($n -lt 30) {
+              $comp = Prop $r 'completed'
+              if ($null -eq $comp -or [double]$comp -ge 100) { break }
+              if ([double]$comp -le $prev) { $quieto++ } else { $quieto = 0 }
+              if ($quieto -ge 4) { break }
+              $prev = [double]$comp
+              Start-Sleep -Seconds 2; $n++
+              $r = Api $eq ($ruta + '&session_id=' + $sid)
+            }
+            $comp = Prop $r 'completed'
+            if ($null -ne $comp -and [double]$comp -lt 100) { $pendiente = $origen + ' no termino la busqueda a tiempo (' + $comp + '%)'; continue }
+          }
+          if ($null -ne $r -and $r.PSObject.Properties['results']) {
+            $f = @($r.results | Where-Object { $null -ne $_ })
+            if ($f.Count -gt 0) { return @{ origen = $origen; filas = $f } }
+            if ($null -eq $vacio) { $vacio = @{ origen = $origen; filas = @() } }
+          }
+        } catch {
+          $st = $null; try { $st = [int]$_.Exception.Response.StatusCode } catch {}
+          if ($st) { $ultimo = $origen + ' ' + $st } else { $ultimo = $origen + ' ' + $_.Exception.Message }
+        }
       }
     }
   }
+  if ($pendiente) { [void]$script:avisos.Add('logs ' + (@($tipos)[0]) + ': ' + $pendiente) }
+  # Algun origen respondio pero sin filas: no hubo eventos en el periodo
+  if ($null -ne $vacio) { return $vacio }
   $txt = 'no se pudieron leer'
   if ($ultimo -match ' (401|403)$') { $txt = 'sin permiso (revisar que el perfil tenga lectura de Log & Report)' } elseif ($ultimo) { $txt = $txt + ' (' + $ultimo + ')' }
   [void]$script:avisos.Add('logs ' + (@($tipos)[0]) + ': ' + $txt)
@@ -299,7 +331,7 @@ function Consultar-FortiGate($eq) {
 
   # Administracion: inicios de sesion, intentos fallidos y cierres de las ultimas 2 horas (log de eventos del sistema).
   # No se cuentan las consultas por API (las hace este mismo puente).
-  $la = Logs $eq 'event/system' 2000 $desde
+  $la = Logs $eq 'event/system' 500 $desde @('action==login'); $lo = Logs $eq 'event/system' 500 $desde @('action==logout'); $la = @{ origen = $la.origen; filas = @(@($la.filas) + @($lo.filas)) }
   $usuariosApi = @()
   try { $usuariosApi = @(@(Prop (Api $eq '/api/v2/cmdb/system/api-user') 'results') | ForEach-Object { [string](Prop $_ 'name') } | Where-Object { $_ }) } catch {}
   $r.admin_logins = @($la.filas | Where-Object { ($usuariosApi -notcontains [string](Prop $_ 'user')) -and ([string](Prop $_ 'logdesc') -match '^Admin (login|logout)' -or [string](Prop $_ 'logid') -match '^01000320(01|02|03|21)$') -and [string](Prop $_ 'ui') -notmatch '^api' -and [string](Prop $_ 'method') -notmatch '^api' } | Select-Object -First 300 | ForEach-Object {
@@ -430,6 +462,8 @@ $puente = @'
 __PUENTE__
 '@
 Set-Content -Path $Script -Value $puente -Encoding UTF8
+# Si el archivo existia y tenia la marca de descargado de Internet, la tarea programada no lo podria ejecutar
+Unblock-File -Path $Script -ErrorAction SilentlyContinue
 
 $accion  = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $Script + '"')
 $periodo = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes __INTERVALO__)
