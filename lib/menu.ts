@@ -76,6 +76,8 @@ export const TEMAS: Tema[] = [
   { id: "gobierno", label: "Gobierno", titulo: "Cumplimiento, normativa, incidentes y registros", paginas: [
     { href: "/inventario/cumplimiento", label: "Cumplimiento" },
     { href: "/inventario/normativa", label: "Normativa" },
+    { href: "/inventario/normativa/soa", label: "Declaración de aplicabilidad" },
+    { href: "/inventario/normativa/riesgos", label: "Registro de riesgos" },
     { href: "/inventario/informe", label: "Informe mensual" },
     { href: "/inventario/incidentes", label: "Incidentes" },
     { href: "/auditoria/revision", label: "Revisión de accesos" },
