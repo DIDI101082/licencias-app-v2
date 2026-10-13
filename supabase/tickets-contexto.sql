@@ -60,6 +60,7 @@ declare
   q record;
   dj jsonb;
   det jsonb;
+  fc jsonb;
   equipos jsonb := '[]'::jsonb;
 begin
   select token_hash into v_hash from tickets_integracion where id = 1;
@@ -118,6 +119,21 @@ begin
           exception when others then null;
           end;
         end if;
+        -- FortiClient instalado y la versión más nueva que hay en la flota (para el diagnóstico de VPN)
+        fc := null;
+        if dj is not null then
+          begin
+            select jsonb_build_object('nombre', a.nombre, 'version', a.version,
+                     'ultima', (select a2.version from inv_dispositivo_apps a2
+                                 where a2.nombre = a.nombre and a2.ultimo_visto > now() - interval '30 days' and a2.version ~ '^[0-9]+(\.[0-9]+)*$'
+                                 order by string_to_array(a2.version, '.')::int[] desc limit 1))
+              into fc
+              from inv_dispositivo_apps a
+             where a.dispositivo_id = (dj ->> 'id')::uuid and a.nombre ~* 'forticlient'
+             order by a.ultimo_visto desc limit 1;
+          exception when others then null;
+          end;
+        end if;
         equipos := equipos || jsonb_build_array(jsonb_build_object(
           'id', q.j ->> 'id',
           'codigo', q.j ->> 'codigo',
@@ -134,7 +150,12 @@ begin
           'reinicio_pendiente', (dj ->> 'reinicio_pendiente')::boolean,
           'ultimo_parche', dj ->> 'ultimo_parche',
           'ubicacion', dj ->> 'ubicacion_tipo',
-          'eset', det));
+          'eset', det,
+          'discos', case when jsonb_typeof(dj -> 'discos') = 'array' then dj -> 'discos' end,
+          'ram_total_gb', dj -> 'ram_total_gb',
+          'ram_libre_gb', dj -> 'ram_libre_gb',
+          'arranque', dj ->> 'arranque',
+          'forticlient', fc));
       end loop;
       r := r || jsonb_build_object('equipos', equipos);
     exception when others then null;
