@@ -376,36 +376,52 @@ export default function TablasMejoradas() {
     if (!main) return;
     const tablas = new Map<HTMLTableElement, TablaMejorada>();
     let pendiente = 0;
+    // Solo se reacomodan las tablas que cambiaron; si cambió algo fuera de una tabla (una tabla nueva,
+    // otra pestaña), se revisa todo. Así las pantallas que se actualizan solas no recalculan cada tabla.
+    let todas = true;
+    const sucias = new Set<HTMLTableElement>();
 
+    const preparar = (t: HTMLTableElement) => {
+      if (t.hasAttribute("data-sin-filtros")) return;
+      let m = tablas.get(t);
+      if (!m) { m = new TablaMejorada(t, ruta); tablas.set(t, m); }
+      m.actualizar();
+    };
     const escanear = () => {
       pendiente = 0;
-      // Tablas que desaparecieron (cambio de pestaña, etc.)
-      tablas.forEach((m, t) => { if (!t.isConnected) { m.destruir(); tablas.delete(t); } });
-      main.querySelectorAll<HTMLTableElement>("table.data").forEach((t) => {
-        if (t.hasAttribute("data-sin-filtros")) return;
-        let m = tablas.get(t);
-        if (!m) { m = new TablaMejorada(t, ruta); tablas.set(t, m); }
-        m.actualizar();
-      });
+      if (todas) {
+        // Tablas que desaparecieron (cambio de pestaña, etc.)
+        tablas.forEach((m, t) => { if (!t.isConnected) { m.destruir(); tablas.delete(t); } });
+        main.querySelectorAll<HTMLTableElement>("table.data").forEach(preparar);
+      } else {
+        sucias.forEach((t) => { if (t.isConnected) preparar(t); });
+      }
+      todas = false;
+      sucias.clear();
     };
-    const programar = () => { if (!pendiente) pendiente = requestAnimationFrame(escanear); };
+    const programar = (t: HTMLTableElement | null) => {
+      if (t) sucias.add(t); else todas = true;
+      if (!pendiente) pendiente = requestAnimationFrame(escanear);
+    };
+    const tablaDe = (n: Node | null) => ((n && (n.nodeType === 1 ? (n as Element) : n.parentElement))?.closest("table.data") as HTMLTableElement | null) ?? null;
 
     // Se reacomoda cuando la pantalla cambia filas o textos (ignorando lo que agrega este componente)
     const obs = new MutationObserver((cambios) => {
       const propios = (n: Node | null) => !!(n && (n.nodeType === 1 ? (n as Element) : n.parentElement)?.closest(`[${MARCA}]`));
-      const relevante = cambios.some((c) => {
-        if (propios(c.target)) return false;
+      for (const c of cambios) {
+        if (propios(c.target)) continue;
         if (c.type === "childList") {
           const nodos = [...Array.from(c.addedNodes), ...Array.from(c.removedNodes)];
-          return nodos.length === 0 || nodos.some((n) => !(n.nodeType === 1 && (n as Element).hasAttribute(MARCA)));
+          if (nodos.length && nodos.every((n) => n.nodeType === 1 && (n as Element).hasAttribute(MARCA))) continue;
+          // Si lo que entró o salió es (o contiene) una tabla, se revisa todo
+          if (nodos.some((n) => n.nodeType === 1 && ((n as Element).matches("table.data") || !!(n as Element).querySelector("table.data")))) { programar(null); continue; }
         }
-        return true;
-      });
-      if (relevante) programar();
+        programar(tablaDe(c.target));
+      }
     });
     obs.observe(main, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["value", "checked"] });
     // Cambios en <select> e inputs (no generan mutaciones)
-    const alCambiar = () => programar();
+    const alCambiar = (e: Event) => programar(tablaDe(e.target as Node));
     main.addEventListener("change", alCambiar);
     escanear();
 
