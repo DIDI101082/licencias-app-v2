@@ -65,7 +65,7 @@ export default function Alertas() {
   const cargar = async () => {
     const sb = createClient();
     const [a, c] = await Promise.all([
-      sb.from("alertas").select("*").gte("abierta", new Date(Date.now() - 90 * 86400000).toISOString())
+      sb.from("alertas").select("*").or(`resuelta.is.null,abierta.gte.${new Date(Date.now() - 90 * 86400000).toISOString()}`)
         .order("abierta", { ascending: false }).limit(1000),
       sb.rpc("alertas_config_ver"),
     ]);

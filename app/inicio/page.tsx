@@ -10,6 +10,7 @@ import { ESTADO_INT, type Integracion } from "@/components/integraciones";
 
 type Datos = {
   alertas?: Record<string, number>;
+  confirmadas?: number;
   por_dia?: { dia: string; n: number }[];
   urgentes?: { id: number; severidad: string; titulo: string; detalle: string | null; enlace: string | null; abierta: string }[] | null;
   securescore?: { actual: number; maximo: number; promedio: number | null } | null;
@@ -71,12 +72,13 @@ export default function Inicio() {
           {cumplimiento != null && <Medidor v={cumplimiento} color={cumplimiento >= 80 ? "bg-emerald-500" : cumplimiento >= 60 ? "bg-amber-500" : "bg-red-500"} />}
         </Link>
         <Link href="/auditoria/alertas" className="card p-5 hover:ring-1 hover:ring-line/20">
-          <div className="text-xs text-ink/50 font-medium">Alertas abiertas</div>
+          <div className="text-xs text-ink/50 font-medium">Alertas sin confirmar</div>
           <div className="font-display text-3xl mt-1 tabular-nums">{d ? totalAlertas : "—"}</div>
           <div className="flex flex-wrap gap-1 mt-2">
             {SEV.filter(([k]) => d?.alertas?.[k]).map(([k, t, c]) => <span key={k} className={`pill ${c}`}>{d!.alertas![k]} {t}</span>)}
             {d && !totalAlertas && <span className="text-xs text-emerald-700">Nada pendiente</span>}
           </div>
+          {!!d?.confirmadas && <div className="text-xs text-ink/50 mt-2">{d.confirmadas} confirmada{d.confirmadas > 1 ? "s" : ""} siguen abiertas hasta que se resuelvan</div>}
         </Link>
         <Link href="/inventario/securescore" className="card p-5 hover:ring-1 hover:ring-line/20">
           <div className="text-xs text-ink/50 font-medium">Secure Score de Microsoft 365</div>
