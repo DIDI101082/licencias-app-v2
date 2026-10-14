@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import TicketsConfig from "@/components/TicketsConfig";
+import { usePerfil } from "@/components/PerfilContext";
 
 type Alerta = {
   ticket_ref?: string | null;
   id: number; clave: string; regla: string; severidad: "critica" | "alta" | "media" | "info";
   titulo: string; detalle: string | null; enlace: string | null;
   abierta: string; ultima_vez: string; resuelta: string | null; enviada: string | null; envio_error: string | null;
+  confirmada?: string | null; confirmada_por_nombre?: string | null; confirmada_nota?: string | null;
 };
 type Config = {
   activo: boolean; url_app: string | null; reglas: string[]; dias_sin_reportar: number; dias_sin_parches: number;
@@ -53,6 +55,12 @@ export default function Alertas() {
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [configAbierta, setConfigAbierta] = useState(false);
+  const { puedeEditar } = usePerfil();
+  const [severidad, setSeveridad] = useState("");
+  const [conf, setConf] = useState<"" | "sin" | "si">("");
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [nota, setNota] = useState("");
+  const [confirmando, setConfirmando] = useState(false);
 
   const cargar = async () => {
     const sb = createClient();
@@ -69,12 +77,28 @@ export default function Alertas() {
   useEffect(() => { cargar(); }, []);
 
   const lista = useMemo(() => {
-    const base = alertas.filter((a) => (vista === "abiertas" ? !a.resuelta : true)).filter((a) => !regla || a.regla === regla);
+    const base = alertas.filter((a) => (vista === "abiertas" ? !a.resuelta : true)).filter((a) => !regla || a.regla === regla)
+      .filter((a) => !severidad || a.severidad === severidad)
+      .filter((a) => vista !== "abiertas" || !conf || (conf === "si" ? !!a.confirmada : !a.confirmada));
     const orden = { critica: 0, alta: 1, media: 2, info: 3 };
     return vista === "abiertas" ? [...base].sort((x, y) => orden[x.severidad] - orden[y.severidad] || y.abierta.localeCompare(x.abierta)) : base;
-  }, [alertas, vista, regla]);
+  }, [alertas, vista, regla, severidad, conf]);
+  const tipos = useMemo(() => Array.from(new Set(alertas.map((a) => a.regla))).sort((x, y) => (NOMBRE_REGLA[x] ?? x).localeCompare(NOMBRE_REGLA[y] ?? y)), [alertas]);
+  const seleccionables = vista === "abiertas" && puedeEditar ? lista.filter((a) => !a.resuelta) : [];
+  const todasElegidas = seleccionables.length > 0 && seleccionables.every((a) => sel.has(a.id));
+
+  async function confirmar(quitar: boolean) {
+    setConfirmando(true); setError(null);
+    const { data, error } = await createClient().rpc("alertas_confirmar", { p_ids: Array.from(sel), p_nota: nota, p_quitar: quitar });
+    setConfirmando(false);
+    if (error) return setError(/alertas_confirmar/.test(error.message) ? "Falta ejecutar supabase/alertas-confirmar.sql en Supabase." : error.message);
+    setAviso(quitar ? `Se quitó la confirmación de ${data} alerta(s).` : `${data} alerta(s) confirmada(s).`);
+    setSel(new Set()); setNota("");
+    cargar();
+  }
 
   const abiertas = alertas.filter((a) => !a.resuelta);
+  const sinConfirmar = (s: Alerta["severidad"]) => abiertas.filter((a) => a.severidad === s && !a.confirmada).length;
   const cuenta = (s: Alerta["severidad"]) => abiertas.filter((a) => a.severidad === s).length;
 
   async function evaluar() {
@@ -127,6 +151,7 @@ export default function Alertas() {
           <div key={s} className="card p-4">
             <div className="text-xs text-ink/50 uppercase tracking-wide">{SEV[s].texto}</div>
             <div className={`font-display text-3xl mt-1 ${s === "critica" && cuenta(s) ? "text-red-600" : "text-ink"}`}>{cuenta(s)}</div>
+            {cuenta(s) > 0 && <div className="text-xs text-ink/50">{sinConfirmar(s) ? `${sinConfirmar(s)} sin confirmar` : "todas confirmadas"}</div>}
           </div>
         ))}
       </div>
@@ -134,7 +159,7 @@ export default function Alertas() {
       <div className="flex gap-2 flex-wrap">
         <div className="inline-flex rounded-lg border border-line/10 bg-surface p-0.5">
           {(["abiertas", "historial"] as const).map((v) => (
-            <button key={v} onClick={() => setVista(v)}
+            <button key={v} onClick={() => { setVista(v); setSel(new Set()); }}
               className={`px-3 py-1.5 text-sm rounded-md ${vista === v ? "bg-brand-600 text-white" : "text-ink/60 hover:text-ink"}`}>
               {v === "abiertas" ? `Abiertas (${abiertas.length})` : "Historial (90 días)"}
             </button>
@@ -142,24 +167,57 @@ export default function Alertas() {
         </div>
         <select className="input w-auto" value={regla} onChange={(e) => setRegla(e.target.value)} aria-label="Tipo de alerta">
           <option value="">Todos los tipos</option>
-          {REGLAS.map((r) => <option key={r.k} value={r.k}>{r.titulo}</option>)}
+          {tipos.map((t) => <option key={t} value={t}>{NOMBRE_REGLA[t] ?? t}</option>)}
         </select>
+        <select className="input w-auto" value={severidad} onChange={(e) => setSeveridad(e.target.value)} aria-label="Severidad">
+          <option value="">Todas las severidades</option>
+          {(["critica", "alta", "media", "info"] as const).map((s) => <option key={s} value={s}>{SEV[s].texto}</option>)}
+        </select>
+        {vista === "abiertas" && (
+          <select className="input w-auto" value={conf} onChange={(e) => setConf(e.target.value as "" | "sin" | "si")} aria-label="Confirmación">
+            <option value="">Confirmadas y sin confirmar</option>
+            <option value="sin">Sin confirmar</option>
+            <option value="si">Confirmadas</option>
+          </select>
+        )}
       </div>
+
+      {sel.size > 0 && (
+        <div className="card p-3 flex flex-wrap items-center gap-2 bg-brand-50">
+          <span className="text-sm text-ink font-medium">{sel.size} seleccionada(s)</span>
+          <input className="input flex-1 min-w-[16rem]" placeholder="Qué se hizo o por qué se confirma (ej.: IP bloqueada en el FortiGate, falso positivo, en curso con proveedor)"
+            value={nota} onChange={(e) => setNota(e.target.value)} maxLength={500} />
+          <button className="btn-primary" disabled={confirmando || nota.trim().length < 3} onClick={() => confirmar(false)}>Confirmar</button>
+          <button className="btn-secondary" disabled={confirmando} onClick={() => confirmar(true)}>Quitar confirmación</button>
+          <button className="text-sm text-ink/50 hover:text-ink" onClick={() => setSel(new Set())}>Cancelar</button>
+        </div>
+      )}
 
       <div className="card overflow-x-auto">
         <table className="data w-full">
           <thead>
-            <tr><th>Severidad</th><th>Alerta</th><th>Tipo</th><th>Desde</th>{vista === "historial" && <th>Resuelta</th>}<th>Teams</th></tr>
+            <tr>
+              {seleccionables.length > 0 && <th className="w-8"><input type="checkbox" aria-label="Elegir todas" checked={todasElegidas}
+                onChange={() => setSel(todasElegidas ? new Set() : new Set(seleccionables.map((a) => a.id)))} /></th>}
+              <th>Severidad</th><th>Alerta</th><th>Tipo</th><th>Desde</th>{vista === "historial" && <th>Resuelta</th>}<th>Teams</th></tr>
           </thead>
           <tbody>
             {lista.map((a) => (
               <tr key={a.id} className={a.resuelta ? "opacity-60" : ""}>
+                {seleccionables.length > 0 && <td><input type="checkbox" aria-label="Elegir" checked={sel.has(a.id)} onChange={() => setSel((x) => {
+                  const n = new Set(x); if (n.has(a.id)) n.delete(a.id); else n.add(a.id); return n;
+                })} /></td>}
                 <td><span className={`pill ${SEV[a.severidad].clase}`}>{SEV[a.severidad].texto}</span></td>
                 <td>
                   {a.enlace ? <Link href={a.enlace} className="text-ink font-medium hover:text-brand-700">{a.titulo}</Link>
                     : <span className="text-ink font-medium">{a.titulo}</span>}
                   {a.ticket_ref && <span className="ml-2 pill bg-brand-50 text-brand-700 text-xs">Ticket {a.ticket_ref}</span>}
                   {a.detalle && <div className="text-xs text-ink/55 mt-0.5">{a.detalle}</div>}
+                  {a.confirmada && (
+                    <div className="text-xs mt-1 text-emerald-700">
+                      ✓ Confirmada por {a.confirmada_por_nombre ?? "—"} el {fecha(a.confirmada)}{a.confirmada_nota ? <span className="text-ink/60"> · {a.confirmada_nota}</span> : null}
+                    </div>
+                  )}
                 </td>
                 <td className="text-ink/70 whitespace-nowrap">{NOMBRE_REGLA[a.regla] ?? a.regla}</td>
                 <td className="text-ink/70 whitespace-nowrap">{fecha(a.abierta)}</td>
@@ -172,13 +230,14 @@ export default function Alertas() {
               </tr>
             ))}
             {!cargando && lista.length === 0 && (
-              <tr><td colSpan={6} className="text-center text-ink/40 py-10">{vista === "abiertas" ? "No hay alertas abiertas. 🎉" : "Sin alertas en este período."}</td></tr>
+              <tr><td colSpan={7} className="text-center text-ink/40 py-10">{vista === "abiertas" ? "No hay alertas abiertas. 🎉" : "Sin alertas en este período."}</td></tr>
             )}
           </tbody>
         </table>
       </div>
       <p className="text-xs text-ink/50">
         Cada problema se avisa una sola vez. Cuando se soluciona, la alerta se cierra sola en la siguiente revisión.
+        Confirmar una alerta deja registrado quién la vio y qué se hizo; sigue abierta hasta que el problema desaparece, pero no cuenta como "sin atender" en Cumplimiento.
         Los lunes a las 9:00 llega un resumen semanal al mismo canal.
       </p>
     </div>

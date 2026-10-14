@@ -44,7 +44,7 @@ export async function calcularIndicadores(sb: SupabaseClient): Promise<Kpi[]> {
         q(sb.from("identidad_resumen").select("*").order("fecha", { ascending: false }).limit(1)),
         q(sb.from("vuln_v_resumen").select("kev, criticas, equipos")),
         q(sb.from("incidentes_v").select("estado, severidad, detectado, cerrado")),
-        q(sb.from("alertas").select("severidad, abierta").is("resuelta", null)),
+        q(sb.from("alertas").select("*").is("resuelta", null)),
         q(sb.from("backups_trabajos").select("*").eq("habilitado", true).eq("ignorar", false)),
         q(sb.rpc("backups_estado")),
         q(sb.from("capacitaciones_v_estado").select("estado")),
@@ -87,9 +87,9 @@ export async function calcularIndicadores(sb: SupabaseClient): Promise<Kpi[]> {
       // Alertas sin atender: críticas abiertas hace más de 2 días o altas abiertas hace más de 7
       const al = (alertas as any[] | null) ?? null;
       const graves = al ? al.filter((a) => a.severidad === "critica" || a.severidad === "alta") : [];
-      const atrasada = (a: any) => a.abierta < hace(a.severidad === "critica" ? 2 : 7);
+      const atrasada = (a: any) => !a.confirmada && a.abierta < hace(a.severidad === "critica" ? 2 : 7);
       k.push({ area: "Vulnerabilidades", clave: "alertas_graves", titulo: "Alertas críticas o altas sin atender", valor: al ? graves.filter(atrasada).length : null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/auditoria/alertas",
-        detalle: al ? `críticas de más de 2 días o altas de más de 7 · ${graves.length} abiertas en total` : undefined });
+        detalle: al ? `críticas de más de 2 días o altas de más de 7, sin confirmar · ${graves.length} abiertas, ${graves.filter((a) => a.confirmada).length} confirmadas` : undefined });
       const incs = (inc as any[] | null) ?? null;
       k.push({ area: "Vulnerabilidades", clave: "incidentes_abiertos", titulo: "Incidentes abiertos", valor: incs ? incs.filter((i) => i.estado !== "cerrado").length : null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/inventario/incidentes",
         detalle: incs ? `${incs.filter((i) => i.detectado >= hace(30)).length} registrados en los últimos 30 días` : undefined });
