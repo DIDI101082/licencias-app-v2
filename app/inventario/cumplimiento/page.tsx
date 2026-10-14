@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { calcularIndicadores, nivel, type Kpi } from "@/lib/indicadores";
+import { calcularIndicadores, nivel, puntaje as calcularPuntaje, PUNTAJE_AYUDA, type Kpi } from "@/lib/indicadores";
 import { COLOR } from "@/components/indicadores-estilo";
 
 export default function Cumplimiento() {
@@ -15,8 +15,8 @@ export default function Cumplimiento() {
   }, []);
 
   const areas = kpis ? Array.from(new Set(kpis.map((k) => k.area))) : [];
-  const medidos = (kpis ?? []).filter((k) => nivel(k) !== "nd");
-  const puntaje = medidos.length ? Math.round((medidos.filter((k) => nivel(k) === "ok").length / medidos.length) * 100) : null;
+  const pt = calcularPuntaje(kpis);
+  const puntaje = pt.pct;
   const fechaTxt = fecha.toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", dateStyle: "long", timeStyle: "short" });
 
   return (
@@ -49,9 +49,10 @@ export default function Cumplimiento() {
         <>
           <div className="grid md:grid-cols-3 gap-3">
             <div className="card p-5">
-              <div className="text-xs text-ink/50">Indicadores que cumplen la meta</div>
+              <div className="text-xs text-ink/50" title={PUNTAJE_AYUDA}>Nivel de cumplimiento</div>
               <div className={`font-display text-5xl mt-1 ${puntaje == null ? "text-ink/30" : puntaje >= 80 ? "text-emerald-700" : puntaje >= 60 ? "text-amber-600" : "text-red-600"}`}>{puntaje == null ? "—" : `${puntaje}%`}</div>
-              <div className="text-xs text-ink/50 mt-1">{medidos.filter((k) => nivel(k) === "ok").length} de {medidos.length} medidos{kpis.length > medidos.length ? ` · ${kpis.length - medidos.length} sin datos` : ""}</div>
+              <div className="text-xs text-ink/50 mt-1">{pt.ok} en meta{pt.cerca ? ` · ${pt.cerca} cerca` : ""} · de {pt.medidos} medidos{pt.sinDatos ? ` · ${pt.sinDatos} sin datos` : ""}</div>
+              <div className="text-[11px] text-ink/40 mt-1">{PUNTAJE_AYUDA}</div>
             </div>
             <div className="card p-5 md:col-span-2">
               <div className="text-xs text-ink/50 mb-2">A resolver primero</div>

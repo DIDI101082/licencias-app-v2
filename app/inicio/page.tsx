@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
-import { calcularIndicadores, nivel, type Kpi } from "@/lib/indicadores";
+import { calcularIndicadores, puntaje, type Kpi } from "@/lib/indicadores";
 import { hace } from "@/lib/monitoreo";
 import { ESTADO_INT, type Integracion } from "@/components/integraciones";
 
@@ -46,9 +46,8 @@ export default function Inicio() {
   const nombre = (perfil?.nombre ?? "").split(/[\s@]/)[0];
   const fecha = new Date().toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Argentina/Buenos_Aires" });
 
-  const medidos = (kpis ?? []).filter((k) => nivel(k) !== "nd");
-  const enMeta = medidos.filter((k) => nivel(k) === "ok").length;
-  const cumplimiento = medidos.length ? Math.round((100 * enMeta) / medidos.length) : null;
+  const pt = puntaje(kpis);
+  const cumplimiento = pt.pct;
   const totalAlertas = Object.values(d?.alertas ?? {}).reduce((a, b) => a + b, 0);
   const ss = d?.securescore;
   const ssPct = ss?.maximo ? Math.round((100 * ss.actual) / ss.maximo) : null;
@@ -68,7 +67,7 @@ export default function Inicio() {
         <Link href="/inventario/cumplimiento" className="card p-5 hover:ring-1 hover:ring-line/20">
           <div className="text-xs text-ink/50 font-medium">Nivel de cumplimiento</div>
           <div className="font-display text-3xl mt-1 tabular-nums">{cumplimiento == null ? "—" : `${cumplimiento}%`}</div>
-          <div className="text-xs text-ink/50">{kpis ? `${enMeta} de ${medidos.length} indicadores en meta` : "Calculando…"}</div>
+          <div className="text-xs text-ink/50">{kpis ? `${pt.ok} en meta${pt.cerca ? ` · ${pt.cerca} cerca` : ""} · de ${pt.medidos} indicadores` : "Calculando…"}</div>
           {cumplimiento != null && <Medidor v={cumplimiento} color={cumplimiento >= 80 ? "bg-emerald-500" : cumplimiento >= 60 ? "bg-amber-500" : "bg-red-500"} />}
         </Link>
         <Link href="/auditoria/alertas" className="card p-5 hover:ring-1 hover:ring-line/20">

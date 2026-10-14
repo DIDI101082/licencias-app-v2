@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import { useEstadoProg } from "@/components/TareasProgramadas";
-import { calcularIndicadores, nivel, type Kpi } from "@/lib/indicadores";
+import { calcularIndicadores, nivel, puntaje as calcularPuntaje, type Kpi } from "@/lib/indicadores";
 import { COLOR } from "@/components/indicadores-estilo";
 
 type Datos = Record<string, any>;
@@ -71,7 +71,7 @@ function Contenido() {
   const ssIni = d.securescore?.inicio;
   const esActual = mes === mesActual();
   const medidos = (kpis ?? []).filter((k) => nivel(k) !== "nd");
-  const puntaje = medidos.length ? Math.round((100 * medidos.filter((k) => nivel(k) === "ok").length) / medidos.length) : null;
+  const puntaje = calcularPuntaje(kpis).pct;
 
   return (
     <div className="space-y-6">
@@ -119,7 +119,7 @@ function Contenido() {
         <>
           <Seccion titulo="Resumen">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Cifra t="Indicadores que cumplen la meta" v={puntaje == null ? null : `${puntaje}%`} c={puntaje != null && puntaje >= 80 ? "text-emerald-700" : "text-amber-700"} sub={kpis ? `${medidos.length} medidos` : "sin indicadores"} />
+              <Cifra t="Nivel de cumplimiento" v={puntaje == null ? null : `${puntaje}%`} c={puntaje != null && puntaje >= 80 ? "text-emerald-700" : "text-amber-700"} sub={kpis ? `${medidos.length} medidos` : "sin indicadores"} />
               <Cifra t="Alertas nuevas" v={d.alertas?.nuevas} sub={d.alertas ? `${d.alertas.resueltas} resueltas en el mes` : undefined} />
               <Cifra t="Incidentes registrados" v={d.incidentes?.registrados} c={d.incidentes?.registrados ? "text-amber-700" : "text-ink"} sub={d.incidentes ? `${d.incidentes.abiertos} abiertos al cierre` : undefined} />
               <Cifra t="Secure Score" v={ss?.maximo ? `${Math.round((100 * ss.actual) / ss.maximo)}%` : null}
