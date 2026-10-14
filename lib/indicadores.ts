@@ -7,6 +7,8 @@ import { soporteWindows } from "./riesgos";
 export type Kpi = {
   clave: string; area: string; titulo: string; valor: number | null; meta: number; unidad: "%" | "n";
   menorEsMejor?: boolean; detalle?: string; enlace: string; sinDatos?: string;
+  /** Se muestra pero no suma ni resta en el nivel de cumplimiento */
+  informativo?: boolean;
 };
 export type Nivel = "ok" | "aviso" | "mal" | "nd";
 
@@ -19,12 +21,13 @@ const porc = (a: number, b: number) => (b ? Math.round((a / b) * 100) : null);
 
 /** Nivel general: cada indicador en meta suma 1 y cada uno "cerca" suma medio punto. */
 export function puntaje(kpis: Kpi[] | null | undefined) {
-  const medidos = (kpis ?? []).filter((k) => nivel(k) !== "nd");
+  const cuentan = (kpis ?? []).filter((k) => !k.informativo);
+  const medidos = cuentan.filter((k) => nivel(k) !== "nd");
   const ok = medidos.filter((k) => nivel(k) === "ok").length;
   const cerca = medidos.filter((k) => nivel(k) === "aviso").length;
   return {
     pct: medidos.length ? Math.round((100 * (ok + cerca / 2)) / medidos.length) : null,
-    ok, cerca, medidos: medidos.length, sinDatos: (kpis ?? []).length - medidos.length,
+    ok, cerca, medidos: medidos.length, sinDatos: cuentan.length - medidos.length, informativos: (kpis ?? []).length - cuentan.length,
   };
 }
 export const PUNTAJE_AYUDA = "Cada indicador en meta suma 1 punto y cada uno cerca de la meta suma medio punto.";
@@ -73,7 +76,7 @@ export async function calcularIndicadores(sb: SupabaseClient): Promise<Kpi[]> {
 
       // --- Identidad ---
       const id = (ident as any[] | null)?.[0];
-      k.push({ area: "Identidad", clave: "mfa", titulo: "Cuentas con MFA", valor: id && id.sin_mfa != null ? porc(id.miembros - id.sin_mfa, id.miembros) : null, meta: 100, unidad: "%", enlace: "/inventario/identidad", sinDatos: "Abrí Identidad para actualizar (requiere Entra ID P1)" });
+      k.push({ area: "Identidad", clave: "mfa", titulo: "Cuentas con MFA", valor: id && id.sin_mfa != null ? porc(id.miembros - id.sin_mfa, id.miembros) : null, meta: 100, unidad: "%", enlace: "/inventario/identidad", sinDatos: "Abrí Identidad para actualizar (requiere Entra ID P1)", informativo: true });
       k.push({ area: "Identidad", clave: "admins_sin_mfa", titulo: "Administradores sin MFA", valor: id?.admins_sin_mfa ?? null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/inventario/identidad" });
       k.push({ area: "Identidad", clave: "cuentas_inactivas", titulo: "Cuentas habilitadas sin uso", valor: id?.inactivos ?? null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/inventario/identidad", detalle: id ? `más de ${id.dias_inactivo} días` : undefined });
       k.push({ area: "Identidad", clave: "bajas_pendientes", titulo: "Bajas sin cerrar (+7 días)", valor: bajas ? (bajas as any[]).filter((b) => b.fecha <= hace(7).slice(0, 10)).length : null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/empleados/movimientos" });

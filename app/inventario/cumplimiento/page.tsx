@@ -51,14 +51,14 @@ export default function Cumplimiento() {
             <div className="card p-5">
               <div className="text-xs text-ink/50" title={PUNTAJE_AYUDA}>Nivel de cumplimiento</div>
               <div className={`font-display text-5xl mt-1 ${puntaje == null ? "text-ink/30" : puntaje >= 80 ? "text-emerald-700" : puntaje >= 60 ? "text-amber-600" : "text-red-600"}`}>{puntaje == null ? "—" : `${puntaje}%`}</div>
-              <div className="text-xs text-ink/50 mt-1">{pt.ok} en meta{pt.cerca ? ` · ${pt.cerca} cerca` : ""} · de {pt.medidos} medidos{pt.sinDatos ? ` · ${pt.sinDatos} sin datos` : ""}</div>
+              <div className="text-xs text-ink/50 mt-1">{pt.ok} en meta{pt.cerca ? ` · ${pt.cerca} cerca` : ""} · de {pt.medidos} medidos{pt.sinDatos ? ` · ${pt.sinDatos} sin datos` : ""}{pt.informativos ? ` · ${pt.informativos} informativo${pt.informativos > 1 ? "s" : ""}` : ""}</div>
               <div className="text-[11px] text-ink/40 mt-1">{PUNTAJE_AYUDA}</div>
             </div>
             <div className="card p-5 md:col-span-2">
               <div className="text-xs text-ink/50 mb-2">A resolver primero</div>
-              {kpis.filter((k) => nivel(k) === "mal").length === 0 ? <p className="text-sm text-emerald-700">Ningún indicador está fuera de meta.</p> : (
+              {kpis.filter((k) => !k.informativo && nivel(k) === "mal").length === 0 ? <p className="text-sm text-emerald-700">Ningún indicador está fuera de meta.</p> : (
                 <ul className="space-y-1 text-sm">
-                  {kpis.filter((k) => nivel(k) === "mal").map((k) => (
+                  {kpis.filter((k) => !k.informativo && nivel(k) === "mal").map((k) => (
                     <li key={k.clave} className="flex gap-2"><span className="text-red-600">●</span>
                       <Link href={k.enlace} className="text-ink hover:text-brand-700">{k.titulo}: <b>{k.valor}{k.unidad === "%" ? "%" : ""}</b> <span className="text-ink/50">(meta {k.menorEsMejor ? "≤ " : "≥ "}{k.meta}{k.unidad === "%" ? "%" : ""})</span></Link>
                     </li>
@@ -78,12 +78,13 @@ export default function Cumplimiento() {
                     <Link key={k.clave} href={k.enlace} className={`card p-4 border-l-4 ${COLOR[n].borde} hover:ring-1 hover:ring-line/20`}>
                       <div className="flex justify-between gap-2">
                         <div className="text-sm text-ink/80">{k.titulo}</div>
-                        <span className={`text-xs whitespace-nowrap ${COLOR[n].texto}`}>{COLOR[n].etiqueta}</span>
+                        <span className={`text-xs whitespace-nowrap ${COLOR[n].texto}`}>{COLOR[n].etiqueta}{k.informativo ? " · informativo" : ""}</span>
                       </div>
                       <div className={`font-display text-3xl mt-1 ${COLOR[n].texto}`}>{k.valor == null ? "—" : `${k.valor}${k.unidad === "%" ? "%" : ""}`}</div>
                       <div className="text-xs text-ink/50 mt-1">
                         Meta: {k.menorEsMejor ? (k.meta === 0 ? "ninguno" : `≤ ${k.meta}`) : `≥ ${k.meta}${k.unidad === "%" ? "%" : ""}`}
                         {k.valor == null && k.sinDatos ? ` · ${k.sinDatos}` : k.detalle ? ` · ${k.detalle}` : ""}
+                        {k.informativo ? " · no suma al nivel de cumplimiento" : ""}
                       </div>
                     </Link>
                   );
