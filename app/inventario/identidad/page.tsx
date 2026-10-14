@@ -53,25 +53,27 @@ export default function Identidad() {
   useEffect(() => { cargar(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const usuarios = d?.usuarios ?? [];
+  // Si ya se cruzan las cuentas con los empleados, "sin MFA" muestra solo personas (no cuentas de servicio).
+  const conNominales = usuarios.some((u) => u.nominal != null);
   const lista = useMemo(() => {
     const t = q.trim().toLowerCase();
     return usuarios
       .filter((u) => {
         if (t && ![u.nombre, u.upn, u.area].some((v) => v?.toLowerCase().includes(t))) return false;
-        if (filtro === "sin_mfa") return u.habilitado && !u.invitado && u.mfa === false;
-        if (filtro === "sin_mfa_nominales") return u.habilitado && !u.invitado && u.mfa === false && u.nominal === true;
+        if (filtro === "sin_mfa" || filtro === "sin_mfa_nominales") return u.habilitado && !u.invitado && u.mfa === false && (!conNominales || u.nominal === true);
         if (filtro === "inactivos") return u.habilitado && u.inactivo;
         if (filtro === "admins") return u.roles.length > 0;
         if (filtro === "invitados") return u.invitado;
         return true;
       })
       .sort((a, b) => b.roles.length - a.roles.length || a.nombre.localeCompare(b.nombre));
-  }, [usuarios, filtro, q]);
+  }, [usuarios, filtro, q, conNominales]);
 
   const r = d?.resumen;
   const seg = d?.seguimiento;
-  const conNominales = usuarios.some((u) => u.nominal != null);
   const sinMfaNominales = usuarios.filter((u) => u.habilitado && !u.invitado && u.mfa === false && u.nominal === true).length;
+  const nominalesActivas = usuarios.filter((u) => u.habilitado && !u.invitado && u.nominal === true).length;
+  const eventosPersonas = (seg?.eventos ?? []).filter((ev) => !conNominales || ev.nominal);
 
   const exportar = () => exportarExcel(`identidad_${filtro}_${new Date().toISOString().slice(0, 10)}.xlsx`,
     ["Cuenta", "Usuario", "Área", "Nominal", "MFA", "Métodos", "Último ingreso", "Roles", "Estado"],
@@ -132,7 +134,9 @@ export default function Identidad() {
 
       {r && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {tarjeta("sin_mfa", "Cuentas sin MFA", r.sin_mfa, true, r.sin_mfa != null ? `de ${r.miembros} cuentas activas${conNominales ? ` · ${sinMfaNominales} nominales` : ""}` : "Requiere Entra ID P1")}
+          {conNominales
+            ? tarjeta("sin_mfa", "Personas sin MFA", r.sin_mfa != null ? sinMfaNominales : null, true, r.sin_mfa != null ? `de ${nominalesActivas} cuentas nominales activas` : "Requiere Entra ID P1")
+            : tarjeta("sin_mfa", "Cuentas sin MFA", r.sin_mfa, true, r.sin_mfa != null ? `de ${r.miembros} cuentas activas` : "Requiere Entra ID P1")}
           {tarjeta("inactivos", `Sin uso hace ${d?.dias}+ días`, r.inactivos, true, r.inactivos != null ? "habilitadas, conviene deshabilitar" : "Requiere Entra ID P1")}
           {tarjeta("admins", "Con rol de administrador", r.admins, false,
             r.admins_sin_mfa ? `${r.admins_sin_mfa} sin MFA` : r.admins != null ? "todos con MFA" : undefined)}
@@ -155,17 +159,17 @@ export default function Identidad() {
           {esAdmin && (
             <label className="flex items-center gap-2 text-sm text-ink/70">
               <input type="checkbox" checked={seg.alertar} onChange={(e) => guardarAlertar(e.target.checked)} />
-              Avisar por Teams cuando una cuenta nominal o con rol de administrador se queda sin MFA
+              Avisar por Teams cuando una persona (cuenta nominal) o una cuenta con rol de administrador se queda sin MFA
             </label>
           )}
-          {seg.eventos.length === 0 ? (
+          {eventosPersonas.length === 0 ? (
             <p className="text-sm text-ink/50">Sin cambios todavía. Acá va a aparecer cada cuenta que pierda o registre su segundo factor.</p>
           ) : (
             <div className="overflow-x-auto max-h-72 overflow-y-auto">
               <table className="data w-full">
                 <thead><tr><th>Fecha</th><th>Cuenta</th><th>Cambio</th><th>Métodos</th></tr></thead>
                 <tbody>
-                  {seg.eventos.map((ev) => (
+                  {eventosPersonas.map((ev) => (
                     <tr key={ev.id}>
                       <td className="whitespace-nowrap tabular-nums text-sm">{new Date(ev.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
                       <td>
@@ -191,7 +195,7 @@ export default function Identidad() {
         <div className="card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 p-3 border-b border-line/[0.08]">
             <div className="flex gap-1 text-sm">
-              {([["sin_mfa", "Sin MFA"], ...(conNominales ? [["sin_mfa_nominales", `Sin MFA nominales (${sinMfaNominales})`]] : []), ["inactivos", "Inactivas"], ["admins", "Administradores"], ["invitados", "Invitados"], ["todos", "Todas"]] as [Filtro, string][])
+              {([["sin_mfa", conNominales ? `Personas sin MFA (${sinMfaNominales})` : "Sin MFA"], ["inactivos", "Inactivas"], ["admins", "Administradores"], ["invitados", "Invitados"], ["todos", "Todas"]] as [Filtro, string][])
                 .map(([k, t]) => (
                   <button key={k} onClick={() => setFiltro(k)}
                     className={`px-3 py-1 rounded-full ${filtro === k ? "bg-brand-600 text-white" : "text-ink/60 hover:bg-line/[0.05]"}`}>{t}</button>
