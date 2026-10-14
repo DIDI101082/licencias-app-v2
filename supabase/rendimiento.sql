@@ -92,6 +92,7 @@ declare
     array['inv_dispositivos', 'idx_inv_dispositivos_estado_host', 'estado_registro, hostname'],
     array['inv_dispositivos', 'idx_inv_dispositivos_ultimo_reporte', 'ultimo_reporte desc'],
     array['inv_dispositivo_apps', 'idx_inv_dispositivo_apps_nombre', 'nombre'],
+    array['fg_trafico', 'idx_fg_trafico_fecha', 'fecha'],
     array['auditoria', 'idx_auditoria_fecha', 'fecha desc'],
     array['eset_detecciones', 'idx_eset_detecciones_disp_fecha', 'dispositivo_id, fecha desc'],
     array['empleados', 'idx_empleados_email_lower', 'lower(email)']
