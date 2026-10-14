@@ -57,7 +57,7 @@ export default function Alertas() {
   const [configAbierta, setConfigAbierta] = useState(false);
   const { puedeEditar } = usePerfil();
   const [severidad, setSeveridad] = useState("");
-  const [conf, setConf] = useState<"" | "sin" | "si">("");
+  const [conf, setConf] = useState<"" | "sin" | "si">("sin");
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [nota, setNota] = useState("");
   const [confirmando, setConfirmando] = useState(false);
@@ -161,7 +161,7 @@ export default function Alertas() {
           {(["abiertas", "historial"] as const).map((v) => (
             <button key={v} onClick={() => { setVista(v); setSel(new Set()); }}
               className={`px-3 py-1.5 text-sm rounded-md ${vista === v ? "bg-brand-600 text-white" : "text-ink/60 hover:text-ink"}`}>
-              {v === "abiertas" ? `Abiertas (${abiertas.length})` : "Historial (90 días)"}
+              {v === "abiertas" ? `Abiertas (${abiertas.filter((a) => !a.confirmada).length})` : "Historial (90 días)"}
             </button>
           ))}
         </div>
@@ -175,9 +175,9 @@ export default function Alertas() {
         </select>
         {vista === "abiertas" && (
           <select className="input w-auto" value={conf} onChange={(e) => setConf(e.target.value as "" | "sin" | "si")} aria-label="Confirmación">
-            <option value="">Confirmadas y sin confirmar</option>
             <option value="sin">Sin confirmar</option>
             <option value="si">Confirmadas</option>
+            <option value="">Confirmadas y sin confirmar</option>
           </select>
         )}
       </div>
@@ -237,7 +237,7 @@ export default function Alertas() {
       </div>
       <p className="text-xs text-ink/50">
         Cada problema se avisa una sola vez. Cuando se soluciona, la alerta se cierra sola en la siguiente revisión.
-        Confirmar una alerta deja registrado quién la vio y qué se hizo; sigue abierta hasta que el problema desaparece, pero no cuenta como "sin atender" en Cumplimiento.
+        Confirmar una alerta deja registrado quién la vio y qué se hizo y la saca de la lista (se ven eligiendo "Confirmadas" en el filtro); sigue abierta hasta que el problema desaparece, pero no cuenta como "sin atender" en Cumplimiento.
         Los lunes a las 9:00 llega un resumen semanal al mismo canal.
       </p>
     </div>
