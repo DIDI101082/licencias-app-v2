@@ -86,7 +86,8 @@ export function evaluar(e: EquipoW11): { aptitud: Aptitud; motivos: string[]; ve
   else if (cpu === "verificar") verificar.push(`Procesador a confirmar con la lista de Microsoft: ${e.procesador ?? "sin dato"}`);
 
   if (/ESET/i.test(e.cifrado_producto ?? "")) {
-    avisos.push(`${e.cifrado_producto}: confirmar que la versión instalada soporta el upgrade y probarlo en la oleada piloto`);
+    avisos.push(`${e.cifrado_producto}: el upgrade se hace sin descifrar (carga el driver de cifrado de ESET), solo desde la carpeta de la red o la VPN. ` +
+      "Durante la instalación el equipo se reinicia varias veces y en cada una pide la clave de pre-arranque");
   }
   if (!agenteSoportaW11(e.agente_version)) {
     avisos.push(`Agente ${e.agente_version ?? "?"}: para ejecutar el upgrade hace falta el agente ${VERSION_AGENTE_W11.toFixed(1)} o superior`);

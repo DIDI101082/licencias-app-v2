@@ -45,11 +45,30 @@ try {
   $libre = [math]::Round((Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace / 1GB, 1)
   if ($libre -lt 25) { Informar 'pospuesto' ('Solo ' + $libre + ' GB libres en C: (se necesitan 25 GB)') $null; exit 0 }
 
+  # Cifrado de disco de ESET (Endpoint Encryption o Full Disk Encryption): segun ESET, setup.exe tiene que cargar
+  # el driver de cifrado (/ReflectDrivers) y no tocar la particion de recuperacion; si no, falla con 0xC1900101-0x20017.
+  $DriversEset = 'C:\Windows\System32\dlpcore\Upgrade\'
+  $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+  $cifradoEset = (Test-Path $DriversEset) -or (Test-Path (Join-Path $env:ProgramData 'ESET\ESET Full Disk Encryption')) -or
+                 (Test-Path (Join-Path $env:ProgramFiles 'ESET Endpoint Encryption')) -or ($pf86 -and (Test-Path (Join-Path $pf86 'ESET Endpoint Encryption')))
+  $extraEset = @()
+  if ($cifradoEset) {
+    if (-not (Get-ChildItem -Path $DriversEset -ErrorAction SilentlyContinue)) {
+      Informar 'bloqueado' ('Disco cifrado con ESET pero no esta la carpeta de drivers para el upgrade (' + $DriversEset + '): actualizar el cliente de cifrado de ESET') $null
+      exit 0
+    }
+    $extraEset = @(('/ReflectDrivers ' + $DriversEset), '/ResizeRecoveryPartition Disable')
+  }
+
   # 3. Camino: red local si se llega a la carpeta; si no, internet (si esta permitido)
   $porRed = $false
   if ($origen) {
     if ($origen -notmatch '^\\\\[^\\]+\\') { Informar 'error' 'Origen del instalador invalido: tiene que ser un recurso compartido de la red' $null; exit 1 }
     if (Test-Path (Join-Path $origen 'setup.exe')) { $porRed = $true }
+  }
+  if (-not $porRed -and $cifradoEset) {
+    Informar 'pospuesto' 'Disco cifrado con ESET: se actualiza solo desde la carpeta de la red (el asistente de Microsoft no carga el driver de cifrado). Se reintenta cuando el equipo este en la red o la VPN' $null
+    exit 0
   }
   if (-not $porRed -and -not $orden.internet) {
     Informar 'pospuesto' ('No se accede a ' + $origen + ' (fuera de la red o sin permiso) y la descarga desde internet esta deshabilitada') $null
@@ -76,9 +95,9 @@ try {
     }
 
     Informar 'en_curso' 'Red local: escaneo de compatibilidad de Microsoft' $null
-    $p = Start-Process -FilePath $setup -Wait -PassThru -WindowStyle Hidden -ArgumentList @(
+    $p = Start-Process -FilePath $setup -Wait -PassThru -WindowStyle Hidden -ArgumentList (@(
       '/auto upgrade', '/quiet', '/compat scanonly', '/eula accept', '/dynamicupdate disable', '/noreboot',
-      ('/copylogs "' + (Join-Path $Logs 'compat') + '"'))
+      ('/copylogs "' + (Join-Path $Logs 'compat') + '"')) + $extraEset)
     $hex = '0x{0:X8}' -f $p.ExitCode
     $compat = switch ($hex) {
       '0xC1900210' { 'OK' }
@@ -95,9 +114,11 @@ try {
       exit 0
     }
 
-    Informar 'en_curso' 'Red local: instalando Windows 11 (puede tardar entre 30 y 90 minutos)' 'OK'
+    $notaEset = ''
+    if ($cifradoEset) { $notaEset = ' - disco cifrado con ESET: se carga el driver de cifrado y en cada reinicio se pide la clave de pre-arranque' }
+    Informar 'en_curso' ('Red local: instalando Windows 11 (puede tardar entre 30 y 90 minutos)' + $notaEset) 'OK'
     $parametros = @('/auto upgrade', '/quiet', '/eula accept', '/dynamicupdate disable', '/showoobe none', '/telemetry disable',
-                    ('/copylogs "' + (Join-Path $Logs 'upgrade') + '"'))
+                    ('/copylogs "' + (Join-Path $Logs 'upgrade') + '"')) + $extraEset
     if (-not $orden.reiniciar) { $parametros += '/noreboot' }
     $p = Start-Process -FilePath $setup -Wait -PassThru -WindowStyle Hidden -ArgumentList $parametros
     $hex = '0x{0:X8}' -f $p.ExitCode

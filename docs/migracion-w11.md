@@ -25,6 +25,26 @@ Usa el **agente de inventario que ya tienen los equipos**. No hace falta ESET ni
    Si no la tiene, no se ejecuta nada.
 5. **Cierre:** al reiniciar, el agente reporta el build de Windows 11 y el equipo queda **Migrado**.
 
+### Equipos con disco cifrado por ESET
+
+Se actualizan **sin descifrar**. ESET soporta Windows 11 en Endpoint Encryption y Full Disk Encryption, y para el upgrade in-place
+pide que `setup.exe` cargue su driver de cifrado. La tarea lo detecta sola y agrega:
+
+```
+/ReflectDrivers C:\Windows\System32\dlpcore\Upgrade\ /ResizeRecoveryPartition Disable
+```
+
+Sin esto, el upgrade falla con `0xC1900101 - 0x20017` (fase SAFE_OS). No hace falta clonar ni reemplazar el disco.
+
+- Solo se actualizan por el camino de **red local** (carpeta compartida, en la oficina o por VPN). El Asistente de Microsoft no
+  carga el driver de cifrado, así que en home office sin VPN quedan *Pospuestos* hasta que se conecten.
+- Si el equipo está cifrado pero falta la carpeta de drivers, queda *Bloqueado*: hay que actualizar el cliente de cifrado de ESET.
+- Durante la instalación el equipo **se reinicia varias veces y en cada reinicio pide la clave de pre-arranque**. Con el reinicio
+  manual, el usuario la ingresa. Para oleadas con reinicio automático fuera de horario, hay que suspender antes la autenticación de
+  pre-arranque desde ESET; si no, el equipo queda esperando la clave.
+- **No usar MBR2GPT** en equipos cifrados con ESET: no está soportado. Un equipo cifrado en modo Legacy se trata aparte.
+- ESET recomienda tener backup de los datos importantes antes del upgrade.
+
 Seguridad: la única orden que el agente acepta es "actualizar", autenticada con la clave propia de cada equipo.
 Las órdenes, cancelaciones y cambios de configuración quedan en **Logs**.
 
@@ -71,7 +91,7 @@ reinicia. La opción *Reiniciar automáticamente* (en Configurar) es para oleada
 - **Asistente de Microsoft (camino por internet):** los parámetros silenciosos (`/QuietInstall /SkipEULA /auto upgrade
   /NoRestartUI`) son los que usan las herramientas de gestión, pero Microsoft no los documenta oficialmente. Hay que confirmar en el
   piloto que no reinicia el equipo por su cuenta cuando *Reiniciar automáticamente* está apagado, y qué código de salida devuelve.
-- **ESET Full Disk Encryption:** confirmar con ESET que la versión instalada soporta el upgrade de Windows 10 a 11.
+- **ESET:** probar en el piloto al menos un equipo cifrado, con el cliente de cifrado actualizado a la última versión.
 - **Código de salida de setup.exe:** si un equipo figura con *Error* pero al reiniciar pasa a Windows 11, igual queda *Migrado*;
   conviene revisar el código que muestra el detalle para ajustar la interpretación.
 - **Vuelta atrás:** Windows conserva 10 días para volver a Windows 10 (Configuración → Sistema → Recuperación).
