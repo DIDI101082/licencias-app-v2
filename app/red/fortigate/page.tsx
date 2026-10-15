@@ -37,6 +37,7 @@ type Sdwan = { equipo: string; chequeo: string; enlace: string; estado: string |
 
 type Vista = "resumen" | "configuracion" | "cambios" | "vpn" | "accesos" | "amenazas" | "licencias" | "sdwan";
 type Acceso = { id: number; equipo: string; fecha: string; tipo: "inicio" | "fallo" | "cierre"; usuario: string; ip: string; via: string | null; motivo: string | null };
+type Exclusion = { id: number; usuario: string; ip: string; motivo: string | null; creado_por_nombre: string | null; creado: string };
 const VISTAS: [Vista, string][] = [
   ["resumen", "Resumen"], ["configuracion", "Configuración"], ["cambios", "Cambios"], ["vpn", "VPN"], ["accesos", "Inicios de sesión"],
   ["amenazas", "Amenazas"], ["licencias", "Licencias y certificados"], ["sdwan", "Enlaces y consumo"],
@@ -95,6 +96,10 @@ function Contenido() {
   const [faltaAccesos, setFaltaAccesos] = useState(false);
   const [alertarLogins, setAlertarLogins] = useState<boolean | null>(null);
   const [verCierres, setVerCierres] = useState(false);
+  const [exclusiones, setExclusiones] = useState<Exclusion[]>([]);
+  const [faltaExclusiones, setFaltaExclusiones] = useState(false);
+  const [verExcluidos, setVerExcluidos] = useState(false);
+  const [excluyendo, setExcluyendo] = useState<{ usuario: string; ip: string; soloIp: boolean; motivo: string } | null>(null);
   const [licencias, setLicencias] = useState<Licencia[]>([]);
   const [certificados, setCertificados] = useState<Certificado[]>([]);
   const [sdwan, setSdwan] = useState<Sdwan[]>([]);
@@ -120,7 +125,7 @@ function Contenido() {
   const cargar = useCallback(async () => {
     const sb = createClient();
     const desde = new Date(Date.now() - 7 * 86400000).toISOString();
-    const [e, q, h, p, c, v, f, a, l, ce, s, en, tp, it, ac, al] = await Promise.all([
+    const [e, q, h, p, c, v, f, a, l, ce, s, en, tp, it, ac, al, ex] = await Promise.all([
       sb.rpc("fg_estado"),
       sb.from("fg_equipos_vista").select("*").order("nombre"),
       sb.from("fg_hallazgos").select("*"),
@@ -137,6 +142,7 @@ function Contenido() {
       sb.from("fg_interfaces").select("equipo,nombre,alias,rol"),
       sb.from("fg_admin_logins").select("*").gte("fecha", new Date(Date.now() - 30 * 86400000).toISOString()).order("fecha", { ascending: false }).limit(2000),
       sb.rpc("fg_logins_config"),
+      sb.from("fg_logins_exclusiones").select("id,usuario,ip,motivo,creado_por_nombre,creado").order("creado", { ascending: false }),
     ]);
     const err = e.error ?? q.error;
     setError(err ? (/fg_/.test(err.message) ? "Falta ejecutar supabase/fortigate.sql en Supabase." : err.message) : null);
@@ -150,6 +156,7 @@ function Contenido() {
     setAmenazas((a.data ?? []) as Amenaza[]);
     setAccesos((ac.data ?? []) as Acceso[]); setFaltaAccesos(!!ac.error);
     setAlertarLogins(al.error ? null : (al.data as boolean | null));
+    setExclusiones((ex.data ?? []) as Exclusion[]); setFaltaExclusiones(!!ex.error);
     setLicencias((l.data ?? []) as Licencia[]);
     setCertificados((ce.data ?? []) as Certificado[]);
     setSdwan((s.data ?? []) as Sdwan[]);
@@ -164,6 +171,8 @@ function Contenido() {
   const q = texto.trim().toLowerCase();
   const coincide = (...v: (string | null | undefined)[]) => !q || v.some((x) => x?.toLowerCase().includes(q));
   const deEquipo = (n: string) => !filtroEquipo || n === filtroEquipo;
+  const exclusionDe = (x: { usuario: string; ip: string }) => exclusiones.find((r) => r.usuario === x.usuario && (!r.ip || r.ip === x.ip));
+  const accesosVisibles = accesos.filter((x) => !exclusionDe(x));
 
   const responden = equipos.filter((e) => e.responde).length;
   const kev = equipos.reduce((s, e) => s + (e.vuln_kev ?? 0), 0);
@@ -180,7 +189,7 @@ function Contenido() {
     { t: "Vulnerabilidades explotadas (KEV)", n: kev, c: kev ? "text-red-600" : "text-ink", ir: "" },
     { t: "Configuración riesgosa (crítica o alta)", n: graves.length, c: graves.length ? "text-red-600" : "text-ink", ir: "vista=configuracion" },
     { t: "Intentos fallidos de VPN (24 h)", n: fallos24.length, c: fallos24.length >= (estado?.umbral_fallos ?? 10) ? "text-amber-700" : "text-ink", ir: "vista=vpn" },
-    { t: "Inicios de sesión de administración (24 h)", n: accesos.filter((x) => x.tipo === "inicio" && Date.parse(x.fecha) > ahora - 86400000).length, c: "text-ink", ir: "vista=accesos" },
+    { t: "Inicios de sesión de administración (24 h)", n: accesosVisibles.filter((x) => x.tipo === "inicio" && Date.parse(x.fecha) > ahora - 86400000).length, c: "text-ink", ir: "vista=accesos" },
     { t: "Amenazas no bloqueadas (24 h)", n: noBloqueadas.length, c: noBloqueadas.length ? "text-red-600" : "text-ink", ir: "vista=amenazas" },
     { t: "Licencias y certificados por vencer", n: porVencer.length, c: porVencer.length ? "text-amber-700" : "text-ink", ir: "vista=licencias" },
   ];
@@ -629,23 +638,39 @@ function Contenido() {
 
       {/* Inicios de sesión de administración */}
       {vista === "accesos" && (() => {
-        const lista = accesos.filter((x) => deEquipo(x.equipo) && (verCierres || x.tipo !== "cierre") && coincide(x.usuario, x.ip, x.via, x.equipo, x.motivo));
-        const dia = accesos.filter((x) => deEquipo(x.equipo) && Date.parse(x.fecha) > ahora - 86400000);
+        const base = verExcluidos ? accesos : accesosVisibles;
+        const lista = base.filter((x) => deEquipo(x.equipo) && (verCierres || x.tipo !== "cierre") && coincide(x.usuario, x.ip, x.via, x.equipo, x.motivo));
+        const dia = accesosVisibles.filter((x) => deEquipo(x.equipo) && Date.parse(x.fecha) > ahora - 86400000);
+        const ocultos = accesos.length - accesosVisibles.length;
+        const excluir = async () => {
+          if (!excluyendo) return;
+          const { error } = await createClient().rpc("fg_logins_excluir", { p_usuario: excluyendo.usuario, p_ip: excluyendo.soloIp ? excluyendo.ip : "", p_motivo: excluyendo.motivo });
+          if (error) { alert(error.message); return; }
+          setExcluyendo(null); cargar();
+        };
+        const quitar = async (r: Exclusion) => {
+          if (!confirm(`¿Volver a mostrar y alertar los inicios de sesión de ${r.usuario}${r.ip ? ` desde ${r.ip}` : ""}?`)) return;
+          const { error } = await createClient().rpc("fg_logins_quitar_exclusion", { p_id: r.id });
+          if (error) { alert(error.message); return; }
+          cargar();
+        };
         const PILL = { inicio: ["Inició sesión", "bg-emerald-50 text-emerald-700"], fallo: ["Falló", "bg-red-50 text-red-600"], cierre: ["Cerró sesión", "bg-line/[0.05] text-ink/60"] } as const;
         return (
           <div className="space-y-4">
             {faltaAccesos && <p role="alert" className="text-sm text-amber-800 bg-amber-500/10 rounded-md px-3 py-2">Falta ejecutar supabase/fortigate-accesos.sql en Supabase.</p>}
+            {!faltaAccesos && faltaExclusiones && esAdmin && <p role="alert" className="text-sm text-amber-800 bg-amber-500/10 rounded-md px-3 py-2">Para poder excluir usuarios falta ejecutar supabase/fortigate-accesos-exclusiones.sql en Supabase.</p>}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="card p-4"><div className="text-xs text-ink/50">Inicios de sesión (24 h)</div><div className="font-display text-3xl mt-1 text-ink">{dia.filter((x) => x.tipo === "inicio").length}</div></div>
               <div className="card p-4"><div className="text-xs text-ink/50">Intentos fallidos (24 h)</div><div className={`font-display text-3xl mt-1 ${dia.some((x) => x.tipo === "fallo") ? "text-red-600" : "text-ink"}`}>{dia.filter((x) => x.tipo === "fallo").length}</div></div>
-              <div className="card p-4"><div className="text-xs text-ink/50">Usuarios distintos (30 días)</div><div className="font-display text-3xl mt-1 text-ink">{new Set(accesos.filter((x) => deEquipo(x.equipo) && x.tipo === "inicio").map((x) => x.usuario)).size}</div></div>
-              <div className="card p-4"><div className="text-xs text-ink/50">Orígenes distintos (30 días)</div><div className="font-display text-3xl mt-1 text-ink">{new Set(accesos.filter((x) => deEquipo(x.equipo) && x.tipo === "inicio" && x.ip).map((x) => x.ip)).size}</div></div>
+              <div className="card p-4"><div className="text-xs text-ink/50">Usuarios distintos (30 días)</div><div className="font-display text-3xl mt-1 text-ink">{new Set(accesosVisibles.filter((x) => deEquipo(x.equipo) && x.tipo === "inicio").map((x) => x.usuario)).size}</div></div>
+              <div className="card p-4"><div className="text-xs text-ink/50">Orígenes distintos (30 días)</div><div className="font-display text-3xl mt-1 text-ink">{new Set(accesosVisibles.filter((x) => deEquipo(x.equipo) && x.tipo === "inicio" && x.ip).map((x) => x.ip)).size}</div></div>
             </div>
             <div className="card overflow-x-auto">
               <div className="px-4 pt-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="font-medium text-ink">Quién entró a la administración <span className="text-sm font-normal text-ink/50">(últimos 30 días)</span></div>
                 <div className="flex flex-wrap items-center gap-4 text-sm text-ink/70">
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={verCierres} onChange={(e) => setVerCierres(e.target.checked)} /> Mostrar cierres de sesión</label>
+                  {exclusiones.length > 0 && <label className="flex items-center gap-1.5"><input type="checkbox" checked={verExcluidos} onChange={(e) => setVerExcluidos(e.target.checked)} /> Mostrar excluidos{ocultos ? ` (${ocultos})` : ""}</label>}
                   {esAdmin && alertarLogins !== null && (
                     <label className="flex items-center gap-1.5">
                       <input type="checkbox" checked={alertarLogins} onChange={async (e) => { const v = e.target.checked; setAlertarLogins(v); await createClient().rpc("fg_logins_config_guardar", { p_alertar: v }); }} />
@@ -655,23 +680,66 @@ function Contenido() {
                 </div>
               </div>
               <table className="data w-full">
-                <thead><tr><th>Fecha</th><th>FortiGate</th><th>Usuario</th><th>Resultado</th><th>Desde</th><th>Por</th><th>Detalle</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>FortiGate</th><th>Usuario</th><th>Resultado</th><th>Desde</th><th>Por</th><th>Detalle</th>{esAdmin && !faltaExclusiones && <th></th>}</tr></thead>
                 <tbody>
-                  {!lista.length && vacio(7, accesos.length ? "Nada coincide con el filtro." : "Sin datos todavía. Hace falta el puente 1.6 (generá el instalador de nuevo) y que el usuario de API pueda leer Log & Report.")}
-                  {lista.slice(0, 500).map((x) => (
-                    <tr key={x.id}>
+                  {!lista.length && vacio(esAdmin && !faltaExclusiones ? 8 : 7, accesos.length ? "Nada coincide con el filtro." : "Sin datos todavía. Hace falta el puente 1.6 (generá el instalador de nuevo) y que el usuario de API pueda leer Log & Report.")}
+                  {lista.slice(0, 500).map((x) => { const exc = exclusionDe(x); return (
+                    <tr key={x.id} className={exc ? "opacity-50" : ""}>
                       <td className="text-sm whitespace-nowrap">{new Date(x.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} <span className="text-xs text-ink/50">· {hace(x.fecha, ahora)}</span></td>
                       <td className="text-sm">{x.equipo}</td>
-                      <td className="text-sm font-medium">{x.usuario || "—"}</td>
+                      <td className="text-sm font-medium">{x.usuario || "—"}{exc && <span className="pill bg-line/[0.05] text-ink/60 ml-2" title={exc.motivo ?? ""}>Excluido</span>}</td>
                       <td><span className={`pill ${PILL[x.tipo][1]}`}>{PILL[x.tipo][0]}</span></td>
                       <td className="text-sm font-mono">{x.ip || "—"}</td>
                       <td className="text-sm text-ink/70">{x.via || "—"}</td>
                       <td className="text-xs text-ink/60 max-w-sm">{x.motivo || ""}</td>
+                      {esAdmin && !faltaExclusiones && (
+                        <td className="text-right whitespace-nowrap">
+                          {exc
+                            ? <button className="text-xs text-ink/60 hover:underline" onClick={() => quitar(exc)}>Quitar exclusión</button>
+                            : x.usuario && <button className="text-xs text-ink/60 hover:underline" onClick={() => setExcluyendo({ usuario: x.usuario, ip: x.ip, soloIp: !!x.ip, motivo: "" })}>Excluir</button>}
+                        </td>
+                      )}
                     </tr>
-                  ))}
+                  ); })}
                 </tbody>
               </table>
             </div>
+            {excluyendo && (
+              <div className="card p-4 space-y-3 border border-amber-500/30">
+                <div className="font-medium text-ink">Excluir <span className="font-mono">{excluyendo.usuario}</span></div>
+                <p className="text-sm text-ink/70">Sus inicios de sesión se siguen guardando, pero no aparecen en el listado ni en los contadores y no generan alertas en Teams.</p>
+                {excluyendo.ip && (
+                  <label className="flex items-center gap-1.5 text-sm text-ink/80">
+                    <input type="checkbox" checked={excluyendo.soloIp} onChange={(e) => setExcluyendo({ ...excluyendo, soloIp: e.target.checked })} />
+                    Solo cuando viene desde <span className="font-mono">{excluyendo.ip}</span> (recomendado: si aparece desde otra IP, se sigue viendo y alertando)
+                  </label>
+                )}
+                <input className="input w-full" placeholder="Motivo (por ejemplo: integración con token vencido, en revisión)" value={excluyendo.motivo} onChange={(e) => setExcluyendo({ ...excluyendo, motivo: e.target.value })} />
+                <div className="flex gap-2">
+                  <button className="btn-primary" onClick={excluir}>Excluir</button>
+                  <button className="btn-secondary" onClick={() => setExcluyendo(null)}>Cancelar</button>
+                </div>
+              </div>
+            )}
+            {exclusiones.length > 0 && (
+              <div className="card overflow-x-auto">
+                <div className="px-4 pt-4 font-medium text-ink">Excluidos <span className="text-sm font-normal text-ink/50">(no se muestran ni alertan)</span></div>
+                <table className="data w-full">
+                  <thead><tr><th>Usuario</th><th>Desde</th><th>Motivo</th><th>Excluido por</th>{esAdmin && <th></th>}</tr></thead>
+                  <tbody>
+                    {exclusiones.map((r) => (
+                      <tr key={r.id}>
+                        <td className="text-sm font-medium font-mono">{r.usuario}</td>
+                        <td className="text-sm font-mono">{r.ip || "Cualquier origen"}</td>
+                        <td className="text-sm text-ink/70">{r.motivo || "—"}</td>
+                        <td className="text-sm text-ink/70 whitespace-nowrap">{r.creado_por_nombre || "—"} <span className="text-xs text-ink/50">· {hace(r.creado, ahora)}</span></td>
+                        {esAdmin && <td className="text-right"><button className="text-xs text-ink/60 hover:underline" onClick={() => quitar(r)}>Quitar</button></td>}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <p className="text-xs text-ink/50">
               Se leen del log de eventos de cada FortiGate en cada reporte del puente. No se cuentan las consultas por API (las hace el propio puente).
               El aviso de cada inicio de sesión se envía solo si las alertas del FortiGate están activadas en «Configurar».
