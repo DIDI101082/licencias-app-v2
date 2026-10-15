@@ -47,9 +47,15 @@ export const esWindowsCliente = (e: Pick<EquipoW11, "so_nombre">) =>
 function evaluarCpu(cpu: string | null): "ok" | "no" | "verificar" {
   const n = cpu ?? "";
   if (/Core\(TM\) Ultra|Core Ultra/i.test(n)) return "ok";
+  // Desde la 11.ª generación Windows informa la generación en el nombre ("11th Gen Intel(R) Core(TM) i5-1135G7")
+  const g = n.match(/(\d{1,2})(?:th|st|nd|rd) Gen Intel/i);
+  if (g && parseInt(g[1], 10) >= 8) return "ok";
   let m = n.match(/Core\(TM\) i[3579]-(\d{4,5})/i) ?? n.match(/Core i[3579]-(\d{4,5})/i);
   if (m) {
-    const gen = m[1].length === 5 ? parseInt(m[1].slice(0, 2), 10) : parseInt(m[1][0], 10);
+    // 5 cifras (i5-10400, i7-12700) o 4 cifras que empiezan con 1 (i5-1035G1, i5-1135G7, i7-1265U):
+    // la generación son las dos primeras cifras. Con 4 cifras que no empiezan con 1 (i5-8250U), es la primera.
+    const dosCifras = m[1].length === 5 || m[1][0] === "1";
+    const gen = dosCifras ? parseInt(m[1].slice(0, 2), 10) : parseInt(m[1][0], 10);
     if (gen >= 8) return "ok";
     if (gen === 7) return "verificar"; // algunos modelos de 7.ª generación están soportados
     return "no";
