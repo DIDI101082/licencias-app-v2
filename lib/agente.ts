@@ -3,7 +3,146 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "1.9";
+export const AGENTE_VERSION = "2.0";
+
+// Actualización a Windows 11 (modo mixto: carpeta de la red local o, si no se llega, Asistente de Microsoft por internet).
+// El agente la escribe en el equipo y la ejecuta en una tarea programada aparte
+// (la tarea del agente tiene un límite de 3 minutos y el upgrade tarda entre 30 y 90).
+// Solo se lanza si Accusys Cyber lo ordena; exige que el instalador esté firmado por Microsoft.
+// Se embebe en base64 para no romper el here-string del instalador. Solo ASCII.
+const W11_ACTUALIZAR = String.raw`# Actualizacion a Windows 11 - la lanza el agente de Accusys Cyber cuando un administrador la ordena
+# Modo mixto: si el equipo llega a la carpeta compartida, actualiza desde la red local (rapido en la oficina);
+# si no llega (home office) y esta permitido, baja el Asistente de instalacion de Windows 11 desde Microsoft.
+$ErrorActionPreference = 'Stop'
+$Carpeta = 'C:\ProgramData\AccusysAgente'
+$Dir   = Join-Path $Carpeta 'w11'
+$Logs  = Join-Path $Dir 'logs'
+$Cache = 'C:\W11Setup'
+$UrlAsistente = 'https://go.microsoft.com/fwlink/?linkid=2171764'
+New-Item -ItemType Directory -Force -Path $Logs | Out-Null
+
+function Informar($estado, $detalle, $compat) {
+  $o = [ordered]@{ estado = $estado; detalle = $detalle; compat = $compat; fecha = (Get-Date).ToString('s'); reportado = $false }
+  Set-Content -Path (Join-Path $Dir 'estado.json') -Value ($o | ConvertTo-Json -Compress) -Encoding UTF8
+}
+function Firmado-Microsoft($ruta) {
+  $f = Get-AuthenticodeSignature -FilePath $ruta
+  return ($f.Status -eq 'Valid' -and $f.SignerCertificate.Subject -match 'O=Microsoft Corporation')
+}
+
+try {
+  $orden  = Get-Content (Join-Path $Dir 'orden.json') -Raw | ConvertFrom-Json
+  $origen = ([string]$orden.origen).TrimEnd('\')
+  if ([int](Get-CimInstance Win32_OperatingSystem).BuildNumber -ge 22000) { exit 0 }
+
+  # 1. Notebook enchufada (sin bateria = equipo de escritorio)
+  try {
+    $bat = Get-CimInstance -Namespace root\wmi -ClassName BatteryStatus -ErrorAction Stop | Select-Object -First 1
+    if ($bat -and -not $bat.PowerOnline) { Informar 'pospuesto' 'Notebook a bateria: se reintenta cuando este enchufada' $null; exit 0 }
+  } catch { }
+
+  # 2. Espacio libre
+  $libre = [math]::Round((Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace / 1GB, 1)
+  if ($libre -lt 25) { Informar 'pospuesto' ('Solo ' + $libre + ' GB libres en C: (se necesitan 25 GB)') $null; exit 0 }
+
+  # 3. Camino: red local si se llega a la carpeta; si no, internet (si esta permitido)
+  $porRed = $false
+  if ($origen) {
+    if ($origen -notmatch '^\\\\[^\\]+\\') { Informar 'error' 'Origen del instalador invalido: tiene que ser un recurso compartido de la red' $null; exit 1 }
+    if (Test-Path (Join-Path $origen 'setup.exe')) { $porRed = $true }
+  }
+  if (-not $porRed -and -not $orden.internet) {
+    Informar 'pospuesto' ('No se accede a ' + $origen + ' (fuera de la red o sin permiso) y la descarga desde internet esta deshabilitada') $null
+    exit 0
+  }
+  New-Item -ItemType Directory -Force -Path $Cache | Out-Null
+
+  if ($porRed) {
+    # ---------- Desde la red local ----------
+    $setupRed = Join-Path $origen 'setup.exe'
+    if (-not (Firmado-Microsoft $setupRed)) { Informar 'error' 'El setup.exe de la carpeta no tiene una firma valida de Microsoft: upgrade NO lanzado' $null; exit 1 }
+
+    Informar 'en_curso' 'Red local: copiando el instalador al equipo' $null
+    & robocopy.exe $origen $Cache /MIR /Z /R:3 /W:10 /NP /NFL /NDL ('/LOG:' + (Join-Path $Logs 'robocopy.log')) | Out-Null
+    if ($LASTEXITCODE -ge 8) { Informar 'pospuesto' ('Fallo la copia del instalador (robocopy ' + $LASTEXITCODE + '): se reintenta') $null; exit 0 }
+    $setup = Join-Path $Cache 'setup.exe'
+    if (-not (Firmado-Microsoft $setup)) { Informar 'error' 'El setup.exe copiado no tiene una firma valida de Microsoft: upgrade NO lanzado' $null; exit 1 }
+
+    if ($orden.sha256) {
+      $img = @('install.wim', 'install.esd') | ForEach-Object { Join-Path $Cache ('sources\' + $_) } | Where-Object { Test-Path $_ } | Select-Object -First 1
+      $hash = $null
+      if ($img) { $hash = (Get-FileHash -Path $img -Algorithm SHA256).Hash }
+      if ($hash -ne ([string]$orden.sha256).ToUpper()) { Informar 'error' ('La huella de la imagen no coincide (' + $hash + '): upgrade NO lanzado') $null; exit 1 }
+    }
+
+    Informar 'en_curso' 'Red local: escaneo de compatibilidad de Microsoft' $null
+    $p = Start-Process -FilePath $setup -Wait -PassThru -WindowStyle Hidden -ArgumentList @(
+      '/auto upgrade', '/quiet', '/compat scanonly', '/eula accept', '/dynamicupdate disable', '/noreboot',
+      ('/copylogs "' + (Join-Path $Logs 'compat') + '"'))
+    $hex = '0x{0:X8}' -f $p.ExitCode
+    $compat = switch ($hex) {
+      '0xC1900210' { 'OK' }
+      '0xC1900208' { 'Aplicacion incompatible' }
+      '0xC1900204' { 'No se pueden conservar apps y datos (idioma o edicion distinta)' }
+      '0xC1900200' { 'No cumple los requisitos minimos' }
+      '0xC190020E' { 'Falta espacio en disco' }
+      default      { 'Codigo ' + $hex }
+    }
+    if ($hex -ne '0xC1900210') {
+      $est = 'bloqueado'
+      if ($hex -eq '0xC190020E') { $est = 'pospuesto' }
+      Informar $est ('Escaneo de Microsoft: ' + $compat + ' (' + $hex + '). Logs en ' + $Logs) $compat
+      exit 0
+    }
+
+    Informar 'en_curso' 'Red local: instalando Windows 11 (puede tardar entre 30 y 90 minutos)' 'OK'
+    $parametros = @('/auto upgrade', '/quiet', '/eula accept', '/dynamicupdate disable', '/showoobe none', '/telemetry disable',
+                    ('/copylogs "' + (Join-Path $Logs 'upgrade') + '"'))
+    if (-not $orden.reiniciar) { $parametros += '/noreboot' }
+    $p = Start-Process -FilePath $setup -Wait -PassThru -WindowStyle Hidden -ArgumentList $parametros
+    $hex = '0x{0:X8}' -f $p.ExitCode
+    if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
+      Informar 'pendiente_reinicio' 'Red local: Windows 11 preparado, se completa cuando se reinicie el equipo' 'OK'
+    } else {
+      Informar 'error' ('Red local: setup.exe termino con el codigo ' + $hex + '. Logs en ' + $Logs) 'OK'
+    }
+  }
+  else {
+    # ---------- Desde internet (Asistente de instalacion de Windows 11 de Microsoft) ----------
+    Informar 'en_curso' 'Internet: descargando el Asistente de instalacion de Windows 11 desde Microsoft' $null
+    $asistente = Join-Path $Cache 'Windows11InstallationAssistant.exe'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    try {
+      $ProgressPreference = 'SilentlyContinue'
+      Invoke-WebRequest -Uri $UrlAsistente -OutFile $asistente -UseBasicParsing -TimeoutSec 600
+    } catch {
+      Informar 'pospuesto' ('Internet: no se pudo descargar el asistente de Microsoft (' + $_.Exception.Message + '): se reintenta') $null
+      exit 0
+    }
+    if (-not (Firmado-Microsoft $asistente)) {
+      Remove-Item $asistente -Force -ErrorAction SilentlyContinue
+      Informar 'error' 'Internet: el asistente descargado no tiene una firma valida de Microsoft: upgrade NO lanzado' $null
+      exit 1
+    }
+
+    # El asistente verifica la compatibilidad, baja Windows 11 (unos 4 GB) e instala conservando apps y datos
+    Informar 'en_curso' 'Internet: el asistente de Microsoft esta descargando e instalando Windows 11 (1 a 3 horas segun la conexion)' 'Asistente de Microsoft'
+    $parametros = @('/QuietInstall', '/SkipEULA', '/auto upgrade', ('/copylogs "' + (Join-Path $Logs 'asistente') + '"'))
+    if (-not $orden.reiniciar) { $parametros += '/NoRestartUI' }
+    $p = Start-Process -FilePath $asistente -Wait -PassThru -ArgumentList $parametros
+    $hex = '0x{0:X8}' -f $p.ExitCode
+    if ($p.ExitCode -eq 0) {
+      Informar 'pendiente_reinicio' 'Internet: Windows 11 instalado por el asistente, se completa cuando se reinicie el equipo' 'Asistente de Microsoft'
+    } else {
+      Informar 'error' ('Internet: el asistente de Microsoft termino con el codigo ' + $hex + '. Logs en ' + $Logs) 'Asistente de Microsoft'
+    }
+  }
+}
+catch {
+  Informar 'error' ($_.Exception.Message) $null
+  exit 1
+}
+`;
 
 const AGENTE = String.raw`# Agente de inventario Accusys - reporta el estado del equipo cada pocos minutos
 $ErrorActionPreference = 'Stop'
@@ -548,6 +687,56 @@ catch {
   if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $dAcc = $dAcc + ' | ' + $_.ErrorDetails.Message }
   Set-Content -Path (Join-Path $Carpeta 'ultimos-accesos.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + ($dAcc -replace '\s+', ' '))
 }
+
+# ---- Migracion a Windows 11 (solo equipos de escritorio aprobados) ----
+# Informa el build y el estado del upgrade; si Accusys Cyber ordena actualizar, lanza la tarea aparte.
+# El agente no ejecuta nada que venga del servidor: la unica orden posible es "actualizar".
+try {
+  if ($Estado -eq 'aprobado' -and $os -and [int]$os.ProductType -eq 1) {
+    $DirW11 = Join-Path $Carpeta 'w11'
+    $ArchEstadoW11 = Join-Path $DirW11 'estado.json'
+    $TareaW11 = 'AccusysActualizacionW11'
+    $datosW11 = [ordered]@{ build = [string]$os.BuildNumber }
+    $pendienteW11 = $null
+    if (Test-Path $ArchEstadoW11) {
+      $pendienteW11 = Get-Content $ArchEstadoW11 -Raw | ConvertFrom-Json
+      if (-not $pendienteW11.reportado) {
+        $datosW11.estado  = [string]$pendienteW11.estado
+        $datosW11.detalle = [string]$pendienteW11.detalle
+        $datosW11.compat  = [string]$pendienteW11.compat
+      }
+    }
+    $cuerpoW11 = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
+                 ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_secreto":' + (ConvertTo-Json ([string]$Secreto)) +
+                 ',"p_datos":' + (ConvertTo-Json -InputObject $datosW11 -Compress) + '}'
+    $rW11 = Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_w11_agente') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoW11)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 30
+    if ($datosW11.Contains('estado')) {
+      $pendienteW11.reportado = $true
+      Set-Content -Path $ArchEstadoW11 -Value ($pendienteW11 | ConvertTo-Json -Compress) -Encoding UTF8
+    }
+
+    if ($rW11.orden -eq 'actualizar' -and [int]$os.BuildNumber -lt 22000) {
+      $enMarcha = Obtener { (Get-ScheduledTask -TaskName $TareaW11 -ErrorAction Stop).State -eq 'Running' }
+      if (-not $enMarcha) {
+        New-Item -ItemType Directory -Force -Path $DirW11 | Out-Null
+        $ordenW11 = [ordered]@{ origen = [string]$rW11.origen; sha256 = [string]$rW11.sha256; reiniciar = [bool]$rW11.reiniciar; internet = [bool]$rW11.internet }
+        Set-Content -Path (Join-Path $DirW11 'orden.json') -Value ($ordenW11 | ConvertTo-Json -Compress) -Encoding UTF8
+        $scriptW11 = Join-Path $DirW11 'actualizar.ps1'
+        Set-Content -Path $scriptW11 -Value ([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__W11_SCRIPT__'))) -Encoding UTF8
+        Set-Content -Path $ArchEstadoW11 -Value '{"estado":"en_curso","detalle":"Tarea de actualizacion iniciada","compat":null,"reportado":false}' -Encoding UTF8
+        $accW11 = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $scriptW11 + '"')
+        $usrW11 = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $cfgW11 = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 6) -MultipleInstances IgnoreNew
+        Register-ScheduledTask -TaskName $TareaW11 -Action $accW11 -Principal $usrW11 -Settings $cfgW11 -Force | Out-Null
+        Start-ScheduledTask -TaskName $TareaW11
+      }
+    }
+    Set-Content -Path (Join-Path $Carpeta 'ultima-w11.txt') -Value ('OK ' + (Get-Date).ToString('s') + ' orden: ' + [string]$rW11.orden)
+  }
+}
+catch {
+  Set-Content -Path (Join-Path $Carpeta 'ultima-w11.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+}
 `;
 
 const INSTALADOR = String.raw`# Instalador del agente de inventario Accusys
@@ -606,7 +795,9 @@ export function generarInstalador(url: string, anon: string, token: string, inte
   const agente = AGENTE.replace("__URL__", () => url.replace(/\/$/, ""))
     .replace("__ANON__", () => anon)
     .replace("__TOKEN__", () => token)
-    .replace("__VERSION__", () => AGENTE_VERSION);
+    .replace("__VERSION__", () => AGENTE_VERSION)
+    // btoa: el script es solo ASCII y funciona igual en el navegador y en el servidor
+    .replace("__W11_SCRIPT__", () => btoa(W11_ACTUALIZAR.replace(/\r?\n/g, "\r\n")));
   return INSTALADOR.replace("__AGENTE__", () => agente).replace("__INTERVALO__", () => String(intervalo));
 }
 

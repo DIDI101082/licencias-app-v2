@@ -39,6 +39,7 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/riesgos", label: "Riesgos" },
     { href: "/inventario/vulnerabilidades", label: "Vulnerabilidades" },
     { href: "/inventario/monitoreo", label: "Monitoreo" },
+    { href: "/inventario/migracion-w11", label: "Migración a Windows 11" },
   ] },
   { id: "perimetro", label: "Perímetro", titulo: "Perímetro, correo y nube", paginas: [
     { href: "/inventario/superficie", label: "Superficie expuesta" },

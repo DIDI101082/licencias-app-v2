@@ -14,6 +14,7 @@ export const SECCION: Record<string, string> = {
   revision_items: "Revisión de accesos (usuarios)", eset_config: "Integración con ESET", eset_detecciones: "Detecciones de ESET",
   correo_dominios: "Correo y dominio", correo_cambios: "Cambios de DNS del correo", sup_objetivos: "Superficie expuesta",
   sup_puertos: "Superficie expuesta (puertos)", norma_evaluacion: "Normativa", prog_config: "Verificaciones diarias",
+  inv_w11: "Migración a Windows 11",
 };
 
 const CAMPO: Record<string, string> = {
