@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "2.4";
+export const AGENTE_VERSION = "2.5";
 
 // Diagnostico del disco C (agente 2.1): que ocupa el espacio y en que estado fisico esta el disco.
 // Recorrer todo C: puede tardar varios minutos, asi que corre en una tarea programada aparte
@@ -166,7 +166,7 @@ function Informar($estado, $detalle, $compat, $progreso = $null) {
   Set-Content -Path (Join-Path $Dir 'estado.json') -Value ($o | ConvertTo-Json -Compress) -Encoding UTF8
 }
 # Avance general (0-100) para la barra de Accusys Cyber:
-#   copia del instalador 0-15, escaneo de compatibilidad 15-20, instalacion de Windows 20-100 (o 5-100 por internet)
+#   copia del instalador 0-15, instalacion de Windows (incluye la verificacion de compatibilidad) 15-100 (o 5-100 por internet)
 function Avance-Setup {
   try { return [int](Get-ItemProperty 'HKLM:\SYSTEM\Setup\MoSetup\Volatile' -ErrorAction Stop).SetupProgress } catch { return $null }
 }
@@ -179,6 +179,44 @@ function Esperar-Con-Avance($proc, $estado, $detalle, $compat, [scriptblock]$cal
     if ($null -ne $pct -and $pct -ne $ultimo) { Informar $estado $detalle $compat ([int][math]::Min(99, [math]::Max(0, $pct))); $ultimo = $pct }
   }
   return $proc.ExitCode
+}
+# Como Esperar-Con-Avance, pero vigila que setup.exe no quede colgado: con algunos builds, SetupHost termina
+# y setup.exe queda abierto sin hacer nada. Si SetupHost aparecio y despues lleva 10 minutos cerrado, se toma
+# el resultado del log de Panther y se cierra setup.exe.
+function Esperar-Setup($proc, $estado, $detalle, $compat, [scriptblock]$calc) {
+  $null = $proc.Handle
+  $ultimo = -1; $vioHost = $false; $sinHost = 0
+  while (-not $proc.WaitForExit(30000)) {
+    $pct = & $calc
+    if ($null -ne $pct -and $pct -ne $ultimo) { Informar $estado $detalle $compat ([int][math]::Min(99, [math]::Max(0, $pct))); $ultimo = $pct }
+    if (Get-Process -Name SetupHost -ErrorAction SilentlyContinue) { $vioHost = $true; $sinHost = 0 }
+    elseif ($vioHost) { $sinHost += 30 }
+    if ($sinHost -ge 600) {
+      $codigo = -2
+      $log = 'C:\$WINDOWS.~BT\Sources\Panther\setupact.log'
+      $m = Select-String -Path $log -Pattern 'CSetupHost::Execute\(\d+\): Result = 0x([0-9A-Fa-f]+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+      if ($m) {
+        $v = [Convert]::ToInt64($m.Matches[0].Groups[1].Value, 16)
+        if ($v -gt 0x7FFFFFFF) { $v -= 0x100000000 }
+        $codigo = [int]$v
+      }
+      # setup.exe lanza setupprep.exe: si queda abierto, bloquea cualquier instalacion nueva (0x80070652)
+      Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+      Get-Process -Name setupprep -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+      return $codigo
+    }
+  }
+  return $proc.ExitCode
+}
+function Texto-Compat($hex) {
+  switch ($hex) {
+    '0xC1900208' { return 'Aplicacion incompatible' }
+    '0xC1900204' { return 'No se pueden conservar apps y datos (idioma o edicion distinta)' }
+    '0xC1900200' { return 'No cumple los requisitos minimos' }
+    '0xC190020E' { return 'Falta espacio en disco' }
+    '0xC1900202' { return 'No cumple los requisitos minimos' }
+  }
+  return $null
 }
 function Firmado-Microsoft($ruta) {
   $f = Get-AuthenticodeSignature -FilePath $ruta
@@ -257,40 +295,33 @@ try {
       if ($hash -ne ([string]$orden.sha256).ToUpper()) { Informar 'error' ('La huella de la imagen no coincide (' + $hash + '): upgrade NO lanzado') $null; exit 1 }
     }
 
-    Informar 'en_curso' 'Red local: escaneo de compatibilidad de Microsoft' $null 15
-    $p = Start-Process -FilePath $setup -Wait -PassThru -WindowStyle Hidden -ArgumentList (@(
-      '/auto upgrade', '/quiet', '/compat scanonly', '/eula accept', '/noreboot',
-      ('/copylogs "' + (Join-Path $Logs 'compat') + '"')) + $extraEset)
-    $hex = '0x{0:X8}' -f $p.ExitCode
-    $compat = switch ($hex) {
-      '0xC1900210' { 'OK' }
-      '0xC1900208' { 'Aplicacion incompatible' }
-      '0xC1900204' { 'No se pueden conservar apps y datos (idioma o edicion distinta)' }
-      '0xC1900200' { 'No cumple los requisitos minimos' }
-      '0xC190020E' { 'Falta espacio en disco' }
-      default      { 'Codigo ' + $hex }
-    }
-    if ($hex -ne '0xC1900210') {
-      $est = 'bloqueado'
-      if ($hex -eq '0xC190020E') { $est = 'pospuesto' }
-      Informar $est ('Escaneo de Microsoft: ' + $compat + ' (' + $hex + '). Logs en ' + $Logs) $compat
-      exit 0
-    }
-
     $notaEset = ''
     if ($cifradoEset) { $notaEset = ' - disco cifrado con ESET: se carga el driver de cifrado y en cada reinicio se pide la clave de pre-arranque' }
     $detInst = 'Red local: instalando Windows 11 (puede tardar entre 30 y 90 minutos)' + $notaEset
-    Informar 'en_curso' $detInst 'OK' 20
-    $parametros = @('/auto upgrade', '/quiet', '/eula accept', '/showoobe none', '/telemetry disable',
+    # Sin escaneo previo aparte: la instalacion hace la misma verificacion de compatibilidad y frena con los mismos codigos
+    Informar 'en_curso' $detInst $null 15
+    # /DynamicUpdate Disable (asi, con mayusculas): no baja actualizaciones de Microsoft durante la instalacion (ahorra ~40 min)
+    $parametros = @('/auto upgrade', '/quiet', '/eula accept', '/DynamicUpdate Disable', '/showoobe none', '/telemetry disable',
                     ('/copylogs "' + (Join-Path $Logs 'upgrade') + '"')) + $extraEset
     if (-not $orden.reiniciar) { $parametros += '/noreboot' }
+    # Restos de un intento anterior colgado (si quedan abiertos, setup.exe responde 0x80070652 "ya hay otra instalacion")
+    Get-Process -Name setupprep, SetupHost -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -Name setup -ErrorAction SilentlyContinue | Where-Object { $_.Path -like 'C:\W11Setup\*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 5
     $p = Start-Process -FilePath $setup -PassThru -WindowStyle Hidden -ArgumentList $parametros
-    $codigo = Esperar-Con-Avance $p 'en_curso' $detInst 'OK' { $s = Avance-Setup; if ($null -eq $s) { return $null }; return [int](20 + 0.8 * $s) }
+    $codigo = Esperar-Setup $p 'en_curso' $detInst $null { $s = Avance-Setup; if ($null -eq $s) { return $null }; return [int](15 + 0.85 * $s) }
     $hex = '0x{0:X8}' -f $codigo
+    $compat = Texto-Compat $hex
     if ($codigo -eq 0 -or $codigo -eq 3010) {
       Informar 'pendiente_reinicio' 'Red local: Windows 11 preparado, se completa cuando se reinicie el equipo' 'OK' 100
+    } elseif ($compat) {
+      $est = 'bloqueado'
+      if ($hex -eq '0xC190020E') { $est = 'pospuesto' }
+      Informar $est ('Verificacion de Microsoft: ' + $compat + ' (' + $hex + '). Logs en ' + $Logs) $compat
+    } elseif ($codigo -eq -2) {
+      Informar 'error' ('Red local: setup.exe quedo colgado y no informo resultado. Logs en ' + $Logs + ' y C:\$WINDOWS.~BT\Sources\Panther') $null
     } else {
-      Informar 'error' ('Red local: setup.exe termino con el codigo ' + $hex + '. Logs en ' + $Logs) 'OK'
+      Informar 'error' ('Red local: setup.exe termino con el codigo ' + $hex + '. Logs en ' + $Logs) $null
     }
   }
   else {

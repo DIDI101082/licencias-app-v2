@@ -410,11 +410,12 @@ function Configuracion({ config, onGuardado }: { config: Config; onGuardado: (m:
   );
 }
 
-// Etapa según el avance general que informa el agente 2.3 (copia 0-15, escaneo 15-20, instalación 20-100)
+// Etapa según el avance general que informa el agente (2.5: copia 0-15, instalación 15-100;
+// la instalación arranca verificando compatibilidad y bajando actualizaciones de Microsoft, y ahí puede quedar un rato quieta)
 function etapaAvance(p: number) {
   if (p >= 100) return "listo, falta reiniciar";
   if (p < 15) return "copiando el instalador";
-  if (p < 20) return "escaneo de compatibilidad";
+  if (p === 15) return "verificando compatibilidad";
   return "instalando Windows 11";
 }
 

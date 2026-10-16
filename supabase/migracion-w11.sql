@@ -34,7 +34,7 @@ create table if not exists public.inv_w11 (
   migrado_fecha timestamptz
 );
 create index if not exists idx_inv_w11_estado on public.inv_w11(estado);
--- Avance general 0-100 (agente 2.3): copia 0-15, escaneo 15-20, instalación 20-100
+-- Avance general 0-100 (agente 2.5): copia 0-15, instalación 15-100
 alter table public.inv_w11 add column if not exists progreso int;
 
 alter table public.inv_w11 enable row level security;
