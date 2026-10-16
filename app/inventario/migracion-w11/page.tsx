@@ -13,7 +13,7 @@ import {
 const COLUMNAS = [
   "id", "hostname", "usuario", "fabricante", "modelo", "numero_serie", "so_nombre", "so_version", "so_build", "procesador",
   "ram_total_gb", "discos", "tpm_version", "secure_boot", "cifrado_producto", "ultimo_reporte", "agente_version",
-  "inv_w11(oleada, estado, orden_pendiente, orden_por, orden_fecha, detalle, compat, estado_fecha, build_origen, migrado_fecha)",
+  "inv_w11(oleada, estado, orden_pendiente, orden_por, orden_fecha, detalle, compat, estado_fecha, build_origen, migrado_fecha, progreso)",
 ].join(", ");
 
 type Config = { w11_origen: string | null; w11_sha256: string | null; w11_reiniciar: boolean; w11_internet: boolean };
@@ -278,6 +278,7 @@ export default function MigracionW11() {
                     </td>
                     <td title={ESTADO[f.est].ayuda}>
                       <span className={ESTADO[f.est].cls}>{ESTADO[f.est].txt}</span>
+                      {(f.est === "en_curso" || f.est === "pendiente_reinicio") && f.inv_w11?.progreso != null && <BarraAvance pct={f.inv_w11.progreso} />}
                       {f.inv_w11?.estado_fecha && f.est !== "sin_orden" && <div className="text-xs text-ink/50 mt-0.5">{hace(f.inv_w11.estado_fecha)}</div>}
                     </td>
                     <td>{f.inv_w11?.oleada ?? "—"}</td>
@@ -303,6 +304,9 @@ export default function MigracionW11() {
                             <div className="text-xs uppercase tracking-wide text-ink/50">Actualización</div>
                             <p className="text-ink/70">{ESTADO[f.est].ayuda}.</p>
                             {f.inv_w11?.detalle && <p><b>Último estado:</b> {f.inv_w11.detalle} ({fh(f.inv_w11.estado_fecha)})</p>}
+                            {(f.est === "en_curso" || f.est === "pendiente_reinicio") && f.inv_w11?.progreso != null && (
+                              <p><b>Avance:</b> {f.inv_w11.progreso}% · {etapaAvance(f.inv_w11.progreso)}</p>
+                            )}
                             {f.inv_w11?.compat && <p><b>Escaneo de Microsoft:</b> {f.inv_w11.compat}</p>}
                             {f.inv_w11?.orden_por && <p><b>Ordenado por:</b> {f.inv_w11.orden_por} el {fh(f.inv_w11.orden_fecha)}</p>}
                             {f.inv_w11?.build_origen && <p><b>Build al ordenar:</b> {f.inv_w11.build_origen}</p>}
@@ -402,6 +406,26 @@ function Configuracion({ config, onGuardado }: { config: Config; onGuardado: (m:
       {!origen.trim() && !internet && <p className="text-sm text-amber-700">Configurá la carpeta o permití la descarga desde internet.</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button className="btn-primary" onClick={guardar}>Guardar</button>
+    </div>
+  );
+}
+
+// Etapa según el avance general que informa el agente 2.3 (copia 0-15, escaneo 15-20, instalación 20-100)
+function etapaAvance(p: number) {
+  if (p >= 100) return "listo, falta reiniciar";
+  if (p < 15) return "copiando el instalador";
+  if (p < 20) return "escaneo de compatibilidad";
+  return "instalando Windows 11";
+}
+
+function BarraAvance({ pct }: { pct: number }) {
+  const v = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="mt-1 w-28" title={`${v}% · ${etapaAvance(v)}`}>
+      <div className="h-1.5 bg-line/[0.08] rounded-full overflow-hidden" role="progressbar" aria-valuenow={v} aria-valuemin={0} aria-valuemax={100} aria-label={`Avance de la actualización: ${v}%`}>
+        <div className={`h-full rounded-full transition-all duration-700 ${v >= 100 ? "bg-emerald-500" : "bg-brand-500"}`} style={{ width: `${v}%` }} />
+      </div>
+      <div className="text-[11px] text-ink/60 tabular-nums mt-0.5">{v}%</div>
     </div>
   );
 }

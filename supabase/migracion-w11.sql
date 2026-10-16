@@ -34,6 +34,8 @@ create table if not exists public.inv_w11 (
   migrado_fecha timestamptz
 );
 create index if not exists idx_inv_w11_estado on public.inv_w11(estado);
+-- Avance general 0-100 (agente 2.3): copia 0-15, escaneo 15-20, instalación 20-100
+alter table public.inv_w11 add column if not exists progreso int;
 
 alter table public.inv_w11 enable row level security;
 drop policy if exists inv_w11_select on public.inv_w11;
@@ -102,7 +104,7 @@ begin
     select id, hostname, nullif(trim(p_oleada), ''), 'ordenado', true, v_email, now(), null, null, now(), so_build from cand
     on conflict (dispositivo_id) do update set
       hostname = excluded.hostname, oleada = excluded.oleada, estado = 'ordenado', orden_pendiente = true,
-      orden_por = excluded.orden_por, orden_fecha = now(), detalle = null, compat = null,
+      orden_por = excluded.orden_por, orden_fecha = now(), detalle = null, compat = null, progreso = null,
       estado_fecha = now(), build_origen = excluded.build_origen
     returning w.dispositivo_id
   )
@@ -160,6 +162,11 @@ begin
       estado = v_estado,
       detalle = left(p_datos->>'detalle', 1000),
       compat = coalesce(left(nullif(p_datos->>'compat', ''), 120), compat),
+      progreso = case
+        when v_estado = 'pendiente_reinicio' then 100
+        when v_estado = 'en_curso' and (p_datos->>'progreso') ~ '^\d{1,3}$' then least((p_datos->>'progreso')::int, 100)
+        when v_estado = 'en_curso' then progreso
+        else null end,
       estado_fecha = now(),
       orden_pendiente = (v_estado = 'pospuesto')      -- pospuesto (a batería, sin espacio, fuera de la red): se reintenta solo
     where dispositivo_id = v_id;

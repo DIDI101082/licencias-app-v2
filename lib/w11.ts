@@ -28,7 +28,7 @@ export type EquipoW11 = {
   inv_w11: {
     oleada: string | null; estado: Exclude<EstadoW11, "revisar">; orden_pendiente: boolean; orden_por: string | null;
     orden_fecha: string | null; detalle: string | null; compat: string | null; estado_fecha: string | null;
-    build_origen: string | null; migrado_fecha: string | null;
+    build_origen: string | null; migrado_fecha: string | null; progreso?: number | null;
   } | null;
 };
 

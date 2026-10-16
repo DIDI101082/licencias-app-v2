@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "2.2";
+export const AGENTE_VERSION = "2.3";
 
 // Diagnostico del disco C (agente 2.1): que ocupa el espacio y en que estado fisico esta el disco.
 // Recorrer todo C: puede tardar varios minutos, asi que corre en una tarea programada aparte
@@ -161,9 +161,24 @@ $Cache = 'C:\W11Setup'
 $UrlAsistente = 'https://go.microsoft.com/fwlink/?linkid=2171764'
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
 
-function Informar($estado, $detalle, $compat) {
-  $o = [ordered]@{ estado = $estado; detalle = $detalle; compat = $compat; fecha = (Get-Date).ToString('s'); reportado = $false }
+function Informar($estado, $detalle, $compat, $progreso = $null) {
+  $o = [ordered]@{ estado = $estado; detalle = $detalle; compat = $compat; progreso = $progreso; fecha = (Get-Date).ToString('s'); reportado = $false }
   Set-Content -Path (Join-Path $Dir 'estado.json') -Value ($o | ConvertTo-Json -Compress) -Encoding UTF8
+}
+# Avance general (0-100) para la barra de Accusys Cyber:
+#   copia del instalador 0-15, escaneo de compatibilidad 15-20, instalacion de Windows 20-100 (o 5-100 por internet)
+function Avance-Setup {
+  try { return [int](Get-ItemProperty 'HKLM:\SYSTEM\Setup\MoSetup\Volatile' -ErrorAction Stop).SetupProgress } catch { return $null }
+}
+# Espera a que termine un proceso informando el avance cada 30 segundos. $calc devuelve el % general (o $null)
+function Esperar-Con-Avance($proc, $estado, $detalle, $compat, [scriptblock]$calc) {
+  $null = $proc.Handle   # necesario para leer ExitCode al final
+  $ultimo = -1
+  while (-not $proc.WaitForExit(30000)) {
+    $pct = & $calc
+    if ($null -ne $pct -and $pct -ne $ultimo) { Informar $estado $detalle $compat ([int][math]::Min(99, [math]::Max(0, $pct))); $ultimo = $pct }
+  }
+  return $proc.ExitCode
 }
 function Firmado-Microsoft($ruta) {
   $f = Get-AuthenticodeSignature -FilePath $ruta
@@ -221,9 +236,16 @@ try {
     $setupRed = Join-Path $origen 'setup.exe'
     if (-not (Firmado-Microsoft $setupRed)) { Informar 'error' 'El setup.exe de la carpeta no tiene una firma valida de Microsoft: upgrade NO lanzado' $null; exit 1 }
 
-    Informar 'en_curso' 'Red local: copiando el instalador al equipo' $null
-    & robocopy.exe $origen $Cache /MIR /Z /R:3 /W:10 /NP /NFL /NDL ('/LOG:' + (Join-Path $Logs 'robocopy.log')) | Out-Null
-    if ($LASTEXITCODE -ge 8) { Informar 'pospuesto' ('Fallo la copia del instalador (robocopy ' + $LASTEXITCODE + '): se reintenta') $null; exit 0 }
+    Informar 'en_curso' 'Red local: copiando el instalador al equipo' $null 0
+    $totalOrigen = (Get-ChildItem -LiteralPath $origen -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+    $pr = Start-Process -FilePath 'robocopy.exe' -PassThru -WindowStyle Hidden -ArgumentList @(('"' + $origen + '"'), ('"' + $Cache + '"'),
+            '/MIR', '/Z', '/R:3', '/W:10', '/NP', '/NFL', '/NDL', ('/LOG:"' + (Join-Path $Logs 'robocopy.log') + '"'))
+    $rc = Esperar-Con-Avance $pr 'en_curso' 'Red local: copiando el instalador al equipo' $null {
+      if (-not $totalOrigen) { return $null }
+      $copiado = (Get-ChildItem -LiteralPath $Cache -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+      return [int](15 * $copiado / $totalOrigen)
+    }
+    if ($rc -ge 8) { Informar 'pospuesto' ('Fallo la copia del instalador (robocopy ' + $rc + '): se reintenta') $null; exit 0 }
     $setup = Join-Path $Cache 'setup.exe'
     if (-not (Firmado-Microsoft $setup)) { Informar 'error' 'El setup.exe copiado no tiene una firma valida de Microsoft: upgrade NO lanzado' $null; exit 1 }
 
@@ -234,7 +256,7 @@ try {
       if ($hash -ne ([string]$orden.sha256).ToUpper()) { Informar 'error' ('La huella de la imagen no coincide (' + $hash + '): upgrade NO lanzado') $null; exit 1 }
     }
 
-    Informar 'en_curso' 'Red local: escaneo de compatibilidad de Microsoft' $null
+    Informar 'en_curso' 'Red local: escaneo de compatibilidad de Microsoft' $null 15
     $p = Start-Process -FilePath $setup -Wait -PassThru -WindowStyle Hidden -ArgumentList (@(
       '/auto upgrade', '/quiet', '/compat scanonly', '/eula accept', '/dynamicupdate disable', '/noreboot',
       ('/copylogs "' + (Join-Path $Logs 'compat') + '"')) + $extraEset)
@@ -256,14 +278,16 @@ try {
 
     $notaEset = ''
     if ($cifradoEset) { $notaEset = ' - disco cifrado con ESET: se carga el driver de cifrado y en cada reinicio se pide la clave de pre-arranque' }
-    Informar 'en_curso' ('Red local: instalando Windows 11 (puede tardar entre 30 y 90 minutos)' + $notaEset) 'OK'
+    $detInst = 'Red local: instalando Windows 11 (puede tardar entre 30 y 90 minutos)' + $notaEset
+    Informar 'en_curso' $detInst 'OK' 20
     $parametros = @('/auto upgrade', '/quiet', '/eula accept', '/dynamicupdate disable', '/showoobe none', '/telemetry disable',
                     ('/copylogs "' + (Join-Path $Logs 'upgrade') + '"')) + $extraEset
     if (-not $orden.reiniciar) { $parametros += '/noreboot' }
-    $p = Start-Process -FilePath $setup -Wait -PassThru -WindowStyle Hidden -ArgumentList $parametros
-    $hex = '0x{0:X8}' -f $p.ExitCode
-    if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
-      Informar 'pendiente_reinicio' 'Red local: Windows 11 preparado, se completa cuando se reinicie el equipo' 'OK'
+    $p = Start-Process -FilePath $setup -PassThru -WindowStyle Hidden -ArgumentList $parametros
+    $codigo = Esperar-Con-Avance $p 'en_curso' $detInst 'OK' { $s = Avance-Setup; if ($null -eq $s) { return $null }; return [int](20 + 0.8 * $s) }
+    $hex = '0x{0:X8}' -f $codigo
+    if ($codigo -eq 0 -or $codigo -eq 3010) {
+      Informar 'pendiente_reinicio' 'Red local: Windows 11 preparado, se completa cuando se reinicie el equipo' 'OK' 100
     } else {
       Informar 'error' ('Red local: setup.exe termino con el codigo ' + $hex + '. Logs en ' + $Logs) 'OK'
     }
@@ -287,13 +311,15 @@ try {
     }
 
     # El asistente verifica la compatibilidad, baja Windows 11 (unos 4 GB) e instala conservando apps y datos
-    Informar 'en_curso' 'Internet: el asistente de Microsoft esta descargando e instalando Windows 11 (1 a 3 horas segun la conexion)' 'Asistente de Microsoft'
+    $detAsis = 'Internet: el asistente de Microsoft esta descargando e instalando Windows 11 (1 a 3 horas segun la conexion)'
+    Informar 'en_curso' $detAsis 'Asistente de Microsoft' 5
     $parametros = @('/QuietInstall', '/SkipEULA', '/auto upgrade', ('/copylogs "' + (Join-Path $Logs 'asistente') + '"'))
     if (-not $orden.reiniciar) { $parametros += '/NoRestartUI' }
-    $p = Start-Process -FilePath $asistente -Wait -PassThru -ArgumentList $parametros
-    $hex = '0x{0:X8}' -f $p.ExitCode
-    if ($p.ExitCode -eq 0) {
-      Informar 'pendiente_reinicio' 'Internet: Windows 11 instalado por el asistente, se completa cuando se reinicie el equipo' 'Asistente de Microsoft'
+    $p = Start-Process -FilePath $asistente -PassThru -ArgumentList $parametros
+    $codigo = Esperar-Con-Avance $p 'en_curso' $detAsis 'Asistente de Microsoft' { $s = Avance-Setup; if ($null -eq $s) { return $null }; return [int](5 + 0.95 * $s) }
+    $hex = '0x{0:X8}' -f $codigo
+    if ($codigo -eq 0) {
+      Informar 'pendiente_reinicio' 'Internet: Windows 11 instalado por el asistente, se completa cuando se reinicie el equipo' 'Asistente de Microsoft' 100
     } else {
       Informar 'error' ('Internet: el asistente de Microsoft termino con el codigo ' + $hex + '. Logs en ' + $Logs) 'Asistente de Microsoft'
     }
@@ -865,6 +891,7 @@ try {
         $datosW11.estado  = [string]$pendienteW11.estado
         $datosW11.detalle = [string]$pendienteW11.detalle
         $datosW11.compat  = [string]$pendienteW11.compat
+        if ($null -ne $pendienteW11.progreso) { $datosW11.progreso = [int]$pendienteW11.progreso }
       }
     }
     $cuerpoW11 = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
@@ -872,8 +899,12 @@ try {
                  ',"p_datos":' + (ConvertTo-Json -InputObject $datosW11 -Compress) + '}'
     $rW11 = Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_w11_agente') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoW11)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 30
     if ($datosW11.Contains('estado')) {
-      $pendienteW11.reportado = $true
-      Set-Content -Path $ArchEstadoW11 -Value ($pendienteW11 | ConvertTo-Json -Compress) -Encoding UTF8
+      # Solo se marca como reportado si la tarea no escribio un estado nuevo mientras tanto (avance cada 30 s)
+      $actualW11 = Obtener { Get-Content $ArchEstadoW11 -Raw | ConvertFrom-Json }
+      if ($actualW11 -and [string]$actualW11.fecha -eq [string]$pendienteW11.fecha -and [string]$actualW11.estado -eq [string]$pendienteW11.estado) {
+        $pendienteW11.reportado = $true
+        Set-Content -Path $ArchEstadoW11 -Value ($pendienteW11 | ConvertTo-Json -Compress) -Encoding UTF8
+      }
     }
 
     if ($rW11.orden -eq 'actualizar' -and [int]$os.BuildNumber -lt 22000) {
@@ -884,7 +915,7 @@ try {
         Set-Content -Path (Join-Path $DirW11 'orden.json') -Value ($ordenW11 | ConvertTo-Json -Compress) -Encoding UTF8
         $scriptW11 = Join-Path $DirW11 'actualizar.ps1'
         Set-Content -Path $scriptW11 -Value ([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__W11_SCRIPT__'))) -Encoding UTF8
-        Set-Content -Path $ArchEstadoW11 -Value '{"estado":"en_curso","detalle":"Tarea de actualizacion iniciada","compat":null,"reportado":false}' -Encoding UTF8
+        Set-Content -Path $ArchEstadoW11 -Value '{"estado":"en_curso","detalle":"Tarea de actualizacion iniciada","compat":null,"progreso":0,"reportado":false}' -Encoding UTF8
         $accW11 = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $scriptW11 + '"')
         $usrW11 = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $cfgW11 = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 6) -MultipleInstances IgnoreNew
