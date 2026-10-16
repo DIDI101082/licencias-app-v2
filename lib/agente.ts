@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "2.1";
+export const AGENTE_VERSION = "2.2";
 
 // Diagnostico del disco C (agente 2.1): que ocupa el espacio y en que estado fisico esta el disco.
 // Recorrer todo C: puede tardar varios minutos, asi que corre en una tarea programada aparte
@@ -16,14 +16,15 @@ New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 try { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' } catch { }
 $inicio = Get-Date
 $GB = 1GB
+# Ojo: no usar "R" como nombre de funcion: en PowerShell "r" es un alias de Invoke-History y tiene prioridad
 
 function Guardar($o) { Set-Content -Path (Join-Path $Dir 'disco.json') -Value ($o | ConvertTo-Json -Depth 6 -Compress) -Encoding UTF8 }
-function R($b) { if ($null -eq $b) { return $null }; return [math]::Round($b / $GB, 2) }
+function A-GB($b) { if ($null -eq $b) { return $null }; return [math]::Round($b / $GB, 2) }
 
 try {
   # ---------- 1. Volumen C ----------
   $vol = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
-  $volumen = [ordered]@{ total_gb = R $vol.Size; libre_gb = R $vol.FreeSpace }
+  $volumen = [ordered]@{ total_gb = A-GB $vol.Size; libre_gb = A-GB $vol.FreeSpace }
 
   # ---------- 2. Disco fisico donde esta C y su salud ----------
   $fisico = [ordered]@{}
@@ -34,7 +35,7 @@ try {
       $fisico.modelo = ([string]$pd.FriendlyName).Trim()
       $fisico.tipo = [string]$pd.MediaType
       $fisico.bus = [string]$pd.BusType
-      $fisico.tamano_gb = R $pd.Size
+      $fisico.tamano_gb = A-GB $pd.Size
       $fisico.salud = [string]$pd.HealthStatus
       $fisico.estado = (@($pd.OperationalStatus) | ForEach-Object { [string]$_ }) -join ', '
       try {
@@ -98,7 +99,7 @@ try {
           $script:archivos++
           if (([int]$h.Attributes) -band $NoLocal) { continue }
           $suma += $h.Length
-          if ($h.Length -ge 1GB) { [void]$grandes.Add([ordered]@{ ruta = $h.FullName; gb = R $h.Length; fecha = $h.LastWriteTime.ToString('yyyy-MM-dd') }) }
+          if ($h.Length -ge 1GB) { [void]$grandes.Add([ordered]@{ ruta = $h.FullName; gb = A-GB $h.Length; fecha = $h.LastWriteTime.ToString('yyyy-MM-dd') }) }
         }
       }
     } catch { $script:sinAcceso++ }
@@ -113,21 +114,21 @@ try {
   # Archivos de sistema que no se ven al recorrer (o que conviene informar aparte)
   $sistema = [ordered]@{}
   foreach ($f in @('hiberfil.sys', 'pagefile.sys', 'swapfile.sys')) {
-    try { $i = Get-Item -LiteralPath ('C:\' + $f) -Force -ErrorAction Stop; $sistema[$f] = R $i.Length } catch { }
+    try { $i = Get-Item -LiteralPath ('C:\' + $f) -Force -ErrorAction Stop; $sistema[$f] = A-GB $i.Length } catch { }
   }
-  try { $i = Get-Item -LiteralPath 'C:\Windows\MEMORY.DMP' -Force -ErrorAction Stop; $sistema['MEMORY.DMP'] = R $i.Length } catch { }
+  try { $i = Get-Item -LiteralPath 'C:\Windows\MEMORY.DMP' -Force -ErrorAction Stop; $sistema['MEMORY.DMP'] = A-GB $i.Length } catch { }
   # Puntos de restauracion / instantaneas (no se ven como archivos)
   try {
     $volC = Get-CimInstance Win32_Volume -Filter "DriveLetter='C:'" -ErrorAction Stop
     $sombra = Get-CimInstance Win32_ShadowStorage -ErrorAction Stop | Where-Object { [string]$_.Volume.DeviceID -eq [string]$volC.DeviceID } |
       ForEach-Object { $_.UsedSpace } | Measure-Object -Sum
-    if ($sombra.Sum) { $sistema['puntos_restauracion'] = R $sombra.Sum }
+    if ($sombra.Sum) { $sistema['puntos_restauracion'] = A-GB $sombra.Sum }
   } catch { }
 
   $raizItems = @($tam.GetEnumerator() | Where-Object { $_.Key -match '^c:\\[^\\]+$' } |
-    Sort-Object Value -Descending | Select-Object -First 15 | ForEach-Object { [ordered]@{ ruta = $_.Key; gb = R $_.Value } })
+    Sort-Object Value -Descending | Select-Object -First 15 | ForEach-Object { [ordered]@{ ruta = $_.Key; gb = A-GB $_.Value } })
   $rutas = @($tam.GetEnumerator() | Where-Object { $_.Key -notmatch '^c:\\[^\\]+$' -and $_.Value -ge 50MB } |
-    Sort-Object Value -Descending | ForEach-Object { [ordered]@{ ruta = $_.Key; gb = R $_.Value } })
+    Sort-Object Value -Descending | ForEach-Object { [ordered]@{ ruta = $_.Key; gb = A-GB $_.Value } })
 
   Guardar ([ordered]@{
     estado = 'ok'; reportado = $false; fecha = (Get-Date).ToString('s')
