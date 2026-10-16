@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "2.5";
+export const AGENTE_VERSION = "2.6";
 
 // Diagnostico del disco C (agente 2.1): que ocupa el espacio y en que estado fisico esta el disco.
 // Recorrer todo C: puede tardar varios minutos, asi que corre en una tarea programada aparte
@@ -208,6 +208,55 @@ function Esperar-Setup($proc, $estado, $detalle, $compat, [scriptblock]$calc) {
   }
   return $proc.ExitCode
 }
+# ---- Aviso al usuario conectado (notificacion de Windows) ----
+# El agente corre como SYSTEM en una sesion invisible: el aviso se lanza con una tarea que corre como el usuario
+# que tiene la sesion abierta (grupo Usuarios). La notificacion queda en pantalla hasta que la cierra.
+# Solo ASCII en este archivo: las letras acentuadas se arman con [char].
+$a_ = [char]0xE1; $e_ = [char]0xE9; $i_ = [char]0xED; $o_ = [char]0xF3; $u_ = [char]0xFA
+function Avisar-Usuario($titulo, $texto) {
+  try {
+    if (-not (Get-CimInstance Win32_ComputerSystem).UserName) { return }   # nadie conectado
+    $dirAviso = Join-Path $env:ProgramData 'AccusysAviso'
+    New-Item -ItemType Directory -Force -Path $dirAviso | Out-Null
+    $ps = Join-Path $dirAviso 'aviso.ps1'
+    $xml = '<toast scenario="reminder"><visual><binding template="ToastGeneric"><text>' + [Security.SecurityElement]::Escape($titulo) +
+           '</text><text>' + [Security.SecurityElement]::Escape($texto) + '</text></binding></visual>' +
+           '<actions><action content="Entendido" arguments="dismiss" activationType="system"/></actions></toast>'
+    $cod = @'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+$x = New-Object Windows.Data.Xml.Dom.XmlDocument
+$x.LoadXml('__XML__')
+$app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show([Windows.UI.Notifications.ToastNotification]::new($x))
+'@
+    Set-Content -Path $ps -Value $cod.Replace('__XML__', $xml.Replace("'", "''")) -Encoding UTF8
+    $grupo = (New-Object Security.Principal.SecurityIdentifier('S-1-5-32-545')).Translate([Security.Principal.NTAccount]).Value
+    $acc = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ps + '"')
+    $usr = New-ScheduledTaskPrincipal -GroupId $grupo -RunLevel Limited
+    Register-ScheduledTask -TaskName 'AccusysAvisoW11' -Action $acc -Principal $usr -Force | Out-Null
+    Start-ScheduledTask -TaskName 'AccusysAvisoW11'
+    Start-Sleep -Seconds 20
+    Unregister-ScheduledTask -TaskName 'AccusysAvisoW11' -Confirm:$false -ErrorAction SilentlyContinue
+  } catch { }
+}
+function Aviso-Inicio {
+  $t = "Actualizaci$($o_)n a Windows 11 en curso"
+  $b = "El $($a_)rea de Tecnolog$($i_)a est$($a_) actualizando tu equipo. Pod$($e_)s seguir trabajando. No lo apagues ni lo desenchufes."
+  if ($orden.reiniciar) { $b += " Al terminar se va a reiniciar solo: guard$($a_) tu trabajo." }
+  Avisar-Usuario $t $b
+}
+function Aviso-Fin {
+  $t = "Windows 11 listo: falta reiniciar"
+  if ($orden.reiniciar) {
+    $b = "El equipo se va a reiniciar para terminar la actualizaci$($o_)n. Tarda entre 20 y 40 minutos; no lo apagues."
+  } else {
+    $b = "Guard$($a_) tu trabajo y reinici$($a_) el equipo cuando puedas. El reinicio tarda entre 20 y 40 minutos; no lo apagues."
+  }
+  if ($cifradoEset) { $b += " Te va a pedir la clave de inicio del cifrado, posiblemente m$($a_)s de una vez." }
+  Avisar-Usuario $t $b
+}
+
 function Texto-Compat($hex) {
   switch ($hex) {
     '0xC1900208' { return 'Aplicacion incompatible' }
@@ -276,6 +325,7 @@ try {
     if (-not (Firmado-Microsoft $setupRed)) { Informar 'error' 'El setup.exe de la carpeta no tiene una firma valida de Microsoft: upgrade NO lanzado' $null; exit 1 }
 
     Informar 'en_curso' 'Red local: copiando el instalador al equipo' $null 0
+    Aviso-Inicio
     $totalOrigen = (Get-ChildItem -LiteralPath $origen -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
     $pr = Start-Process -FilePath 'robocopy.exe' -PassThru -WindowStyle Hidden -ArgumentList @(('"' + $origen + '"'), ('"' + $Cache + '"'),
             '/MIR', '/Z', '/R:10', '/W:30', '/NP', '/NFL', '/NDL', ('/LOG:"' + (Join-Path $Logs 'robocopy.log') + '"'))
@@ -314,6 +364,7 @@ try {
     $compat = Texto-Compat $hex
     if ($codigo -eq 0 -or $codigo -eq 3010) {
       Informar 'pendiente_reinicio' 'Red local: Windows 11 preparado, se completa cuando se reinicie el equipo' 'OK' 100
+      Aviso-Fin
     } elseif ($compat) {
       $est = 'bloqueado'
       if ($hex -eq '0xC190020E') { $est = 'pospuesto' }
@@ -327,6 +378,7 @@ try {
   else {
     # ---------- Desde internet (Asistente de instalacion de Windows 11 de Microsoft) ----------
     Informar 'en_curso' 'Internet: descargando el Asistente de instalacion de Windows 11 desde Microsoft' $null
+    Aviso-Inicio
     $asistente = Join-Path $Cache 'Windows11InstallationAssistant.exe'
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     try {
@@ -352,6 +404,7 @@ try {
     $hex = '0x{0:X8}' -f $codigo
     if ($codigo -eq 0) {
       Informar 'pendiente_reinicio' 'Internet: Windows 11 instalado por el asistente, se completa cuando se reinicie el equipo' 'Asistente de Microsoft' 100
+      Aviso-Fin
     } else {
       Informar 'error' ('Internet: el asistente de Microsoft termino con el codigo ' + $hex + '. Logs en ' + $Logs) 'Asistente de Microsoft'
     }
