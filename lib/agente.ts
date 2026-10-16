@@ -239,7 +239,7 @@ try {
     Informar 'en_curso' 'Red local: copiando el instalador al equipo' $null 0
     $totalOrigen = (Get-ChildItem -LiteralPath $origen -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
     $pr = Start-Process -FilePath 'robocopy.exe' -PassThru -WindowStyle Hidden -ArgumentList @(('"' + $origen + '"'), ('"' + $Cache + '"'),
-            '/MIR', '/Z', '/R:3', '/W:10', '/NP', '/NFL', '/NDL', ('/LOG:"' + (Join-Path $Logs 'robocopy.log') + '"'))
+            '/MIR', '/Z', '/R:10', '/W:30', '/NP', '/NFL', '/NDL', ('/LOG:"' + (Join-Path $Logs 'robocopy.log') + '"'))
     $rc = Esperar-Con-Avance $pr 'en_curso' 'Red local: copiando el instalador al equipo' $null {
       if (-not $totalOrigen) { return $null }
       $copiado = (Get-ChildItem -LiteralPath $Cache -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
