@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "2.3";
+export const AGENTE_VERSION = "2.4";
 
 // Diagnostico del disco C (agente 2.1): que ocupa el espacio y en que estado fisico esta el disco.
 // Recorrer todo C: puede tardar varios minutos, asi que corre en una tarea programada aparte
@@ -212,7 +212,8 @@ try {
       Informar 'bloqueado' ('Disco cifrado con ESET pero no esta la carpeta de drivers para el upgrade (' + $DriversEset + '): actualizar el cliente de cifrado de ESET') $null
       exit 0
     }
-    $extraEset = @(('/ReflectDrivers ' + $DriversEset), '/ResizeRecoveryPartition Disable')
+    # Sin barra final: con "\" al final setup.exe rechaza el parametro (0x80070057)
+    $extraEset = @(('/ReflectDrivers ' + $DriversEset.TrimEnd('\')), '/ResizeRecoveryPartition Disable')
   }
 
   # 3. Camino: red local si se llega a la carpeta; si no, internet (si esta permitido)
@@ -258,7 +259,7 @@ try {
 
     Informar 'en_curso' 'Red local: escaneo de compatibilidad de Microsoft' $null 15
     $p = Start-Process -FilePath $setup -Wait -PassThru -WindowStyle Hidden -ArgumentList (@(
-      '/auto upgrade', '/quiet', '/compat scanonly', '/eula accept', '/dynamicupdate disable', '/noreboot',
+      '/auto upgrade', '/quiet', '/compat scanonly', '/eula accept', '/noreboot',
       ('/copylogs "' + (Join-Path $Logs 'compat') + '"')) + $extraEset)
     $hex = '0x{0:X8}' -f $p.ExitCode
     $compat = switch ($hex) {
@@ -280,7 +281,7 @@ try {
     if ($cifradoEset) { $notaEset = ' - disco cifrado con ESET: se carga el driver de cifrado y en cada reinicio se pide la clave de pre-arranque' }
     $detInst = 'Red local: instalando Windows 11 (puede tardar entre 30 y 90 minutos)' + $notaEset
     Informar 'en_curso' $detInst 'OK' 20
-    $parametros = @('/auto upgrade', '/quiet', '/eula accept', '/dynamicupdate disable', '/showoobe none', '/telemetry disable',
+    $parametros = @('/auto upgrade', '/quiet', '/eula accept', '/showoobe none', '/telemetry disable',
                     ('/copylogs "' + (Join-Path $Logs 'upgrade') + '"')) + $extraEset
     if (-not $orden.reiniciar) { $parametros += '/noreboot' }
     $p = Start-Process -FilePath $setup -PassThru -WindowStyle Hidden -ArgumentList $parametros
