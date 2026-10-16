@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
+import DiagnosticoDisco from "@/components/DiagnosticoDisco";
 import { exportarExcel } from "@/lib/excel";
 import { textoUbicacion, ATRIBUCION_GEO } from "@/lib/geo";
 import { conectado, hace, discoCritico, usoDisco, encendidoDesde, MINUTOS_CONECTADO, tipoEquipo, tipoDeducido, TIPOS_EQUIPO, type Disco, type TipoEquipo } from "@/lib/monitoreo";
@@ -422,6 +423,12 @@ export default function Monitoreo() {
                             </div>
                           )}
                         </dl>
+                        {/^windows/i.test(d.so_nombre?.replace("Microsoft ", "") ?? "") && (
+                          <section className="border-t border-line/[0.08] mt-3 pt-3" aria-label={`Disco C de ${d.hostname}`}>
+                            <h3 className="text-xs font-semibold text-ink/60 uppercase tracking-wide mb-2">Disco C: por qué está lleno y si hay que cambiarlo</h3>
+                            <DiagnosticoDisco id={d.id} hostname={d.hostname} agenteVersion={d.agente_version} esAdmin={esAdmin} />
+                          </section>
+                        )}
                       </td>
                     </tr>
                   )}

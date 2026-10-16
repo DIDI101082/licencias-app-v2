@@ -3,7 +3,146 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "2.0";
+export const AGENTE_VERSION = "2.1";
+
+// Diagnostico del disco C (agente 2.1): que ocupa el espacio y en que estado fisico esta el disco.
+// Recorrer todo C: puede tardar varios minutos, asi que corre en una tarea programada aparte
+// (la del agente tiene un limite de 3 minutos), con prioridad baja, y deja el resultado en disco.json.
+// Solo lee: no borra ni cambia nada en el equipo. Solo ASCII.
+const DISCO_ANALIZAR = String.raw`# Diagnostico del disco C - lo lanza el agente de Accusys Cyber. Solo lectura: no borra nada.
+$ErrorActionPreference = 'Stop'
+$Dir = 'C:\ProgramData\AccusysAgente\disco'
+New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+try { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' } catch { }
+$inicio = Get-Date
+$GB = 1GB
+
+function Guardar($o) { Set-Content -Path (Join-Path $Dir 'disco.json') -Value ($o | ConvertTo-Json -Depth 6 -Compress) -Encoding UTF8 }
+function R($b) { if ($null -eq $b) { return $null }; return [math]::Round($b / $GB, 2) }
+
+try {
+  # ---------- 1. Volumen C ----------
+  $vol = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
+  $volumen = [ordered]@{ total_gb = R $vol.Size; libre_gb = R $vol.FreeSpace }
+
+  # ---------- 2. Disco fisico donde esta C y su salud ----------
+  $fisico = [ordered]@{}
+  try {
+    $nro = (Get-Partition -DriveLetter C -ErrorAction Stop | Select-Object -First 1).DiskNumber
+    $pd = Get-PhysicalDisk -ErrorAction Stop | Where-Object { [string]$_.DeviceId -eq [string]$nro } | Select-Object -First 1
+    if ($pd) {
+      $fisico.modelo = ([string]$pd.FriendlyName).Trim()
+      $fisico.tipo = [string]$pd.MediaType
+      $fisico.bus = [string]$pd.BusType
+      $fisico.tamano_gb = R $pd.Size
+      $fisico.salud = [string]$pd.HealthStatus
+      $fisico.estado = (@($pd.OperationalStatus) | ForEach-Object { [string]$_ }) -join ', '
+      try {
+        $rc = $pd | Get-StorageReliabilityCounter -ErrorAction Stop
+        $fisico.desgaste_pct = $rc.Wear
+        $fisico.temperatura = $rc.Temperature
+        $fisico.horas_uso = $rc.PowerOnHours
+        $fisico.errores_lectura = $rc.ReadErrorsUncorrected
+        $fisico.errores_escritura = $rc.WriteErrorsUncorrected
+      } catch { }
+    }
+    # SSD/HDD sin tipo informado: se deduce por la velocidad de rotacion
+    if (-not $fisico.tipo -or $fisico.tipo -eq 'Unspecified') {
+      try {
+        $md = Get-CimInstance -Namespace root\Microsoft\Windows\Storage -ClassName MSFT_PhysicalDisk -ErrorAction Stop | Where-Object { [string]$_.DeviceId -eq [string]$nro } | Select-Object -First 1
+        if ($md -and $md.SpindleSpeed -eq 0) { $fisico.tipo = 'SSD' } elseif ($md -and $md.SpindleSpeed -gt 0) { $fisico.tipo = 'HDD' }
+      } catch { }
+    }
+  } catch { $fisico.error = $_.Exception.Message }
+  # Alerta SMART de prediccion de falla (la que da el propio disco)
+  try {
+    $smart = @(Get-CimInstance -Namespace root\wmi -ClassName MSStorageDriver_FailurePredictStatus -ErrorAction Stop)
+    if ($smart.Count -gt 0) { $fisico.smart_falla = [bool]($smart | Where-Object { $_.PredictFailure }) }
+  } catch { }
+
+  # ---------- 3. Que ocupa el espacio (un solo recorrido de C:) ----------
+  # Rutas puntuales que interesan, ademas de cada carpeta de la raiz y cada perfil de usuario
+  $interes = @{}
+  @('C:\Windows', 'C:\Windows\Temp', 'C:\Windows\SoftwareDistribution\Download', 'C:\Windows\Installer', 'C:\Windows\WinSxS',
+    'C:\Windows\Minidump', 'C:\Windows\LiveKernelReports', 'C:\Windows.old', 'C:\$Recycle.Bin', 'C:\$WINDOWS.~BT', 'C:\W11Setup',
+    'C:\ProgramData\Microsoft\Windows\WER', 'C:\Program Files', 'C:\Program Files (x86)') | ForEach-Object { $interes[$_.ToLower()] = $true }
+  $porPerfil = @('Downloads', 'Desktop', 'Documents', 'Pictures', 'Videos', 'AppData\Local\Temp', 'AppData\Local\Microsoft\Outlook',
+    'AppData\Local\Packages\MSTeams_8wekyb3d8bbwe', 'AppData\Roaming\Microsoft\Teams', 'AppData\Local\Microsoft\Teams',
+    'AppData\Local\Google\Chrome\User Data', 'AppData\Local\Microsoft\Edge\User Data', 'AppData\Local\CrashDumps')
+  $perfiles = @(Get-ChildItem -LiteralPath 'C:\Users' -Directory -Force -ErrorAction SilentlyContinue |
+    Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) })
+  foreach ($p in $perfiles) {
+    $interes[$p.FullName.ToLower()] = $true
+    foreach ($s in $porPerfil) { $interes[(Join-Path $p.FullName $s).ToLower()] = $true }
+    Get-ChildItem -LiteralPath $p.FullName -Directory -Force -Filter 'OneDrive*' -ErrorAction SilentlyContinue | ForEach-Object { $interes[$_.FullName.ToLower()] = $true }
+  }
+
+  $tam = @{}
+  $grandes = New-Object System.Collections.ArrayList
+  $script:archivos = 0
+  $script:sinAcceso = 0
+  # Atributos de archivos de OneDrive que no estan bajados al equipo (no ocupan disco)
+  $NoLocal = 0x400000 -bor 0x1000 -bor 0x40000
+
+  function Medir([IO.DirectoryInfo]$d, [int]$prof) {
+    [long]$suma = 0
+    $hijos = $null
+    try { $hijos = $d.EnumerateFileSystemInfos() } catch { $script:sinAcceso++; return [long]0 }
+    try {
+      foreach ($h in $hijos) {
+        if ($h -is [IO.DirectoryInfo]) {
+          # Puntos de union y accesos directos de carpetas: se saltean para no contar dos veces
+          if ($h.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+          $suma += Medir $h ($prof + 1)
+        } else {
+          $script:archivos++
+          if (([int]$h.Attributes) -band $NoLocal) { continue }
+          $suma += $h.Length
+          if ($h.Length -ge 1GB) { [void]$grandes.Add([ordered]@{ ruta = $h.FullName; gb = R $h.Length; fecha = $h.LastWriteTime.ToString('yyyy-MM-dd') }) }
+        }
+      }
+    } catch { $script:sinAcceso++ }
+    $clave = $d.FullName.TrimEnd('\').ToLower()
+    if ($prof -le 1 -or $interes.ContainsKey($clave)) { $tam[$clave] = $suma }
+    return $suma
+  }
+
+  $raiz = New-Object IO.DirectoryInfo 'C:\'
+  [void](Medir $raiz 0)
+
+  # Archivos de sistema que no se ven al recorrer (o que conviene informar aparte)
+  $sistema = [ordered]@{}
+  foreach ($f in @('hiberfil.sys', 'pagefile.sys', 'swapfile.sys')) {
+    try { $i = Get-Item -LiteralPath ('C:\' + $f) -Force -ErrorAction Stop; $sistema[$f] = R $i.Length } catch { }
+  }
+  try { $i = Get-Item -LiteralPath 'C:\Windows\MEMORY.DMP' -Force -ErrorAction Stop; $sistema['MEMORY.DMP'] = R $i.Length } catch { }
+  # Puntos de restauracion / instantaneas (no se ven como archivos)
+  try {
+    $volC = Get-CimInstance Win32_Volume -Filter "DriveLetter='C:'" -ErrorAction Stop
+    $sombra = Get-CimInstance Win32_ShadowStorage -ErrorAction Stop | Where-Object { [string]$_.Volume.DeviceID -eq [string]$volC.DeviceID } |
+      ForEach-Object { $_.UsedSpace } | Measure-Object -Sum
+    if ($sombra.Sum) { $sistema['puntos_restauracion'] = R $sombra.Sum }
+  } catch { }
+
+  $raizItems = @($tam.GetEnumerator() | Where-Object { $_.Key -match '^c:\\[^\\]+$' } |
+    Sort-Object Value -Descending | Select-Object -First 15 | ForEach-Object { [ordered]@{ ruta = $_.Key; gb = R $_.Value } })
+  $rutas = @($tam.GetEnumerator() | Where-Object { $_.Key -notmatch '^c:\\[^\\]+$' -and $_.Value -ge 50MB } |
+    Sort-Object Value -Descending | ForEach-Object { [ordered]@{ ruta = $_.Key; gb = R $_.Value } })
+
+  Guardar ([ordered]@{
+    estado = 'ok'; reportado = $false; fecha = (Get-Date).ToString('s')
+    duracion_seg = [int]((Get-Date) - $inicio).TotalSeconds
+    volumen = $volumen; fisico = $fisico; sistema = $sistema
+    raiz = $raizItems; rutas = $rutas
+    grandes = @($grandes | Sort-Object { $_.gb } -Descending | Select-Object -First 15)
+    archivos = $script:archivos; sin_acceso = $script:sinAcceso
+  })
+}
+catch {
+  Guardar ([ordered]@{ estado = 'error'; reportado = $false; fecha = (Get-Date).ToString('s'); detalle = $_.Exception.Message })
+  exit 1
+}
+`;
 
 // Actualización a Windows 11 (modo mixto: carpeta de la red local o, si no se llega, Asistente de Microsoft por internet).
 // El agente la escribe en el equipo y la ejecuta en una tarea programada aparte
@@ -758,6 +897,47 @@ try {
 catch {
   Set-Content -Path (Join-Path $Carpeta 'ultima-w11.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
 }
+
+# ---- Diagnostico del disco C (agente 2.1) ----
+# Envia el resultado del ultimo analisis y pregunta si hay que hacer uno nuevo. Cuando analizar lo decide
+# Accusys Cyber (pedido desde la app, disco casi lleno o analisis viejo). El analisis corre en una tarea aparte y solo lee.
+try {
+  if ($Estado -eq 'aprobado') {
+    $DirDisco = Join-Path $Carpeta 'disco'
+    $ArchDisco = Join-Path $DirDisco 'disco.json'
+    $TareaDisco = 'AccusysDiagnosticoDisco'
+    $resDisco = $null
+    $datosDisco = '{}'
+    if (Test-Path $ArchDisco) {
+      $resDisco = Get-Content $ArchDisco -Raw | ConvertFrom-Json
+      if (-not $resDisco.reportado) { $datosDisco = '{"resultado":' + (Get-Content $ArchDisco -Raw).Trim() + '}' }
+    }
+    $enMarchaDisco = [bool](Obtener { (Get-ScheduledTask -TaskName $TareaDisco -ErrorAction Stop).State -eq 'Running' })
+    if ($datosDisco -eq '{}' -and $enMarchaDisco) { $datosDisco = '{"en_curso":true}' }
+    $cuerpoDisco = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
+                   ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + ',"p_secreto":' + (ConvertTo-Json ([string]$Secreto)) +
+                   ',"p_datos":' + $datosDisco + '}'
+    $rDisco = Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_disco_agente') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoDisco)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 60
+    if ($datosDisco.StartsWith('{"resultado"')) {
+      $resDisco.reportado = $true
+      Set-Content -Path $ArchDisco -Value ($resDisco | ConvertTo-Json -Depth 6 -Compress) -Encoding UTF8
+    }
+    if ($rDisco.analizar -and -not $enMarchaDisco) {
+      New-Item -ItemType Directory -Force -Path $DirDisco | Out-Null
+      $scriptDisco = Join-Path $DirDisco 'analizar.ps1'
+      Set-Content -Path $scriptDisco -Value ([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__DISCO_SCRIPT__'))) -Encoding UTF8
+      $accDisco = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $scriptDisco + '"')
+      $usrDisco = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+      $cfgDisco = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 45) -MultipleInstances IgnoreNew -Priority 7
+      Register-ScheduledTask -TaskName $TareaDisco -Action $accDisco -Principal $usrDisco -Settings $cfgDisco -Force | Out-Null
+      Start-ScheduledTask -TaskName $TareaDisco
+    }
+    Set-Content -Path (Join-Path $Carpeta 'ultimo-disco.txt') -Value ('OK ' + (Get-Date).ToString('s') + ' analizar: ' + [string]$rDisco.analizar)
+  }
+}
+catch {
+  Set-Content -Path (Join-Path $Carpeta 'ultimo-disco.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+}
 `;
 
 const INSTALADOR = String.raw`# Instalador del agente de inventario Accusys
@@ -818,7 +998,8 @@ export function generarInstalador(url: string, anon: string, token: string, inte
     .replace("__TOKEN__", () => token)
     .replace("__VERSION__", () => AGENTE_VERSION)
     // btoa: el script es solo ASCII y funciona igual en el navegador y en el servidor
-    .replace("__W11_SCRIPT__", () => btoa(W11_ACTUALIZAR.replace(/\r?\n/g, "\r\n")));
+    .replace("__W11_SCRIPT__", () => btoa(W11_ACTUALIZAR.replace(/\r?\n/g, "\r\n")))
+    .replace("__DISCO_SCRIPT__", () => btoa(DISCO_ANALIZAR.replace(/\r?\n/g, "\r\n")));
   return INSTALADOR.replace("__AGENTE__", () => agente).replace("__INTERVALO__", () => String(intervalo));
 }
 
