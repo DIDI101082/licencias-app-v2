@@ -69,7 +69,7 @@ export async function calcularIndicadores(sb: SupabaseClient): Promise<Kpi[]> {
       k.push({ area: "Equipos", clave: "antivirus", titulo: "Antivirus activo y actualizado", valor: disp ? pctCtl("antivirus") : null, meta: 98, unidad: "%", enlace: "/inventario/seguridad" });
       k.push({ area: "Equipos", clave: "parches", titulo: "Parches al día", valor: disp ? porc(lista.filter((d, i) => parcheOk(d, ev[i])).length, parchesMedidos.length) : null, meta: 95, unidad: "%", enlace: "/inventario/seguridad",
         detalle: `parche en los últimos ${DIAS_MAX_SIN_PARCHES} días${reinicios ? ` · ${reinicios} con reinicio pendiente` : ""}` });
-      k.push({ area: "Equipos", clave: "firewall", titulo: "Firewall encendido", valor: disp ? pctCtl("firewall") : null, meta: 95, unidad: "%", enlace: "/inventario/seguridad" });
+      k.push({ area: "Equipos", clave: "firewall", titulo: "Firewall encendido", valor: disp ? pctCtl("firewall") : null, meta: 95, unidad: "%", enlace: "/inventario/seguridad", informativo: true });
       const so = lista.map((d) => soporteWindows(d.so_nombre, d.so_version, d.so_build)).filter((s) => s.nivel !== "sin_datos");
       k.push({ area: "Equipos", clave: "so_soporte", titulo: "Sistema operativo con soporte", valor: disp ? porc(so.filter((s) => s.nivel !== "problema").length, so.length) : null, meta: 95, unidad: "%", enlace: "/inventario/riesgos?vista=sistemas" });
       k.push({ area: "Equipos", clave: "admins_locales", titulo: "Equipos con admins locales no permitidos", valor: disp ? lista.filter((d) => adminsExtra(d.admins_locales, permitidos).length > 0).length : null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/inventario/seguridad" });
@@ -78,7 +78,7 @@ export async function calcularIndicadores(sb: SupabaseClient): Promise<Kpi[]> {
       const id = (ident as any[] | null)?.[0];
       k.push({ area: "Identidad", clave: "mfa", titulo: "Cuentas con MFA", valor: id && id.sin_mfa != null ? porc(id.miembros - id.sin_mfa, id.miembros) : null, meta: 100, unidad: "%", enlace: "/inventario/identidad", sinDatos: "Abrí Identidad para actualizar (requiere Entra ID P1)", informativo: true });
       k.push({ area: "Identidad", clave: "admins_sin_mfa", titulo: "Administradores sin MFA", valor: id?.admins_sin_mfa ?? null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/inventario/identidad" });
-      k.push({ area: "Identidad", clave: "cuentas_inactivas", titulo: "Cuentas habilitadas sin uso", valor: id?.inactivos ?? null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/inventario/identidad", detalle: id ? `más de ${id.dias_inactivo} días` : undefined });
+      k.push({ area: "Identidad", clave: "cuentas_inactivas", titulo: "Cuentas habilitadas sin uso", valor: id?.inactivos ?? null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/inventario/identidad", detalle: id ? `más de ${id.dias_inactivo} días` : undefined, informativo: true });
       k.push({ area: "Identidad", clave: "bajas_pendientes", titulo: "Bajas sin cerrar (+7 días)", valor: bajas ? (bajas as any[]).filter((b) => b.fecha <= hace(7).slice(0, 10)).length : null, meta: 0, unidad: "n", menorEsMejor: true, enlace: "/empleados/movimientos" });
 
       // --- Vulnerabilidades y respuesta ---
@@ -104,7 +104,7 @@ export async function calcularIndicadores(sb: SupabaseClient): Promise<Kpi[]> {
 
       // --- Personas ---
       const cs = (caps as any[] | null) ?? null;
-      k.push({ area: "Personas", clave: "capacitacion", titulo: "Empleados con capacitación al día", valor: cs && cs.length ? porc(cs.filter((c) => c.estado === "al_dia").length, cs.length) : null, meta: 90, unidad: "%", enlace: "/inventario/concientizacion", sinDatos: "Registrá capacitaciones en Concientización" });
+      k.push({ area: "Personas", clave: "capacitacion", titulo: "Empleados con capacitación al día", valor: cs && cs.length ? porc(cs.filter((c) => c.estado === "al_dia").length, cs.length) : null, meta: 90, unidad: "%", enlace: "/inventario/concientizacion", sinDatos: "Registrá capacitaciones en Concientización", informativo: true });
 
       // --- Nube, correo y perímetro ---
       const s0 = (ss as any[] | null)?.[0];
