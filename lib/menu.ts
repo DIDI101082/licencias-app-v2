@@ -38,6 +38,7 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/seguridad", label: "Estado de los equipos" },
     { href: "/inventario/riesgos", label: "Riesgos" },
     { href: "/inventario/vulnerabilidades", label: "Vulnerabilidades" },
+    { href: "/inventario/qualys", label: "Qualys VMDR" },
     { href: "/inventario/monitoreo", label: "Monitoreo" },
     { href: "/inventario/migracion-w11", label: "Migración a Windows 11" },
   ] },

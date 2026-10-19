@@ -26,7 +26,7 @@ export const INICIO_MODULO: Record<Modulo, string> = {
   auditoria: "/auditoria",
 };
 
-const RUTAS_SEGURIDAD = ["/inicio", "/inventario/seguridad", "/inventario/riesgos", "/inventario/vulnerabilidades", "/inventario/migracion-w11", "/inventario/identidad", "/inventario/incidentes", "/inventario/backups", "/inventario/concientizacion", "/inventario/cumplimiento", "/inventario/wifi", "/inventario/ad", "/inventario/normativa", "/inventario/informe", "/inventario/securescore", "/inventario/apps-entra", "/inventario/correo", "/inventario/superficie", "/inventario/cloudflare"];
+const RUTAS_SEGURIDAD = ["/inicio", "/inventario/seguridad", "/inventario/riesgos", "/inventario/vulnerabilidades", "/inventario/migracion-w11", "/inventario/identidad", "/inventario/incidentes", "/inventario/backups", "/inventario/concientizacion", "/inventario/cumplimiento", "/inventario/wifi", "/inventario/ad", "/inventario/normativa", "/inventario/informe", "/inventario/securescore", "/inventario/apps-entra", "/inventario/correo", "/inventario/superficie", "/inventario/cloudflare", "/inventario/qualys"];
 
 // null = ruta sin solapa (login, usuarios, etc.)
 export function moduloDeRuta(pathname: string): Modulo | null {

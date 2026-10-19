@@ -14,6 +14,10 @@
     {
       "path": "/api/cloudflare/auto",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/qualys/auto",
+      "schedule": "11,41 * * * *"
     }
   ]
 }
