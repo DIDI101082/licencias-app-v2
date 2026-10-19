@@ -65,7 +65,17 @@ export async function calcularIndicadores(sb: SupabaseClient): Promise<Kpi[]> {
       const parcheOk = (d: any, e: any) => e.parches.nivel === "ok" || (d.reinicio_pendiente && d.ultimo_parche && Date.now() - Date.parse(d.ultimo_parche) <= DIAS_MAX_SIN_PARCHES * 86400000);
       const parchesMedidos = lista.filter((d, i) => ev[i].parches.nivel !== "sin_datos");
       const reinicios = lista.filter((d) => d.reinicio_pendiente).length;
-      k.push({ area: "Equipos", clave: "cifrado", titulo: "Discos cifrados", valor: disp ? pctCtl("bitlocker") : null, meta: 95, unidad: "%", enlace: "/inventario/seguridad", detalle: `${ev.length} equipos que reportaron en 30 días` });
+      // Cifrado: excluir máquinas virtuales y Windows Server (no aplica BitLocker en esos equipos)
+      const esVMoServer = (d: any) =>
+        /vmware|virtual ?machine|virtualbox|hyper-v|kvm|qemu|xen|proxmox|parallels/i.test(`${d.fabricante ?? ""} ${d.modelo ?? ""}`) ||
+        /server/i.test(d.so_nombre ?? "") ||
+        /^v?srv[-_]/i.test(d.hostname ?? "");
+      const listaWs = lista.filter((d) => !esVMoServer(d));
+      const evWs = listaWs.map((d) => evaluar(d, permitidos));
+      const pctBitlocker = disp && evWs.filter((e) => e.bitlocker.nivel !== "sin_datos").length
+        ? porc(evWs.filter((e) => e.bitlocker.nivel === "ok").length, evWs.filter((e) => e.bitlocker.nivel !== "sin_datos").length)
+        : null;
+      k.push({ area: "Equipos", clave: "cifrado", titulo: "Discos cifrados", valor: pctBitlocker, meta: 95, unidad: "%", enlace: "/inventario/seguridad", detalle: `${listaWs.length} equipos (sin VMs ni servidores)` });
       k.push({ area: "Equipos", clave: "antivirus", titulo: "Antivirus activo y actualizado", valor: disp ? pctCtl("antivirus") : null, meta: 98, unidad: "%", enlace: "/inventario/seguridad" });
       k.push({ area: "Equipos", clave: "parches", titulo: "Parches al día", valor: disp ? porc(lista.filter((d, i) => parcheOk(d, ev[i])).length, parchesMedidos.length) : null, meta: 95, unidad: "%", enlace: "/inventario/seguridad",
         detalle: `parche en los últimos ${DIAS_MAX_SIN_PARCHES} días${reinicios ? ` · ${reinicios} con reinicio pendiente` : ""}` });
