@@ -242,15 +242,23 @@ export async function leerCloudflare(opciones: { auditoriaDesde: Date | null }) 
   const t0 = Date.now();
   const avisos: string[] = [];
 
-  const verif = await cf<{ status: string; expires_on?: string }>(`/user/tokens/verify`).catch((e) => { throw new Error(`El token de Cloudflare no es válido: ${msj(e)}`); });
-  if (verif.result?.status !== "active") throw new Error(`El token de Cloudflare está ${verif.result?.status ?? "inactivo"}`);
-  if (verif.result?.expires_on) avisos.push(`El token vence el ${verif.result.expires_on.slice(0, 10)}`);
-
-  const lista = await zonas();
-  if (!lista.length) throw new Error("El token no ve ninguna zona: revisá que tenga Zone → Zone → Read sobre todas las zonas de la cuenta");
+  // Las zonas primero: sirve para tokens de usuario y para tokens de la cuenta (account-owned)
+  const lista = await zonas().catch((e) => {
+    const m = msj(e);
+    throw new Error(/invalid api token|authentication|sin permiso/i.test(m)
+      ? `Cloudflare rechazó el token (${m}). Revisá que en Vercel esté copiado completo, sin espacios ni comillas, y que tenga Zone → Read sobre todos los dominios`
+      : `No se pudieron leer los dominios de Cloudflare: ${m}`);
+  });
+  if (!lista.length) throw new Error("El token no ve ningún dominio: revisá que tenga Zone → Read con alcance «Todos los dominios»");
 
   const cuentaId = process.env.CLOUDFLARE_ACCOUNT_ID || lista[0]?.account?.id || null;
   const cuentaNombre = lista.find((z) => z.account?.id === cuentaId)?.account?.name ?? null;
+
+  // Vencimiento del token: los de la cuenta se verifican en /accounts/{id}/tokens/verify y los de usuario en /user/tokens/verify
+  const verif = await (cuentaId ? cf<{ status: string; expires_on?: string }>(`/accounts/${cuentaId}/tokens/verify`) : Promise.reject())
+    .catch(() => cf<{ status: string; expires_on?: string }>(`/user/tokens/verify`)).catch(() => null);
+  if (verif?.result?.status && verif.result.status !== "active") throw new Error(`El token de Cloudflare está ${verif.result.status}`);
+  if (verif?.result?.expires_on) avisos.push(`El token vence el ${verif.result.expires_on.slice(0, 10)}`);
 
   const leidas: Zona[] = [];
   // De a 3 zonas por vez para no pasar el límite de la API (1200 solicitudes cada 5 minutos)
