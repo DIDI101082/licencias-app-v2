@@ -57,7 +57,8 @@ export async function middleware(request: NextRequest) {
   const isInstalador = request.nextUrl.pathname === "/api/agente/instalar";
   // Tarea diaria de Vercel (se autentica con CRON_SECRET dentro de la ruta)
   const isProgramado = request.nextUrl.pathname === "/api/programado"
-    || request.nextUrl.pathname === "/api/entra/auto";   // sincronización automática con Entra ID (idem)
+    || request.nextUrl.pathname === "/api/entra/auto"    // sincronización automática con Entra ID (idem)
+    || request.nextUrl.pathname === "/api/cloudflare/auto";   // lectura de Cloudflare (idem)
 
   // Pedido de la clave de BIOS desde cada notebook (se autentica con la clave propia del agente dentro de la ruta)
   const isBiosEquipo = request.nextUrl.pathname === "/api/bios/clave";

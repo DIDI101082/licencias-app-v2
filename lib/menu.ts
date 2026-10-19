@@ -44,6 +44,7 @@ export const TEMAS: Tema[] = [
   { id: "perimetro", label: "Perímetro", titulo: "Perímetro, correo y nube", paginas: [
     { href: "/inventario/superficie", label: "Superficie expuesta" },
     { href: "/inventario/correo", label: "Correo y dominio" },
+    { href: "/inventario/cloudflare", label: "Cloudflare" },
     { href: "/inventario/securescore", label: "Secure Score" },
     { href: "/inventario/apps-entra", label: "Aplicaciones de Entra ID" },
     { href: "/red/fortigate", label: "FortiGate" },
