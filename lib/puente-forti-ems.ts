@@ -2,20 +2,19 @@
 // EMS Cloud es accesible desde internet: corre en cualquier Windows con salida a internet.
 // Recomendado: mismo servidor PRTG que ya corre el puente de FortiGate.
 //
-// Autenticación: OAuth2 con client_id + client_secret de FortiCloud.
-// Cómo obtenerlos: FortiCloud console → IAM → API Users → New API User
-//   (o FortiCloud → EMS → API Access, según la versión del tenant).
+// Autenticación: usuario y contraseña de administrador del EMS Cloud.
+// Se hace login en /api/v1/auth/signin y se renueva la sesión automáticamente.
 
 import { envolverEnCmd } from "@/lib/agente";
 
 export type ConfigPuenteEMS = {
-  url: string;         // URL pública de Supabase
-  anon: string;        // Anon key de Supabase
-  token: string;       // Token en texto plano (el hash queda en Supabase)
-  emsUrl: string;      // https://<tenant>.forticloud.com  (o URL custom del tenant)
-  clientId: string;    // OAuth2 client_id de FortiCloud IAM
-  clientSecret: string; // OAuth2 client_secret
-  intervalo: number;   // Minutos entre ejecuciones
+  url: string;       // URL pública de Supabase
+  anon: string;      // Anon key de Supabase
+  token: string;     // Token en texto plano (el hash queda en Supabase)
+  emsUrl: string;    // https://forticlient.forticloud.com (o URL custom del tenant)
+  emsUser: string;   // Usuario administrador del EMS
+  emsPass: string;   // Contraseña del administrador
+  intervalo: number; // Minutos entre ejecuciones
 };
 
 export function generarPuenteFortiEMS(cfg: ConfigPuenteEMS): string {
@@ -23,7 +22,7 @@ export function generarPuenteFortiEMS(cfg: ConfigPuenteEMS): string {
 #Requires -Version 5.1
 <#
   Puente FortiClient EMS Cloud → Accusys Cyber
-  Versión: 1.0
+  Versión: 2.0
   Instalado: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
 
   Consulta la API REST de FortiClient EMS Cloud y empuja los datos a Supabase.
@@ -31,64 +30,85 @@ export function generarPuenteFortiEMS(cfg: ConfigPuenteEMS): string {
   Las credenciales solo existen en este archivo, en la carpeta protegida del servicio.
 
   Prerrequisitos:
-    - API User creado en FortiCloud IAM con rol de solo lectura en EMS.
+    - Usuario administrador del EMS Cloud (puede ser Standard Administrator).
     - Acceso a internet desde este servidor (HTTPS saliente a forticloud.com y supabase.co).
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$VERSION          = '1.0'
-$SUPABASE_URL     = '${cfg.url}'
-$SUPABASE_ANON    = '${cfg.anon}'
-$TOKEN            = '${cfg.token}'
-$EMS_BASE         = '${cfg.emsUrl}'.TrimEnd('/')
-$CLIENT_ID        = '${cfg.clientId}'
-$CLIENT_SECRET    = '${cfg.clientSecret}'
-$INTERVALO_MIN    = ${cfg.intervalo}
+$VERSION       = '2.0'
+$SUPABASE_URL  = '${cfg.url}'
+$SUPABASE_ANON = '${cfg.anon}'
+$TOKEN         = '${cfg.token}'
+$EMS_BASE      = '${cfg.emsUrl}'.TrimEnd('/')
+$EMS_USER      = '${cfg.emsUser}'
+$EMS_PASS      = '${cfg.emsPass}'
+$INTERVALO_MIN = ${cfg.intervalo}
 
 # Forzar TLS 1.2+
 [System.Net.ServicePointManager]::SecurityProtocol =
   [System.Net.SecurityProtocolType]::Tls13 -bor
   [System.Net.SecurityProtocolType]::Tls12
 
-# ── OAuth2: obtener access token de FortiCloud ────────────────
-$script:access_token = $null
-$script:token_expira = [datetime]::MinValue
+# ── Sesión EMS: login y renovación ───────────────────────────
+$script:ems_token   = $null
+$script:ems_expira  = [datetime]::MinValue
+# Guardar cookies de sesión
+$script:ems_session = New-Object System.Net.CookieContainer
 
-function Get-FortiToken {
-  # FortiCloud IAM token endpoint
-  $body = @{
-    grant_type    = 'client_credentials'
-    client_id     = $CLIENT_ID
-    client_secret = $CLIENT_SECRET
+function Get-EMSToken {
+  $body = @{ name = $EMS_USER; password = $EMS_PASS } | ConvertTo-Json
+  $hdrs = @{ 'Content-Type' = 'application/json' }
+  try {
+    $r = Invoke-RestMethod \`
+      -Uri "$EMS_BASE/api/v1/auth/signin" \`
+      -Method POST -Headers $hdrs -Body $body \`
+      -SessionVariable 'emsWebSession'
+    $script:ems_token  = $r.data.token
+    $script:ems_expira = (Get-Date).AddMinutes(25)  # renovar cada 25 min
+    Write-Host "$(Get-Date) Sesión EMS iniciada"
+  } catch {
+    # Algunos tenants devuelven el token en el header o en cookie
+    throw "Login EMS fallido: $($_.Exception.Message)"
   }
-  $r = Invoke-RestMethod \`
-    -Uri 'https://customerapiauth.fortinet.com/api/v1/oauth/token/' \`
-    -Method POST \`
-    -ContentType 'application/x-www-form-urlencoded' \`
-    -Body $body
-  $script:access_token = $r.access_token
-  # Renovar 60 segundos antes de que expire
-  $script:token_expira = (Get-Date).AddSeconds($r.expires_in - 60)
-  Write-Host "$(Get-Date) Token OAuth2 obtenido (expira en $($r.expires_in)s)"
 }
 
-function Assert-Token {
-  if ([datetime]::Now -ge $script:token_expira) { Get-FortiToken }
+function Assert-EMSToken {
+  if (-not $script:ems_token -or [datetime]::Now -ge $script:ems_expira) {
+    Get-EMSToken
+  }
 }
 
 # ── Llamadas a EMS Cloud ──────────────────────────────────────
 function Invoke-EMS {
   param([string]$Path, [string]$Method = 'GET', $Body)
-  Assert-Token
-  $hdrs = @{ 'Authorization' = "Bearer $script:access_token" }
-  $uri  = "$EMS_BASE$Path"
-  if ($Body) {
-    Invoke-RestMethod -Uri $uri -Method $Method -Headers $hdrs \`
-      -ContentType 'application/json' -Body ($Body | ConvertTo-Json -Depth 10)
-  } else {
-    Invoke-RestMethod -Uri $uri -Method $Method -Headers $hdrs
+  Assert-EMSToken
+  $hdrs = @{
+    'Authorization' = "Bearer $script:ems_token"
+    'Content-Type'  = 'application/json'
+  }
+  $uri = "$EMS_BASE$Path"
+  try {
+    if ($Body) {
+      Invoke-RestMethod -Uri $uri -Method $Method -Headers $hdrs \`
+        -Body ($Body | ConvertTo-Json -Depth 10)
+    } else {
+      Invoke-RestMethod -Uri $uri -Method $Method -Headers $hdrs
+    }
+  } catch {
+    # Si 401, forzar re-login
+    if ($_.Exception.Response.StatusCode -eq 401) {
+      $script:ems_token = $null
+      Assert-EMSToken
+      $hdrs['Authorization'] = "Bearer $script:ems_token"
+      if ($Body) {
+        Invoke-RestMethod -Uri $uri -Method $Method -Headers $hdrs \`
+          -Body ($Body | ConvertTo-Json -Depth 10)
+      } else {
+        Invoke-RestMethod -Uri $uri -Method $Method -Headers $hdrs
+      }
+    } else { throw }
   }
 }
 
@@ -122,7 +142,6 @@ function Get-PaisCodigo {
 
 # ── Recolección de datos ──────────────────────────────────────
 function Get-Endpoints {
-  # EMS Cloud API v1: GET /api/v1/host/list
   $r    = Invoke-EMS '/api/v1/host/list?count=5000'
   $list = @()
   foreach ($h in $r.data) {
@@ -249,7 +268,7 @@ function Get-Vulnerabilidades {
 }
 
 function Get-Accesos {
-  $list  = @()
+  $list = @()
   try {
     $desde = [int][double]::Parse(
       (Get-Date).AddDays(-7).ToUniversalTime().Subtract([datetime]::UnixEpoch).TotalSeconds
@@ -288,8 +307,8 @@ function Get-Licencias {
       $estado = 'ok'
       if ($vence) {
         $dr = ([datetime]$vence - (Get-Date)).TotalDays
-        if ($dr -lt 0)  { $estado = 'vencida'    }
-        elseif ($dr -lt 30) { $estado = 'por_vencer' }
+        if ($dr -lt 0)       { $estado = 'vencida'    }
+        elseif ($dr -lt 30)  { $estado = 'por_vencer' }
       }
       $list += @{
         tipo        = $lic.product_name
@@ -336,8 +355,7 @@ Write-Host "$(Get-Date) Puente FortiClient EMS Cloud iniciado (v$VERSION)"
 
 while ($true) {
   try {
-    # Renovar token si hace falta (primera vez lo obtiene aquí)
-    Assert-Token
+    Assert-EMSToken
 
     Write-Host "$(Get-Date) Recolectando endpoints..."
     $endpoints = Get-Endpoints

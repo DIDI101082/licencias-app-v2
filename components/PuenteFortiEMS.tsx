@@ -23,7 +23,7 @@ export type EstadoEMS = {
 };
 
 // Configuración (solo administradores): instalador del puente y alertas.
-// Las credenciales OAuth2 NO se guardan en la app: van solo dentro del instalador.
+// Las credenciales NO se guardan en la app: van solo dentro del instalador.
 export default function PuenteFortiEMS({
   estado,
   alCambiar,
@@ -31,9 +31,9 @@ export default function PuenteFortiEMS({
   estado: EstadoEMS;
   alCambiar: () => void;
 }) {
-  const [emsUrl, setEmsUrl] = useState("https://emscloud.forticloud.com");
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
+  const [emsUrl, setEmsUrl] = useState("https://forticlient.forticloud.com");
+  const [emsUser, setEmsUser] = useState("");
+  const [emsPass, setEmsPass] = useState("");
   const [intervalo, setIntervalo] = useState(10);
   const [confirmar, setConfirmar] = useState(false);
   const [generando, setGenerando] = useState(false);
@@ -52,10 +52,10 @@ export default function PuenteFortiEMS({
     e.preventDefault();
     setAviso(null);
     const url = emsUrl.trim();
-    const id = clientId.trim();
-    const secret = clientSecret.trim();
-    if (!url || !id || !secret)
-      return setAviso({ ok: false, texto: "Completá la URL del EMS, el Client ID y el Client Secret." });
+    const user = emsUser.trim();
+    const pass = emsPass.trim();
+    if (!url || !user || !pass)
+      return setAviso({ ok: false, texto: "Completá la URL del EMS, el usuario y la contraseña." });
     if (!/^https:\/\//i.test(url))
       return setAviso({ ok: false, texto: "La URL debe empezar con https://." });
     if (estado.configurado && !confirmar) {
@@ -86,12 +86,12 @@ export default function PuenteFortiEMS({
         anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
         token,
         emsUrl: url,
-        clientId: id,
-        clientSecret: secret,
+        emsUser: user,
+        emsPass: pass,
         intervalo,
       })
     );
-    setClientSecret("");
+    setEmsPass("");
     setAviso({
       ok: true,
       texto:
@@ -125,30 +125,28 @@ export default function PuenteFortiEMS({
 
   return (
     <div className="card p-5 space-y-6">
-      {/* ── Paso 1: crear API User en FortiCloud ── */}
+      {/* ── Paso 1: crear usuario de solo lectura en el EMS ── */}
       <section className="space-y-3">
         <h2 className="font-display text-lg text-ink">
-          1. Crear un API User de solo lectura en FortiCloud
+          1. Crear un usuario de solo lectura en el EMS
         </h2>
         <ol className="text-sm text-ink/70 space-y-1.5 list-decimal pl-5">
           <li>
-            Ingresar a{" "}
-            <a href="https://support.fortinet.com" target="_blank" rel="noopener noreferrer" className="underline">
-              support.fortinet.com
+            Ingresar al EMS Cloud en{" "}
+            <a href="https://forticlient.forticloud.com" target="_blank" rel="noopener noreferrer" className="underline">
+              forticlient.forticloud.com
             </a>{" "}
-            con la cuenta de FortiCloud del tenant.
+            con una cuenta de administrador.
           </li>
           <li>
-            Ir a <b>IAM → API Users → New API User</b>. Nombre sugerido:{" "}
-            <code>accusys-cyber-readonly</code>. Rol:{" "}
-            <b>Read Only</b> o el perfil de mínimo privilegio que tenga acceso a EMS.
+            Ir a <b>Administration → Admin Users → Create New</b>.
           </li>
           <li>
-            Al guardar, FortiCloud muestra el <b>Client ID</b> y el <b>Client Secret</b> una sola vez. Copiarlos.
+            Crear un usuario con nombre <code>accusys-cyber</code>, rol{" "}
+            <b>Standard Administrator</b> y contraseña fuerte.
           </li>
           <li>
-            Si el EMS tiene una URL de tenant propia (ej.{" "}
-            <code>https://accusys.forticloud.com</code>), usarla en lugar de la URL genérica.
+            Si el EMS tiene una URL de tenant propia, usarla en el campo URL más abajo.
           </li>
           <li>
             El puente puede correr desde cualquier servidor con acceso a internet. El servidor PRTG
@@ -169,34 +167,34 @@ export default function PuenteFortiEMS({
               <input
                 id="ems-url"
                 className="input"
-                placeholder="https://emscloud.forticloud.com"
+                placeholder="https://forticlient.forticloud.com"
                 value={emsUrl}
                 onChange={(e) => setEmsUrl(e.target.value)}
               />
             </div>
             <div className="sm:col-span-4">
-              <label className="label" htmlFor="ems-cid">
-                Client ID
+              <label className="label" htmlFor="ems-user">
+                Usuario administrador
               </label>
               <input
-                id="ems-cid"
+                id="ems-user"
                 className="input"
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
+                placeholder="accusys-cyber"
+                value={emsUser}
+                onChange={(e) => setEmsUser(e.target.value)}
               />
             </div>
             <div className="sm:col-span-4">
-              <label className="label" htmlFor="ems-cs">
-                Client Secret
+              <label className="label" htmlFor="ems-pass">
+                Contraseña
               </label>
               <input
-                id="ems-cs"
+                id="ems-pass"
                 className="input"
                 type="password"
                 autoComplete="off"
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
+                value={emsPass}
+                onChange={(e) => setEmsPass(e.target.value)}
               />
             </div>
           </div>
@@ -268,9 +266,9 @@ export default function PuenteFortiEMS({
         )}
 
         <p className="text-xs text-ink/50">
-          El puente solo lee: no cambia nada en el EMS. Las credenciales OAuth2 no se guardan
-          en la app: quedan en el servidor donde se instala el puente. El token de acceso se
-          renueva automáticamente antes de que expire. Para cambiar las credenciales, generá
+          El puente solo lee: no cambia nada en el EMS. Las credenciales no se guardan
+          en la app: quedan en el servidor donde se instala el puente. La sesión se
+          renueva automáticamente cada 25 minutos. Para cambiar las credenciales, generá
           el puente de nuevo.
         </p>
       </section>
