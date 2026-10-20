@@ -158,4 +158,4 @@ export function ubicar(temas: { id: string; paginas: Pagina[] }[], pathname: str
   for (const t of temas) for (const p of t.paginas) {
     if (esActual(p.href, pathname) && (!mejor || p.href.length > mejor.href.length)) mejor = { tema: t.id, href: p.href };
   }
-  return mejor;
+  return mejor;}
