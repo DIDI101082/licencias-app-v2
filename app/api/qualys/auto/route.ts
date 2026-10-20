@@ -38,8 +38,8 @@ async function ejecutar(clave: string, manual: boolean) {
     let hosts = 0, paginas = 0, detecciones = 0, nuevas = 0, kb = 0;
     let faltan: number[] = [];
 
-    // Lista de equipos (cobertura de escaneo), cada 6 horas
-    if (inicio.leer_hosts) {
+    // Lista de equipos (cobertura de escaneo): cada 6 horas, y siempre que se pide "Leer ahora"
+    if (inicio.leer_hosts || manual) {
       try { const r = await aplicar({ hosts: await leerHosts(15000) }); hosts = r.hosts; faltan = r.faltan_kb; }
       catch (e) { avisos.push(`Lista de equipos: ${msj(e)}`); }
     }
