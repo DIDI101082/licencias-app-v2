@@ -23,7 +23,7 @@ export function generarPuenteFortiEMS(cfg: ConfigPuenteEMS): string {
 #Requires -Version 5.1
 <#
   Puente FortiClient EMS Cloud → Accusys Cyber
-  Versión: 3.0
+  Versión: 3.3
   Instalado: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
 
   Consulta la API REST de FortiClient EMS Cloud y empuja los datos a Supabase.
@@ -39,7 +39,7 @@ export function generarPuenteFortiEMS(cfg: ConfigPuenteEMS): string {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$VERSION        = '3.0'
+$VERSION        = '3.3'
 $SUPABASE_URL   = '${cfg.url}'
 $SUPABASE_ANON  = '${cfg.anon}'
 $TOKEN          = '${cfg.token}'
@@ -179,21 +179,16 @@ function Get-Endpoints {
       hostname        = if ($h.name) { $h.name } else { $h.host }
       usuario         = $user
       ip              = if ($h.ip_addr) { $h.ip_addr } else { "" }
-      ip_publica      = if ($h.public_ip_addr) { $h.public_ip_addr } else { "" }
       version_cliente = if ($h.fct_version) { $h.fct_version } else { "" }
-      estado          = if ($h.is_ems_online -eq $true) { 'online' } else { 'offline' }
+      estado          = if ($h.is_ems_online -eq $true) { "online" } else { "offline" }
       os              = $osType
       so_version      = $osVersion
-      dominio         = ''
-      sitio           = ''
+      dominio         = ""
+      sitio           = ""
       grupo           = if ($h.groups) { $h.groups } else { "" }
       politica        = if ($h.endpoint_policy_name) { $h.endpoint_policy_name } else { "" }
-      score_postura   = $null
+      score_postura   = 0
       ultimo_visto    = $lastSeen
-      av_activo       = if ($h.av_enabled -eq $true) { $true } else { $false }
-      vpn_activo      = if ($h.vpn_enabled -eq $true) { $true } else { $false }
-      vuln_activo     = if ($h.vuln_enabled -eq $true) { $true } else { $false }
-      wf_activo       = if ($h.wf_enabled -eq $true) { $true } else { $false }
     }
   }
   return $list
@@ -239,7 +234,7 @@ function Get-VPN {
         ip_publica   = $s.public_ip
         ip_tunel     = $s.tunnel_ip
         desde        = if ($s.connect_time) {
-                         [datetime]::UnixEpoch.AddSeconds($s.connect_time).ToString('o')
+                         (Get-Date "1970-01-01T00:00:00Z").AddSeconds($s.connect_time).ToUniversalTime().ToString('o')
                        } else { $null }
         pais_codigo  = $geo.codigo
         pais         = $geo.pais
@@ -251,7 +246,7 @@ function Get-VPN {
 
   try {
     $desde = [int][double]::Parse(
-      (Get-Date).AddDays(-7).ToUniversalTime().Subtract([datetime]::UnixEpoch).TotalSeconds
+      (Get-Date).AddDays(-7).ToUniversalTime().Subtract((Get-Date "1970-01-01T00:00:00Z").ToUniversalTime()).TotalSeconds
     )
     $rh = Invoke-EMS "/api/v1/events/vpn?from=$desde&count=2000"
     foreach ($ev in $rh.data) {
@@ -259,7 +254,7 @@ function Get-VPN {
       $ep  = $Endpoints | Where-Object { $_.hostname -eq $ev.hostname } | Select-Object -First 1
       $historial += @{
         fecha        = if ($ev.timestamp) {
-                         [datetime]::UnixEpoch.AddSeconds($ev.timestamp).ToString('o')
+                         (Get-Date "1970-01-01T00:00:00Z").AddSeconds($ev.timestamp).ToUniversalTime().ToString('o')
                        } else { $null }
         usuario      = $ev.user_name
         endpoint_uid = if ($ep) { $ep.uid } else { $null }
@@ -303,13 +298,13 @@ function Get-Accesos {
   $list = @()
   try {
     $desde = [int][double]::Parse(
-      (Get-Date).AddDays(-7).ToUniversalTime().Subtract([datetime]::UnixEpoch).TotalSeconds
+      (Get-Date).AddDays(-7).ToUniversalTime().Subtract((Get-Date "1970-01-01T00:00:00Z").ToUniversalTime()).TotalSeconds
     )
     $r = Invoke-EMS "/api/v1/events/admin?from=$desde&count=2000"
     foreach ($ev in $r.data) {
       $list += @{
         fecha     = if ($ev.timestamp) {
-                      [datetime]::UnixEpoch.AddSeconds($ev.timestamp).ToString('o')
+                      (Get-Date "1970-01-01T00:00:00Z").AddSeconds($ev.timestamp).ToUniversalTime().ToString('o')
                     } else { $null }
         usuario   = $ev.user_name
         ip        = $ev.client_ip
@@ -334,7 +329,7 @@ function Get-Licencias {
     foreach ($lic in $r.data) {
       $vence = $null
       if ($lic.expire_time) {
-        $vence = [datetime]::UnixEpoch.AddSeconds($lic.expire_time).ToString('yyyy-MM-dd')
+        $vence = (Get-Date "1970-01-01T00:00:00Z").AddSeconds($lic.expire_time).ToUniversalTime().ToString('yyyy-MM-dd')
       }
       $estado = 'ok'
       if ($vence) {
