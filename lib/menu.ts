@@ -49,6 +49,7 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/securescore", label: "Secure Score" },
     { href: "/inventario/apps-entra", label: "Aplicaciones de Entra ID" },
     { href: "/red/fortigate", label: "FortiGate" },
+    { href: "/red/forti-ems", label: "FortiClient EMS" },
     { href: "/inventario/wifi", label: "WiFi" },
   ] },
   { id: "infraestructura", label: "Infraestructura", titulo: "Servidores, virtualización, backups y red", paginas: [
@@ -158,4 +159,3 @@ export function ubicar(temas: { id: string; paginas: Pagina[] }[], pathname: str
     if (esActual(p.href, pathname) && (!mejor || p.href.length > mejor.href.length)) mejor = { tema: t.id, href: p.href };
   }
   return mejor;
-}
