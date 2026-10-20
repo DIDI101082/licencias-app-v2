@@ -165,29 +165,29 @@ function Get-Endpoints {
     }
 
     # usuario: último usuario logueado está en fct_users o last_seen_fct_user_id
-    $user = if ($h.fct_users) { $h.fct_users } else { '' }
+    $user = if ($h.fct_users) { $h.fct_users } else { "" }
 
     # OS: viene todo junto en os_version
-    $osVersion = if ($h.os_version) { $h.os_version } else { '' }
-    $osType    = if ($osVersion -match 'Windows') { 'Windows' } `
-                 elseif ($osVersion -match 'Mac')  { 'macOS'  } `
-                 elseif ($osVersion -match 'Linux') { 'Linux' } `
-                 else { '' }
+    $osVersion = if ($h.os_version) { $h.os_version } else { "" }
+    $osType    = if ($osVersion -match "Windows") { "Windows" } \`
+                 elseif ($osVersion -match "Mac")  { "macOS"  } \`
+                 elseif ($osVersion -match "Linux") { "Linux" } \`
+                 else { "" }
 
     $list += @{
       uid             = $uid
       hostname        = if ($h.name) { $h.name } else { $h.host }
       usuario         = $user
-      ip              = if ($h.ip_addr) { $h.ip_addr } else { '' }
-      ip_publica      = if ($h.public_ip_addr) { $h.public_ip_addr } else { '' }
-      version_cliente = if ($h.fct_version) { $h.fct_version } else { '' }
+      ip              = if ($h.ip_addr) { $h.ip_addr } else { "" }
+      ip_publica      = if ($h.public_ip_addr) { $h.public_ip_addr } else { "" }
+      version_cliente = if ($h.fct_version) { $h.fct_version } else { "" }
       estado          = if ($h.is_ems_online -eq $true) { 'online' } else { 'offline' }
       os              = $osType
       so_version      = $osVersion
       dominio         = ''
       sitio           = ''
-      grupo           = if ($h.groups) { $h.groups } else { '' }
-      politica        = if ($h.endpoint_policy_name) { $h.endpoint_policy_name } else { '' }
+      grupo           = if ($h.groups) { $h.groups } else { "" }
+      politica        = if ($h.endpoint_policy_name) { $h.endpoint_policy_name } else { "" }
       score_postura   = $null
       ultimo_visto    = $lastSeen
       av_activo       = if ($h.av_enabled -eq $true) { $true } else { $false }
