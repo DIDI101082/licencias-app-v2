@@ -150,26 +150,43 @@ function Get-PaisCodigo {
 
 # ── Recolección de datos ──────────────────────────────────────
 function Get-Endpoints {
-  $r    = Invoke-EMS '/api/v1/host/list?count=5000'
+  # EMS Cloud usa /api/v1/endpoints/index (no /host/list que es on-premise)
+  $r    = Invoke-EMS '/api/v1/endpoints/index?count=5000'
   $list = @()
-  foreach ($h in $r.data) {
+  $items = if ($r.data) { $r.data } elseif ($r.result) { $r.result } else { @() }
+  foreach ($h in $items) {
+    # EMS Cloud puede devolver los campos con distintos nombres según la versión
+    $uid      = if ($h.id)        { [string]$h.id        } elseif ($h.device_id) { [string]$h.device_id } else { '' }
+    $host     = if ($h.name)      { $h.name      } elseif ($h.hostname)  { $h.hostname  } else { '' }
+    $user     = if ($h.last_user) { $h.last_user } elseif ($h.username)  { $h.username  } else { '' }
+    $ip       = if ($h.ip)        { $h.ip        } elseif ($h.ip_addr)   { $h.ip_addr   } else { '' }
+    $ver      = if ($h.version)   { $h.version   } elseif ($h.client_version) { $h.client_version } else { '' }
+    $os       = if ($h.os_type)   { $h.os_type   } elseif ($h.os)        { $h.os        } else { '' }
+    $osver    = if ($h.os_version){ $h.os_version } elseif ($h.os_ver)   { $h.os_ver    } else { '' }
+    $online   = if ($h.status -eq 1 -or $h.online -eq $true -or $h.status -eq 'online') { 'online' } else { 'offline' }
+    $score    = if ($null -ne $h.compliance_score) { [int]$h.compliance_score } elseif ($null -ne $h.posture_score) { [int]$h.posture_score } else { $null }
+    $lastSeen = $null
+    if ($h.last_seen) {
+      try { $lastSeen = [datetime]::UnixEpoch.AddSeconds($h.last_seen).ToString('o') } catch {}
+    } elseif ($h.last_seen_time) {
+      try { $lastSeen = [datetime]::UnixEpoch.AddSeconds($h.last_seen_time).ToString('o') } catch {}
+    }
+    if (-not $uid) { continue }
     $list += @{
-      uid             = [string]$h.id
-      hostname        = $h.name
-      usuario         = $h.last_user
-      ip              = $h.ip
-      version_cliente = $h.version
-      estado          = switch ($h.status) { 1 { 'online' } 2 { 'offline' } default { 'offline' } }
-      os              = $h.os_type
-      so_version      = $h.os_version
-      dominio         = $h.domain
-      sitio           = $h.site_name
-      grupo           = $h.group_name
-      politica        = $h.profile_name
-      score_postura   = if ($null -ne $h.compliance_score) { [int]$h.compliance_score } else { $null }
-      ultimo_visto    = if ($h.last_seen) {
-                          [datetime]::UnixEpoch.AddSeconds($h.last_seen).ToString('o')
-                        } else { $null }
+      uid             = $uid
+      hostname        = $host
+      usuario         = $user
+      ip              = $ip
+      version_cliente = $ver
+      estado          = $online
+      os              = $os
+      so_version      = $osver
+      dominio         = if ($h.domain)      { $h.domain      } else { '' }
+      sitio           = if ($h.site_name)   { $h.site_name   } else { '' }
+      grupo           = if ($h.group_name)  { $h.group_name  } else { '' }
+      politica        = if ($h.profile_name){ $h.profile_name } elseif ($h.policy_name) { $h.policy_name } else { '' }
+      score_postura   = $score
+      ultimo_visto    = $lastSeen
     }
   }
   return $list
@@ -180,7 +197,7 @@ function Get-Cumplimiento {
   $list = @()
   foreach ($ep in $Endpoints) {
     try {
-      $r = Invoke-EMS "/api/v1/host/$($ep.uid)/compliance"
+      $r = Invoke-EMS "/api/v1/endpoints/$($ep.uid)/compliance"
       foreach ($item in $r.data) {
         $list += @{
           endpoint_uid = $ep.uid
@@ -205,7 +222,7 @@ function Get-VPN {
   $activas   = @()
   $historial = @()
   try {
-    $r = Invoke-EMS '/api/v1/vpn/list?count=1000'
+    $r = Invoke-EMS '/api/v1/vpn/index?count=1000'
     foreach ($s in $r.data) {
       $geo = Get-PaisCodigo $s.public_ip
       $ep  = $Endpoints | Where-Object { $_.hostname -eq $s.hostname } | Select-Object -First 1
@@ -229,7 +246,7 @@ function Get-VPN {
     $desde = [int][double]::Parse(
       (Get-Date).AddDays(-7).ToUniversalTime().Subtract([datetime]::UnixEpoch).TotalSeconds
     )
-    $rh = Invoke-EMS "/api/v1/event/vpn?from=$desde&count=2000"
+    $rh = Invoke-EMS "/api/v1/events/vpn?from=$desde&count=2000"
     foreach ($ev in $rh.data) {
       $geo = Get-PaisCodigo $ev.public_ip
       $ep  = $Endpoints | Where-Object { $_.hostname -eq $ev.hostname } | Select-Object -First 1
@@ -256,7 +273,7 @@ function Get-Vulnerabilidades {
   param($Endpoints)
   $list = @()
   try {
-    $r = Invoke-EMS '/api/v1/vulnerability/list?count=5000'
+    $r = Invoke-EMS '/api/v1/vulnerability/index?count=5000'
     foreach ($v in $r.data) {
       $ep = $Endpoints | Where-Object { $_.hostname -eq $v.hostname } | Select-Object -First 1
       $list += @{
@@ -281,7 +298,7 @@ function Get-Accesos {
     $desde = [int][double]::Parse(
       (Get-Date).AddDays(-7).ToUniversalTime().Subtract([datetime]::UnixEpoch).TotalSeconds
     )
-    $r = Invoke-EMS "/api/v1/event/admin?from=$desde&count=2000"
+    $r = Invoke-EMS "/api/v1/events/admin?from=$desde&count=2000"
     foreach ($ev in $r.data) {
       $list += @{
         fecha     = if ($ev.timestamp) {
@@ -306,7 +323,7 @@ function Get-Accesos {
 function Get-Licencias {
   $list = @()
   try {
-    $r = Invoke-EMS '/api/v1/license/list'
+    $r = Invoke-EMS '/api/v1/license/index'
     foreach ($lic in $r.data) {
       $vence = $null
       if ($lic.expire_time) {
@@ -334,7 +351,7 @@ function Get-Licencias {
 function Get-Politicas {
   $list = @()
   try {
-    $r = Invoke-EMS '/api/v1/ztna/policy/list?count=500'
+    $r = Invoke-EMS '/api/v1/ztna/policy/index?count=500'
     foreach ($p in $r.data) {
       $list += @{
         nombre              = $p.name
@@ -345,7 +362,7 @@ function Get-Politicas {
     }
   } catch {}
   try {
-    $r2 = Invoke-EMS '/api/v1/endpointprofile/list?count=500'
+    $r2 = Invoke-EMS '/api/v1/endpointprofile/index?count=500'
     foreach ($p in $r2.data) {
       $list += @{
         nombre              = $p.name
