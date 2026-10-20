@@ -495,7 +495,7 @@ function Contenido() {
             </table>
           </div>
           <p className="text-xs text-ink/50 max-w-4xl">
-            Equipos aprobados del inventario y servidores sin agente que Qualys no tiene registrados o no escanea hace más de {estado?.dias_cobertura ?? 30} días.
+            Equipos del inventario en uso (reportaron en los últimos 30 días) y servidores sin agente que Qualys no tiene registrados o no escanea hace más de {estado?.dias_cobertura ?? 30} días.
             Las notebooks que trabajan fuera de la oficina sin VPN solo se escanean si tienen el agente de Qualys (Cloud Agent).
           </p>
         </div>

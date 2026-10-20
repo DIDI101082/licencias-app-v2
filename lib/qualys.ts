@@ -26,7 +26,8 @@ async function qualys(ruta: string, params: Record<string, string>, ms = 40000):
     const texto = valor(xml, "TEXT") ?? `HTTP ${r.status}`;
     const codigo = valor(xml, "CODE");
     if (r.status === 401 || codigo === "2002") throw new Error("Usuario o clave de Qualys incorrectos (o la cuenta no tiene acceso a la API)");
-    if (r.status === 409 || codigo === "1960" || codigo === "1965") throw new Error(`Qualys limitó las consultas: ${texto}`);
+    if (/registration must be completed/i.test(texto)) throw new Error("El usuario de Qualys todavía no completó el primer inicio de sesión (aceptar los términos). Ver «Configurar»");
+    if (codigo === "1960" || codigo === "1965" || /rate limit|concurrency limit/i.test(texto)) throw new Error(`Qualys limitó las consultas: ${texto}`);
     throw new Error(`Qualys: ${texto}`);
   }
   return xml;
@@ -127,7 +128,11 @@ export async function leerDetecciones(opc: { idMin: string | null; procesadoDesd
     status: opc.procesadoDesde ? "New,Active,Re-Opened,Fixed" : "New,Active,Re-Opened",
   };
   if (opc.idMin) p.id_min = opc.idMin;
-  if (opc.procesadoDesde) p.vm_processed_after = opc.procesadoDesde.replace(/\.\d{3}Z$/, "Z");
+  // Qualys solo acepta AAAA-MM-DDTHH:MM:SSZ (sin milésimas ni "+00:00"); la base devuelve "2026-10-20T11:35:42.416+00:00"
+  if (opc.procesadoDesde) {
+    const f = new Date(opc.procesadoDesde);
+    if (!isNaN(f.getTime())) p.vm_processed_after = f.toISOString().replace(/\.\d{3}Z$/, "Z");
+  }
   const xml = await qualys("/api/2.0/fo/asset/host/vm/detection/", p, 30000);
   const hosts = bloques(xml, "HOST").map((h) => {
     const x = host(h.cuerpo);

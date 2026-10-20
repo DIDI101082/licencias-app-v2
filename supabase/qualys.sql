@@ -317,7 +317,8 @@ begin
                 from (select d.id::text as inv_id, d.hostname as nombre, d.ip, d.usuario as persona,
                              coalesce(d.tipo, case when d.so_nombre ilike '%server%' or d.so_nombre ilike '%linux%' then 'servidor' end) as tipo,
                              d.ultimo_reporte, lower(split_part(d.hostname, '.', 1)) as corto
-                        from inv_dispositivos d where d.estado_registro = 'aprobado'
+                        from inv_dispositivos d
+                       where d.estado_registro = 'aprobado' and d.ultimo_reporte > now() - interval '30 days'   -- solo equipos en uso
                       union all
                       select 'srv:' || s.id, s.nombre, null, s.responsable, 'servidor', null, lower(split_part(s.nombre, '.', 1))
                         from srv_servidores s where s.activo and s.dispositivo_id is null) i
