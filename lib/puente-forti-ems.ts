@@ -150,43 +150,50 @@ function Get-PaisCodigo {
 
 # ── Recolección de datos ──────────────────────────────────────
 function Get-Endpoints {
-  # EMS Cloud usa /api/v1/endpoints/index (no /host/list que es on-premise)
-  $r    = Invoke-EMS '/api/v1/endpoints/index?count=5000'
-  $list = @()
-  $items = if ($r.data) { $r.data } elseif ($r.result) { $r.result } else { @() }
+  # EMS Cloud: el array está en $r.data.endpoints
+  $r     = Invoke-EMS '/api/v1/endpoints/index?count=5000'
+  $items = if ($r.data.endpoints) { $r.data.endpoints } else { @() }
+  $list  = @()
   foreach ($h in $items) {
-    # EMS Cloud puede devolver los campos con distintos nombres según la versión
-    $uid      = if ($h.id)        { [string]$h.id        } elseif ($h.device_id) { [string]$h.device_id } else { '' }
-    $host     = if ($h.name)      { $h.name      } elseif ($h.hostname)  { $h.hostname  } else { '' }
-    $user     = if ($h.last_user) { $h.last_user } elseif ($h.username)  { $h.username  } else { '' }
-    $ip       = if ($h.ip)        { $h.ip        } elseif ($h.ip_addr)   { $h.ip_addr   } else { '' }
-    $ver      = if ($h.version)   { $h.version   } elseif ($h.client_version) { $h.client_version } else { '' }
-    $os       = if ($h.os_type)   { $h.os_type   } elseif ($h.os)        { $h.os        } else { '' }
-    $osver    = if ($h.os_version){ $h.os_version } elseif ($h.os_ver)   { $h.os_ver    } else { '' }
-    $online   = if ($h.status -eq 1 -or $h.online -eq $true -or $h.status -eq 'online') { 'online' } else { 'offline' }
-    $score    = if ($null -ne $h.compliance_score) { [int]$h.compliance_score } elseif ($null -ne $h.posture_score) { [int]$h.posture_score } else { $null }
+    $uid  = [string]$h.device_id
+    if (-not $uid) { continue }
+
+    # last_seen viene como string ISO "2026-10-20T13:07:55", no como epoch
     $lastSeen = $null
     if ($h.last_seen) {
-      try { $lastSeen = [datetime]::UnixEpoch.AddSeconds($h.last_seen).ToString('o') } catch {}
-    } elseif ($h.last_seen_time) {
-      try { $lastSeen = [datetime]::UnixEpoch.AddSeconds($h.last_seen_time).ToString('o') } catch {}
+      try { $lastSeen = [datetime]::Parse($h.last_seen).ToUniversalTime().ToString('o') } catch {}
     }
-    if (-not $uid) { continue }
+
+    # usuario: último usuario logueado está en fct_users o last_seen_fct_user_id
+    $user = if ($h.fct_users) { $h.fct_users } else { '' }
+
+    # OS: viene todo junto en os_version
+    $osVersion = if ($h.os_version) { $h.os_version } else { '' }
+    $osType    = if ($osVersion -match 'Windows') { 'Windows' } `
+                 elseif ($osVersion -match 'Mac')  { 'macOS'  } `
+                 elseif ($osVersion -match 'Linux') { 'Linux' } `
+                 else { '' }
+
     $list += @{
       uid             = $uid
-      hostname        = $host
+      hostname        = if ($h.name) { $h.name } else { $h.host }
       usuario         = $user
-      ip              = $ip
-      version_cliente = $ver
-      estado          = $online
-      os              = $os
-      so_version      = $osver
-      dominio         = if ($h.domain)      { $h.domain      } else { '' }
-      sitio           = if ($h.site_name)   { $h.site_name   } else { '' }
-      grupo           = if ($h.group_name)  { $h.group_name  } else { '' }
-      politica        = if ($h.profile_name){ $h.profile_name } elseif ($h.policy_name) { $h.policy_name } else { '' }
-      score_postura   = $score
+      ip              = if ($h.ip_addr) { $h.ip_addr } else { '' }
+      ip_publica      = if ($h.public_ip_addr) { $h.public_ip_addr } else { '' }
+      version_cliente = if ($h.fct_version) { $h.fct_version } else { '' }
+      estado          = if ($h.is_ems_online -eq $true) { 'online' } else { 'offline' }
+      os              = $osType
+      so_version      = $osVersion
+      dominio         = ''
+      sitio           = ''
+      grupo           = if ($h.groups) { $h.groups } else { '' }
+      politica        = if ($h.endpoint_policy_name) { $h.endpoint_policy_name } else { '' }
+      score_postura   = $null
       ultimo_visto    = $lastSeen
+      av_activo       = if ($h.av_enabled -eq $true) { $true } else { $false }
+      vpn_activo      = if ($h.vpn_enabled -eq $true) { $true } else { $false }
+      vuln_activo     = if ($h.vuln_enabled -eq $true) { $true } else { $false }
+      wf_activo       = if ($h.wf_enabled -eq $true) { $true } else { $false }
     }
   }
   return $list
@@ -197,7 +204,7 @@ function Get-Cumplimiento {
   $list = @()
   foreach ($ep in $Endpoints) {
     try {
-      $r = Invoke-EMS "/api/v1/endpoints/$($ep.uid)/compliance"
+      $r = Invoke-EMS "/api/v1/endpoints/$($ep.uid)/compliance/index"
       foreach ($item in $r.data) {
         $list += @{
           endpoint_uid = $ep.uid
