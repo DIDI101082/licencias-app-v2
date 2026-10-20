@@ -2,19 +2,20 @@
 // EMS Cloud es accesible desde internet: corre en cualquier Windows con salida a internet.
 // Recomendado: mismo servidor PRTG que ya corre el puente de FortiGate.
 //
-// Autenticación: usuario y contraseña de administrador del EMS Cloud.
-// Se hace login en /api/v1/auth/signin y se renueva la sesión automáticamente.
+// Autenticación: Access Key de la API EMS Cloud + email de la cuenta master.
+// Se hace login en /fct/api/public/v1/ems_api_cloud/login/ y se obtiene un session_id.
+// Los endpoints de datos usan /fct/api/public/v1/ems_api/<path>.
 
 import { envolverEnCmd } from "@/lib/agente";
 
 export type ConfigPuenteEMS = {
-  url: string;       // URL pública de Supabase
-  anon: string;      // Anon key de Supabase
-  token: string;     // Token en texto plano (el hash queda en Supabase)
-  emsUrl: string;    // https://forticlient.forticloud.com (o URL custom del tenant)
-  emsUser: string;   // Usuario administrador del EMS
-  emsPass: string;   // Contraseña del administrador
-  intervalo: number; // Minutos entre ejecuciones
+  url: string;          // URL pública de Supabase
+  anon: string;         // Anon key de Supabase
+  token: string;        // Token en texto plano (el hash queda en Supabase)
+  emsUrl: string;       // https://forticlient.forticloud.com
+  emsEmail: string;     // Email de la cuenta master de FortiCloud
+  emsAccessKey: string; // Access Key generado en EMS Cloud → Access Key → EMS API Access
+  intervalo: number;    // Minutos entre ejecuciones
 };
 
 export function generarPuenteFortiEMS(cfg: ConfigPuenteEMS): string {
@@ -22,7 +23,7 @@ export function generarPuenteFortiEMS(cfg: ConfigPuenteEMS): string {
 #Requires -Version 5.1
 <#
   Puente FortiClient EMS Cloud → Accusys Cyber
-  Versión: 2.0
+  Versión: 3.0
   Instalado: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
 
   Consulta la API REST de FortiClient EMS Cloud y empuja los datos a Supabase.
@@ -30,21 +31,27 @@ export function generarPuenteFortiEMS(cfg: ConfigPuenteEMS): string {
   Las credenciales solo existen en este archivo, en la carpeta protegida del servicio.
 
   Prerrequisitos:
-    - Usuario administrador del EMS Cloud (puede ser Standard Administrator).
+    - Access Key generado en el portal EMS Cloud (menú inferior derecho → Access Key → EMS API Access).
+    - Email de la cuenta master de FortiCloud.
     - Acceso a internet desde este servidor (HTTPS saliente a forticloud.com y supabase.co).
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$VERSION       = '2.0'
-$SUPABASE_URL  = '${cfg.url}'
-$SUPABASE_ANON = '${cfg.anon}'
-$TOKEN         = '${cfg.token}'
-$EMS_BASE      = '${cfg.emsUrl}'.TrimEnd('/')
-$EMS_USER      = '${cfg.emsUser}'
-$EMS_PASS      = '${cfg.emsPass}'
-$INTERVALO_MIN = ${cfg.intervalo}
+$VERSION        = '3.0'
+$SUPABASE_URL   = '${cfg.url}'
+$SUPABASE_ANON  = '${cfg.anon}'
+$TOKEN          = '${cfg.token}'
+$EMS_BASE       = '${cfg.emsUrl}'.TrimEnd('/')
+$EMS_EMAIL      = '${cfg.emsEmail}'
+$EMS_ACCESS_KEY = '${cfg.emsAccessKey}'
+$INTERVALO_MIN  = ${cfg.intervalo}
+
+# Base URL de la API pública del EMS Cloud
+$EMS_API_BASE   = "$EMS_BASE/fct/api/public/v1/ems_api"
+$EMS_LOGIN_URL  = "$EMS_BASE/fct/api/public/v1/ems_api_cloud/login/"
+$EMS_LOGOUT_URL = "$EMS_BASE/fct/api/public/v1/ems_api_cloud/logout/"
 
 # Forzar TLS 1.2+
 [System.Net.ServicePointManager]::SecurityProtocol =
@@ -52,30 +59,29 @@ $INTERVALO_MIN = ${cfg.intervalo}
   [System.Net.SecurityProtocolType]::Tls12
 
 # ── Sesión EMS: login y renovación ───────────────────────────
-$script:ems_token   = $null
-$script:ems_expira  = [datetime]::MinValue
-# Guardar cookies de sesión
-$script:ems_session = New-Object System.Net.CookieContainer
+$script:ems_session_id = $null
+$script:ems_expira     = [datetime]::MinValue
 
 function Get-EMSToken {
-  $body = @{ name = $EMS_USER; password = $EMS_PASS } | ConvertTo-Json
+  $body = @{
+    access_key    = $EMS_ACCESS_KEY
+    account_email = $EMS_EMAIL
+  } | ConvertTo-Json
   $hdrs = @{ 'Content-Type' = 'application/json' }
   try {
     $r = Invoke-RestMethod \`
-      -Uri "$EMS_BASE/api/v1/auth/signin" \`
-      -Method POST -Headers $hdrs -Body $body \`
-      -SessionVariable 'emsWebSession'
-    $script:ems_token  = $r.data.token
-    $script:ems_expira = (Get-Date).AddMinutes(25)  # renovar cada 25 min
-    Write-Host "$(Get-Date) Sesión EMS iniciada"
+      -Uri $EMS_LOGIN_URL \`
+      -Method POST -Headers $hdrs -Body $body
+    $script:ems_session_id = $r.session_id
+    $script:ems_expira     = (Get-Date).AddMinutes(25)
+    Write-Host "$(Get-Date) Sesión EMS Cloud iniciada (session_id obtenido)"
   } catch {
-    # Algunos tenants devuelven el token en el header o en cookie
-    throw "Login EMS fallido: $($_.Exception.Message)"
+    throw "Login EMS Cloud fallido: $($_.Exception.Message)"
   }
 }
 
 function Assert-EMSToken {
-  if (-not $script:ems_token -or [datetime]::Now -ge $script:ems_expira) {
+  if (-not $script:ems_session_id -or [datetime]::Now -ge $script:ems_expira) {
     Get-EMSToken
   }
 }
@@ -85,10 +91,11 @@ function Invoke-EMS {
   param([string]$Path, [string]$Method = 'GET', $Body)
   Assert-EMSToken
   $hdrs = @{
-    'Authorization' = "Bearer $script:ems_token"
-    'Content-Type'  = 'application/json'
+    'Authorization'              = $script:ems_session_id
+    'Ems-Api-Header-Content-Type' = 'application/json'
+    'Content-Type'               = 'application/json'
   }
-  $uri = "$EMS_BASE$Path"
+  $uri = "$EMS_API_BASE$Path"
   try {
     if ($Body) {
       Invoke-RestMethod -Uri $uri -Method $Method -Headers $hdrs \`
@@ -97,11 +104,12 @@ function Invoke-EMS {
       Invoke-RestMethod -Uri $uri -Method $Method -Headers $hdrs
     }
   } catch {
-    # Si 401, forzar re-login
-    if ($_.Exception.Response.StatusCode -eq 401) {
-      $script:ems_token = $null
+    # Si 401/403, forzar re-login y reintentar
+    $code = $_.Exception.Response.StatusCode.value__
+    if ($code -eq 401 -or $code -eq 403) {
+      $script:ems_session_id = $null
       Assert-EMSToken
-      $hdrs['Authorization'] = "Bearer $script:ems_token"
+      $hdrs['Authorization'] = $script:ems_session_id
       if ($Body) {
         Invoke-RestMethod -Uri $uri -Method $Method -Headers $hdrs \`
           -Body ($Body | ConvertTo-Json -Depth 10)
@@ -127,7 +135,7 @@ function Invoke-Supabase {
 
 function Get-PaisCodigo {
   param([string]$Ip)
-  if (-not $Ip -or $Ip -match '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)') {
+  if (-not $Ip -or $Ip -match '^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)') {
     return @{ codigo = ''; pais = 'Red interna'; ciudad = ''; isp = '' }
   }
   try {
