@@ -19,6 +19,10 @@ create table if not exists public.inv_ordenes (
 -- Solo admins y lectura_escritura pueden crear/ver órdenes
 alter table public.inv_ordenes enable row level security;
 
+drop policy if exists "ver_ordenes"       on public.inv_ordenes;
+drop policy if exists "crear_ordenes"     on public.inv_ordenes;
+drop policy if exists "actualizar_ordenes" on public.inv_ordenes;
+
 create policy "ver_ordenes" on public.inv_ordenes
   for select using (puede_ver('inventario'));
 

@@ -4,15 +4,17 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { usePerfil } from "@/components/PerfilContext";
-import { generarDesinstalador, generarDesinstaladorCmd, descargar } from "@/lib/agente";
+import { generarDesinstalador, generarDesinstaladorCmd, generarScriptAgente, descargar, AGENTE_VERSION } from "@/lib/agente";
 import CodigosInstalacion from "@/components/CodigosInstalacion";
 import { generarDesinstaladorLinux } from "@/lib/agente-linux";
 
 export default function ConfigAgente() {
   const { esAdmin } = usePerfil();
-  const [config, setConfig] = useState<{ token: string; intervalo_min: number; dominios_autoaprobados: string[]; permitir_token_general?: boolean } | null>(null);
+  const [config, setConfig] = useState<{ token: string; intervalo_min: number; dominios_autoaprobados: string[]; permitir_token_general?: boolean; script_version?: string; script_hash?: string } | null>(null);
   const [nuevoDominio, setNuevoDominio] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [publicando, setPublicando] = useState(false);
+  const [publicadoOk, setPublicadoOk] = useState(false);
 
   const cargar = () =>
     createClient().from("inv_agente_config").select("*").eq("id", 1).single()
@@ -35,6 +37,26 @@ export default function ConfigAgente() {
     const { error } = await createClient().from("inv_agente_config").update({ dominios_autoaprobados: lista }).eq("id", 1);
     if (error) return setError(error.message);
     cargar();
+  }
+
+  async function publicarAgente() {
+    if (!config) return;
+    if (!confirm(`¿Publicar la versión ${AGENTE_VERSION} del agente? Los equipos se van a actualizar solos en el próximo ciclo.`)) return;
+    setPublicando(true); setError(null); setPublicadoOk(false);
+    try {
+      const url  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+      const script = generarScriptAgente(url, anon, config.token);
+      // Calcular hash SHA-256 del script
+      const enc  = new TextEncoder();
+      const buf  = await crypto.subtle.digest("SHA-256", enc.encode(script));
+      const hash = Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      const sb = createClient();
+      const { error: err } = await sb.rpc("inv_agente_publicar", { p_version: AGENTE_VERSION, p_hash: hash, p_contenido: script });
+      if (err) { setError(err.message); } else { setPublicadoOk(true); cargar(); }
+    } finally {
+      setPublicando(false);
+    }
   }
 
   async function permitirTokenGeneral(valor: boolean) {
@@ -152,6 +174,35 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
           <input className="input flex-1" placeholder="Nombre del dominio" value={nuevoDominio} onChange={(e) => setNuevoDominio(e.target.value)} />
           <button className="btn-secondary" disabled={!config}>Agregar</button>
         </form>
+      </div>
+
+      <div className="card p-5 space-y-3">
+        <div>
+          <h2 className="font-medium text-ink">Actualización automática del agente</h2>
+          <p className="text-sm text-ink/60 mt-1">
+            Al publicar una versión, los equipos la descargan solos en el próximo ciclo sin que tengas que tocar nada.
+            La versión actual del código es <span className="font-mono text-xs bg-line/[0.05] px-1 rounded">{AGENTE_VERSION}</span>.
+          </p>
+        </div>
+        {config?.script_version && (
+          <p className="text-sm text-ink/70">
+            Versión publicada: <span className="font-mono text-xs bg-line/[0.05] px-1 rounded">{config.script_version}</span>
+            {config.script_version === AGENTE_VERSION
+              ? <span className="ml-2 text-emerald-600">✓ Al día</span>
+              : <span className="ml-2 text-amber-600">← hay una versión nueva ({AGENTE_VERSION}) sin publicar</span>}
+          </p>
+        )}
+        {!config?.script_version && (
+          <p className="text-sm text-ink/50">Todavía no hay ninguna versión publicada. Los equipos usan el script instalado manualmente.</p>
+        )}
+        {publicadoOk && <p className="text-sm text-emerald-600">✓ Versión {AGENTE_VERSION} publicada. Los equipos se van a actualizar solos.</p>}
+        <button
+          className="btn-secondary disabled:opacity-50"
+          disabled={publicando || !config || config.script_version === AGENTE_VERSION}
+          onClick={publicarAgente}
+        >
+          {publicando ? "Publicando…" : config?.script_version === AGENTE_VERSION ? `Versión ${AGENTE_VERSION} ya publicada` : `Publicar versión ${AGENTE_VERSION}`}
+        </button>
       </div>
 
       <details className="card p-5">

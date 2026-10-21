@@ -432,6 +432,33 @@ $Estado = 'desconocido'
 
 function Obtener($bloque) { try { & $bloque } catch { $null } }
 
+# ---- Auto-update: compara el hash del script actual con el publicado en Supabase ----
+try {
+  $Script    = $MyInvocation.MyCommand.Path
+  $hashActual = $null
+  if ($Script -and (Test-Path $Script)) {
+    $sha0 = [System.Security.Cryptography.SHA256]::Create()
+    $hashActual = [BitConverter]::ToString($sha0.ComputeHash([System.IO.File]::ReadAllBytes($Script))) -replace '-', ''
+  }
+  $headersUpd = @{ 'apikey' = $AnonKey; 'Authorization' = 'Bearer ' + $AnonKey; 'Content-Type' = 'application/json' }
+  $cuerpoUpd  = '{"p_token":' + ($Token | ConvertTo-Json) + ',"p_hash_actual":' + (if ($hashActual) { $hashActual | ConvertTo-Json } else { '""' }) + '}'
+  $rUpd = Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_agente_check_update') `
+            -Headers $headersUpd -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoUpd)) `
+            -ContentType 'application/json; charset=utf-8' -TimeoutSec 15
+  if ($rUpd -and $rUpd.hay_update -and $rUpd.script_contenido -and $Script -and (Test-Path $Script)) {
+    Set-Content -Path $Script -Value $rUpd.script_contenido -Encoding UTF8 -Force
+    Set-Content -Path (Join-Path $Carpeta 'ultimo-update.txt') -Value ('UPDATE ' + (Get-Date).ToString('s') + ' v' + $rUpd.script_version)
+    # Reiniciar la tarea para que corra con el nuevo script
+    Stop-ScheduledTask  -TaskName 'AccusysInventarioAgente' -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName 'AccusysInventarioAgente'
+    exit 0
+  }
+}
+catch {
+  # Si falla el check de update, continúa con el ciclo normal
+  Set-Content -Path (Join-Path $Carpeta 'ultimo-update.txt') -Value ('ERROR-CHECK ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+}
+
 try {
   $cs   = Get-CimInstance Win32_ComputerSystem
   $csp  = Get-CimInstance Win32_ComputerSystemProduct
@@ -1230,6 +1257,18 @@ export function generarDesinstaladorCmd() {
 
 export function generarDesinstalador() {
   return DESINSTALADOR;
+}
+
+// Genera el script del agente listo para publicar en Supabase (auto-update).
+// Usa los mismos valores de URL/token que el instalador descargado.
+export function generarScriptAgente(url: string, anon: string, token: string) {
+  return AGENTE
+    .replace("__URL__", () => url.replace(/\/$/, ""))
+    .replace("__ANON__", () => anon)
+    .replace("__TOKEN__", () => token)
+    .replace("__VERSION__", () => AGENTE_VERSION)
+    .replace("__W11_SCRIPT__", () => btoa(W11_ACTUALIZAR.replace(/\r?\n/g, "\r\n")))
+    .replace("__DISCO_SCRIPT__", () => btoa(DISCO_ANALIZAR.replace(/\r?\n/g, "\r\n")));
 }
 
 export function descargar(nombre: string, contenido: string, opciones: { linux?: boolean } = {}) {
