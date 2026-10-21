@@ -442,9 +442,7 @@ try {
   }
   $headersUpd = @{ 'apikey' = $AnonKey; 'Authorization' = 'Bearer ' + $AnonKey; 'Content-Type' = 'application/json' }
   $cuerpoUpd  = '{"p_token":' + ($Token | ConvertTo-Json) + ',"p_hash_actual":' + (if ($hashActual) { $hashActual | ConvertTo-Json } else { '""' }) + '}'
-  $rUpd = Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_agente_check_update') `
-            -Headers $headersUpd -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoUpd)) `
-            -ContentType 'application/json; charset=utf-8' -TimeoutSec 15
+  $rUpd = Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_agente_check_update') -Headers $headersUpd -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoUpd)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 15
   if ($rUpd -and $rUpd.hay_update -and $rUpd.script_contenido -and $Script -and (Test-Path $Script)) {
     Set-Content -Path $Script -Value $rUpd.script_contenido -Encoding UTF8 -Force
     Set-Content -Path (Join-Path $Carpeta 'ultimo-update.txt') -Value ('UPDATE ' + (Get-Date).ToString('s') + ' v' + $rUpd.script_version)
