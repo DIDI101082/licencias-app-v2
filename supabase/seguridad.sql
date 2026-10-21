@@ -17,7 +17,8 @@ alter table public.inv_dispositivos
   add column if not exists tpm_presente boolean,
   add column if not exists tpm_version text,
   add column if not exists secure_boot boolean,
-  add column if not exists seguridad_actualizado timestamptz;
+  add column if not exists seguridad_actualizado timestamptz,
+  add column if not exists parches_pendientes jsonb;   -- {cantidad: int, actualizaciones: [{titulo, kb, categoria, critica}]}
 
 -- Administradores que no deben marcarse como problema (se editan desde la app)
 alter table public.inv_agente_config
@@ -53,6 +54,7 @@ begin
     tpm_presente          = nullif(p_datos->>'tpm_presente', '')::boolean,
     tpm_version           = p_datos->>'tpm_version',
     secure_boot           = nullif(p_datos->>'secure_boot', '')::boolean,
+    parches_pendientes    = p_datos->'parches_pendientes',
     seguridad_actualizado = now()
   where uuid_equipo = v_uuid;
 

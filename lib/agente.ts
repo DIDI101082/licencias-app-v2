@@ -639,6 +639,26 @@ function Obtener-UltimoParche {
   return $resultado
 }
 
+function Obtener-ParhesPendientes {
+  # Devuelve lista de actualizaciones pendientes (excluye Defender/firmas)
+  # y la cantidad total. Si el COM falla devuelve null.
+  try {
+    $buscador = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()
+    $result   = $buscador.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
+    $lista = @($result.Updates | Where-Object { $_.Title -and
+                $_.Title -notmatch 'Defender|Security Intelligence|inteligencia de seguridad|Antimalware|KB2267602|KB890830|Malicious Software|software malintencionado' } |
+      ForEach-Object {
+        @{
+          titulo    = $_.Title
+          kb        = $(if ($_.KBArticleIDs.Count -gt 0) { 'KB' + $_.KBArticleIDs[0] } else { $null })
+          categoria = $(if ($_.Categories.Count -gt 0) { $_.Categories.Item(0).Name } else { $null })
+          critica   = [bool]($_.MsrcSeverity -match 'Critical|Critica|Importante|Important')
+        }
+      })
+    return @{ cantidad = $lista.Count; actualizaciones = $lista }
+  } catch { return $null }
+}
+
 function Obtener-Admins {
   $sidGrupo = 'S-1-5-32-544'
   try {
@@ -835,6 +855,7 @@ try {
   $bios = Obtener { Obtener-ClaveBios }
   if (-not $bl) { $bl = @{ estado = 'no_disponible'; detalle = @() } }
   $parche = Obtener-UltimoParche
+  $parchesPendientes = Obtener-ParhesPendientes
   $reinicio = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or
               (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
   $admins = @(Obtener { Obtener-Admins } | Where-Object { $_ })
@@ -878,6 +899,7 @@ try {
     bios_clave_admin     = $(if ($bios) { $bios.admin } else { $null })
     bios_clave_sistema   = $(if ($bios) { $bios.sistema } else { $null })
     bios_fuente          = $(if ($bios) { $bios.fuente } else { $null })
+    parches_pendientes   = $parchesPendientes
   }
 
   $jsonSeg = ConvertTo-Json -InputObject $seguridad -Depth 5 -Compress
