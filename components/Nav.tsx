@@ -9,6 +9,54 @@ import { temasVisibles, ubicar, type PaginasGrupo } from "@/lib/menu";
 import { type Tema, type Diseno, type Ancho, temaGuardado, guardarTema, aplicarTema, disenoGuardado, guardarDiseno, anchoGuardado, guardarAncho } from "@/lib/tema";
 import Buscador from "./Buscador";
 
+// Campanita de alertas abiertas — solo visible para administradores
+function CampanillaAlertas({ lateral = false }: { lateral?: boolean }) {
+  const supabase = createClient();
+  const [cantidad, setCantidad] = useState<number | null>(null);
+
+  useEffect(() => {
+    let activo = true;
+    const cargar = async () => {
+      try {
+        const { count } = await supabase.from("alertas").select("id", { count: "exact", head: true }).is("resuelta", null);
+        if (activo) setCantidad(count ?? 0);
+      } catch { if (activo) setCantidad(0); }
+    };
+    cargar();
+    // Refresca cada 2 minutos
+    const t = setInterval(cargar, 120000);
+    return () => { activo = false; clearInterval(t); };
+  }, []);
+
+  const hay = cantidad !== null && cantidad > 0;
+
+  if (lateral) {
+    return (
+      <Link href="/auditoria/alertas" aria-label={`Alertas abiertas${hay ? `: ${cantidad}` : ""}`}
+        className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${hay ? "text-red-600 hover:bg-red-50 font-medium" : "text-ink/50 hover:text-ink hover:bg-line/[0.04]"}`}>
+        <span aria-hidden className="text-base leading-none">{hay ? "🔔" : "🔕"}</span>
+        <span>Alertas</span>
+        {hay && <span className="ml-auto min-w-[1.25rem] h-5 px-1 rounded-full bg-red-600 text-white text-[11px] font-bold flex items-center justify-center tabular-nums">{cantidad > 99 ? "99+" : cantidad}</span>}
+      </Link>
+    );
+  }
+
+  return (
+    <Link href="/auditoria/alertas" aria-label={`Alertas abiertas${hay ? `: ${cantidad}` : ""}`} title={hay ? `${cantidad} alerta${cantidad === 1 ? "" : "s"} abierta${cantidad === 1 ? "" : "s"}` : "Sin alertas"}
+      className={`relative shrink-0 md:pb-2 h-9 w-9 rounded-full flex items-center justify-center transition-colors ${hay ? "bg-red-50 text-red-600 hover:bg-red-100" : "text-ink/40 hover:text-ink hover:bg-line/[0.05]"}`}>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5" aria-hidden>
+        <path d="M10 2a6 6 0 0 0-6 6v1.17a4 4 0 0 1-.586 2.094l-.86 1.435A1 1 0 0 0 3.416 14h13.168a1 1 0 0 0 .862-1.301l-.86-1.435A4 4 0 0 1 16 9.17V8a6 6 0 0 0-6-6Z" />
+        <path d="M10 18a3 3 0 0 1-2.83-2h5.66A3 3 0 0 1 10 18Z" />
+      </svg>
+      {hay && (
+        <span aria-hidden className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-0.5 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center tabular-nums leading-none">
+          {cantidad > 99 ? "99+" : cantidad}
+        </span>
+      )}
+    </Link>
+  );
+}
+
 const rolLabel: Record<string, string> = {
   administrador: "Administrador",
   lectura_escritura: "Lectura y escritura",
@@ -66,6 +114,7 @@ export default function Nav({ nombre, rol, modulos: permitidos, paginas }: { nom
           <Solapas visibles={solapas} activoId={activo?.id ?? ""} />
           <div className="md:pb-2 shrink-0 max-md:ml-auto">{botonBuscar("px-2.5 py-1.5")}</div>
           <Reloj />
+          {esAdmin && <CampanillaAlertas />}
           <MenuUsuario nombre={nombre} rol={rol} esAdmin={esAdmin} enUsuarios={pathname.startsWith("/usuarios")} onSalir={salir} />
         </div>
         {/* Páginas del tema activo */}
@@ -95,6 +144,7 @@ export default function Nav({ nombre, rol, modulos: permitidos, paginas }: { nom
         <nav className="flex-1 overflow-y-auto -mx-1 px-1 space-y-0.5">
           {temas.map((t) => <GrupoLateral key={t.id} tema={t} activo={t.id === activo?.id} esActual={esActual} />)}
         </nav>
+        {esAdmin && <CampanillaAlertas lateral />}
         <div className="flex items-center justify-between gap-2 border-t border-line/[0.06] pt-3">
           <MenuUsuario nombre={nombre} rol={rol} esAdmin={esAdmin} enUsuarios={pathname.startsWith("/usuarios")} onSalir={salir} arriba />
           <Reloj siempre />
