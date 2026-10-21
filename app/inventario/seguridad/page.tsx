@@ -208,6 +208,19 @@ export default function Seguridad() {
           );
         })()}
         {(() => {
+          // Equipos con actualizaciones de Windows pendientes
+          const conParches = conDatos.filter((d) => d.parches_pendientes != null && d.parches_pendientes.cantidad > 0);
+          const n = conParches.length;
+          const sinInfo = conDatos.filter((d) => d.parches_pendientes == null).length;
+          return (
+            <div className="card p-5 text-left">
+              <div className="text-xs text-ink/50 font-medium">Con actualizaciones pendientes</div>
+              <div className={`font-display text-3xl mt-1 ${n ? "text-red-600" : "text-emerald-600"}`}>{n}</div>
+              {sinInfo > 0 && <div className="text-xs text-ink/50 mt-1">{sinInfo} sin datos aún</div>}
+            </div>
+          );
+        })()}
+        {(() => {
           // Equipos sin una persona asignada en el inventario (o que ni siquiera están cargados)
           const sinInv = conDatos.filter((d) => d.asignacion === ASIGNACION.sin_inventario).length;
           const n = conDatos.filter((d) => d.asignacion !== ASIGNACION.asignado).length;
