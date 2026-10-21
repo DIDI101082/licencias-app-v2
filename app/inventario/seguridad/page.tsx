@@ -245,6 +245,7 @@ export default function Seguridad() {
               {CONTROLES.map((c) => <ThFiltro key={c.k} ctl={fc} col={c.k}>{c.titulo}</ThFiltro>)}
               <ThFiltro ctl={fc} col="memoria">Memoria</ThFiltro>
               <ThFiltro ctl={fc} col="discos">Discos</ThFiltro>
+              <th className="whitespace-nowrap">Actualizaciones</th>
             </tr>
           </thead>
           <tbody>
@@ -301,10 +302,19 @@ export default function Seguridad() {
                         ? <div className="space-y-1.5">{(d.discos as Disco[]).map((x) => <BarraDisco key={x.unidad} d={x} />)}</div>
                         : <span className="text-sm text-ink/40">Sin datos</span>}
                     </td>
+                    <td className="whitespace-nowrap text-sm">
+                      {d.parches_pendientes == null
+                        ? <span className="text-ink/40">Sin datos</span>
+                        : d.parches_pendientes.cantidad === 0
+                          ? <span className="text-emerald-600">Al día</span>
+                          : <span className={d.parches_pendientes.cantidad > 5 ? "text-red-600 font-medium" : "text-amber-600"}>
+                              {d.parches_pendientes.cantidad} pendiente{d.parches_pendientes.cantidad !== 1 ? "s" : ""}
+                            </span>}
+                    </td>
                   </tr>
                   {abierto === d.id && (
                     <tr>
-                      <td colSpan={CONTROLES.length + 6} className="bg-canvas">
+                      <td colSpan={CONTROLES.length + 7} className="bg-canvas">
                         <div className="grid md:grid-cols-3 gap-5 text-sm py-1">
                           <div>
                             {d.cifrado_producto && (
@@ -375,7 +385,7 @@ export default function Seguridad() {
               );
             })}
             {!cargando && ordenadas.length === 0 && (
-              <tr><td colSpan={CONTROLES.length + 6} className="text-center text-ink/40 py-10">
+              <tr><td colSpan={CONTROLES.length + 7} className="text-center text-ink/40 py-10">
                 {filtro ? "Ningún equipo tiene este problema." : "Todavía ningún equipo informó datos de seguridad."}
               </td></tr>
             )}

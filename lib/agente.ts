@@ -1077,6 +1077,57 @@ try {
 catch {
   Set-Content -Path (Join-Path $Carpeta 'ultimo-disco.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
 }
+
+# ---- Órdenes remotas (Windows Update, etc.) ----
+try {
+  $cuerpoOrd = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
+               ',"p_hostname":' + (ConvertTo-Json $env:COMPUTERNAME) + '}'
+  $ordenes = Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_ordenes_pendientes') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoOrd)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 20
+  foreach ($ord in @($ordenes)) {
+    if (-not $ord -or -not $ord.id) { continue }
+    $ordEstado  = 'completada'
+    $ordResult  = $null
+    $ordDetalle = $null
+    try {
+      if ($ord.tipo -eq 'windows_update') {
+        # Buscar actualizaciones pendientes via COM (no requiere módulos adicionales)
+        $sess   = New-Object -ComObject Microsoft.Update.Session
+        $buscar = $sess.CreateUpdateSearcher()
+        $res    = $buscar.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
+        $lista  = @($res.Updates | Where-Object { $_.Title -notmatch 'Defender|Security Intelligence|Antimalware|KB2267602|KB890830|Malicious Software' })
+        if ($lista.Count -eq 0) {
+          $ordResult = 'Sin actualizaciones pendientes'
+        } else {
+          # Descargar e instalar
+          $downloader = $sess.CreateUpdateDownloader()
+          $downloader.Updates = $res.Updates
+          $downloader.Download() | Out-Null
+          $installer = $sess.CreateUpdateInstaller()
+          $installer.Updates = $res.Updates
+          $installer.AllowSourcePrompts = $false
+          $installer.ForceQuiet = $true
+          $instRes = $installer.Install()
+          $instaladas = @($lista | ForEach-Object { $_.Title })
+          $ordDetalle = @{ instaladas = $instaladas; reinicio = [bool]$instRes.RebootRequired } | ConvertTo-Json -Compress
+          $ordResult  = ('{0} actualización(es) instalada(s)' -f $lista.Count) + $(if ($instRes.RebootRequired) { '. Reinicio requerido.' } else { '.' })
+          if ($instRes.ResultCode -notin @(2, 3)) { $ordEstado = 'error'; $ordResult = 'Error al instalar (código ' + $instRes.ResultCode + ')' }
+        }
+      } else {
+        $ordEstado = 'error'; $ordResult = 'Tipo de orden desconocido: ' + $ord.tipo
+      }
+    } catch {
+      $ordEstado = 'error'; $ordResult = $_.Exception.Message
+    }
+    $cuerpoRes = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_id":' + $ord.id +
+                 ',"p_estado":' + (ConvertTo-Json $ordEstado) + ',"p_resultado":' + (ConvertTo-Json $ordResult) +
+                 ',"p_detalle":' + $(if ($ordDetalle) { $ordDetalle } else { 'null' }) + '}'
+    Invoke-RestMethod -Method Post -Uri ($SupabaseUrl + '/rest/v1/rpc/inv_orden_resultado') -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpoRes)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 20 | Out-Null
+  }
+  Set-Content -Path (Join-Path $Carpeta 'ultimo-ordenes.txt') -Value ('OK ' + (Get-Date).ToString('s'))
+}
+catch {
+  Set-Content -Path (Join-Path $Carpeta 'ultimo-ordenes.txt') -Value ('ERROR ' + (Get-Date).ToString('s') + ' ' + $_.Exception.Message)
+}
 `;
 
 const INSTALADOR = String.raw`# Instalador del agente de inventario Accusys
