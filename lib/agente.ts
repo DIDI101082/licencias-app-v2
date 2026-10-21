@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "2.6";
+export const AGENTE_VERSION = "2.7";
 
 // Diagnostico del disco C (agente 2.1): que ocupa el espacio y en que estado fisico esta el disco.
 // Recorrer todo C: puede tardar varios minutos, asi que corre en una tarea programada aparte
@@ -932,7 +932,7 @@ try {
   $hashSeg = [BitConverter]::ToString($sha2.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($jsonSeg))) -replace '-', ''
   $archivoSeg = Join-Path $Carpeta 'seguridad.hash'
   $anteriorSeg = Get-Content $archivoSeg -ErrorAction SilentlyContinue
-  $vencidoSeg = (-not (Test-Path $archivoSeg)) -or ((Get-Item $archivoSeg).LastWriteTime -lt (Get-Date).AddHours(-6))
+  $vencidoSeg = (-not (Test-Path $archivoSeg)) -or ((Get-Item $archivoSeg).LastWriteTime -lt (Get-Date).AddHours(-1))
 
   if ((($hashSeg -ne $anteriorSeg) -or $vencidoSeg) -and $Estado -eq 'aprobado') {
     $cuerpoSeg = '{"p_token":' + (ConvertTo-Json $Token) + ',"p_uuid":' + (ConvertTo-Json ([string]$csp.UUID)) +
