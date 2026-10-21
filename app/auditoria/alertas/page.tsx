@@ -92,7 +92,7 @@ export default function Alertas() {
     const { data, error } = await createClient().rpc("alertas_confirmar", { p_ids: Array.from(sel), p_nota: nota, p_quitar: quitar });
     setConfirmando(false);
     if (error) return setError(/alertas_confirmar/.test(error.message) ? "Falta ejecutar supabase/alertas-confirmar.sql en Supabase." : error.message);
-    setAviso(quitar ? `Se quitó la confirmación de ${data} alerta(s).` : `${data} alerta(s) confirmada(s).`);
+    setAviso(quitar ? `Se quitó la confirmación de ${data} alerta(s).` : `${data} alerta(s) confirmada(s) y cerrada(s).`);
     setSel(new Set()); setNota("");
     cargar();
   }

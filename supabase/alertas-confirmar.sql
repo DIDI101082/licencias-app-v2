@@ -1,8 +1,7 @@
 -- ============================================================
 -- Confirmar alertas: marcar una alerta abierta como "vista y atendida" con una nota de lo que se hizo.
--- La alerta sigue abierta (y se cierra sola cuando el problema desaparece), pero deja de contar
--- en el indicador "Alertas críticas o altas sin atender" del nivel de cumplimiento.
--- Si el problema se resuelve y vuelve a aparecer, entra como alerta nueva sin confirmar.
+-- Al confirmar, la alerta también se cierra (resuelta = now()), por lo que desaparece de la lista de abiertas.
+-- Si el problema vuelve a aparecer en la próxima evaluación, entra como alerta nueva sin confirmar.
 -- Ejecutar en Supabase (Accusys Cyber) > SQL Editor. Se puede correr más de una vez.
 -- ============================================================
 alter table public.alertas add column if not exists confirmada timestamptz;
@@ -29,7 +28,8 @@ begin
   else
     if v_nota is null or length(v_nota) < 3 then raise exception 'Escribí qué se hizo o por qué se confirma'; end if;
     select coalesce(nullif(nombre, ''), email) into v_nombre from perfiles where id = auth.uid();
-    update alertas set confirmada = now(), confirmada_por = auth.uid(), confirmada_por_nombre = v_nombre, confirmada_nota = v_nota
+    update alertas set confirmada = now(), confirmada_por = auth.uid(), confirmada_por_nombre = v_nombre, confirmada_nota = v_nota,
+           resuelta = now()
      where id = any(p_ids) and resuelta is null;
     get diagnostics n = row_count;
   end if;

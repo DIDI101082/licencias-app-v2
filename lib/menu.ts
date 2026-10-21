@@ -42,14 +42,11 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/monitoreo", label: "Monitoreo" },
     { href: "/inventario/migracion-w11", label: "Migración a Windows 11" },
   ] },
-  { id: "perimetro", label: "Perímetro", titulo: "Perímetro, correo y nube", paginas: [
-    { href: "/inventario/superficie", label: "Superficie expuesta" },
-    { href: "/inventario/correo", label: "Correo y dominio" },
+  { id: "perimetro", label: "Perímetro", titulo: "Perímetro y nube", paginas: [
     { href: "/inventario/cloudflare", label: "Cloudflare" },
     { href: "/inventario/securescore", label: "Secure Score" },
     { href: "/inventario/apps-entra", label: "Aplicaciones de Entra ID" },
     { href: "/red/fortigate", label: "FortiGate" },
-    { href: "/red/forti-ems", label: "FortiClient EMS" },
     { href: "/inventario/wifi", label: "WiFi" },
   ] },
   { id: "infraestructura", label: "Infraestructura", titulo: "Servidores, virtualización, backups y red", paginas: [
@@ -158,4 +155,5 @@ export function ubicar(temas: { id: string; paginas: Pagina[] }[], pathname: str
   for (const t of temas) for (const p of t.paginas) {
     if (esActual(p.href, pathname) && (!mejor || p.href.length > mejor.href.length)) mejor = { tema: t.id, href: p.href };
   }
-  return mejor;}
+  return mejor;
+}
