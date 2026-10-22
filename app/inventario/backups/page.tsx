@@ -50,7 +50,12 @@ export default function Backups() {
   useEffect(() => { cargar(); }, []);
 
   const limite = estado?.horas_max_sin_exito ?? 26;
-  const problema = (t: Trabajo) => t.habilitado && !t.ignorar && (t.ultimo_resultado === "Failed" || horas(t.ultimo_exito) > limite);
+  const problema = (t: Trabajo) =>
+    t.habilitado &&
+    !t.ignorar &&
+    t.ultimo_resultado !== "Success" &&
+    t.ultimo_resultado !== "Warning" &&
+    horas(t.ultimo_exito) > limite;
   const lista = useMemo(() => [...trabajos].sort((a, b) => Number(problema(b)) - Number(problema(a)) || a.nombre.localeCompare(b.nombre)), [trabajos, limite]); // eslint-disable-line react-hooks/exhaustive-deps
   const activos = trabajos.filter((t) => t.habilitado && !t.ignorar);
   const conProblema = activos.filter(problema).length;
