@@ -15,6 +15,7 @@ export default function ConfigAgente() {
   const [error, setError] = useState<string | null>(null);
   const [publicando, setPublicando] = useState(false);
   const [publicadoOk, setPublicadoOk] = useState(false);
+  const [versiones, setVersiones] = useState<{ agente_version: string | null; count: number }[]>([]);
 
   const cargar = () =>
     createClient().from("inv_agente_config").select("*").eq("id", 1).single()
@@ -22,7 +23,22 @@ export default function ConfigAgente() {
         if (error) setError("No se encontró la configuración del agente. ¿Ejecutaste monitoreo.sql en Supabase?");
         setConfig(data);
       });
-  useEffect(() => { if (esAdmin) cargar(); }, [esAdmin]);
+
+  const cargarVersiones = async () => {
+    const { data } = await createClient()
+      .from("inv_dispositivos")
+      .select("agente_version")
+      .eq("estado_registro", "aprobado");
+    if (!data) return;
+    const mapa: Record<string, number> = {};
+    for (const d of data) {
+      const v = d.agente_version ?? "(sin agente)";
+      mapa[v] = (mapa[v] ?? 0) + 1;
+    }
+    setVersiones(Object.entries(mapa).sort((a, b) => b[0].localeCompare(a[0])).map(([agente_version, count]) => ({ agente_version, count })));
+  };
+
+  useEffect(() => { if (esAdmin) { cargar(); cargarVersiones(); } }, [esAdmin]);
 
   async function regenerar() {
     if (!confirm("¿Generar un token general nuevo? Los equipos ya registrados no se ven afectados (usan su propia clave).")) return;
@@ -175,6 +191,34 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
           <button className="btn-secondary" disabled={!config}>Agregar</button>
         </form>
       </div>
+
+      {versiones.length > 0 && (
+        <div className="card p-5 space-y-3">
+          <h2 className="font-medium text-ink">Versiones instaladas</h2>
+          <div className="divide-y divide-line/[0.06]">
+            {versiones.map(({ agente_version, count }) => {
+              const actual = agente_version === AGENTE_VERSION;
+              const sinAgente = agente_version === "(sin agente)";
+              const total = versiones.reduce((s, v) => s + v.count, 0);
+              const pct = Math.round((count / total) * 100);
+              return (
+                <div key={agente_version ?? ""} className="flex items-center gap-3 py-2">
+                  <span className={`font-mono text-xs px-2 py-0.5 rounded shrink-0 ${actual ? "bg-emerald-50 text-emerald-700" : sinAgente ? "bg-line/[0.05] text-ink/40" : "bg-amber-50 text-amber-700"}`}>
+                    {agente_version}
+                  </span>
+                  <div className="flex-1 h-1.5 bg-line/[0.07] rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${actual ? "bg-emerald-500" : sinAgente ? "bg-line/20" : "bg-amber-400"}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-sm tabular-nums text-ink/70 shrink-0">{count} equipo{count !== 1 ? "s" : ""}</span>
+                  {!actual && !sinAgente && <span className="text-xs text-amber-600 shrink-0">desactualizado</span>}
+                  {actual && <span className="text-xs text-emerald-600 shrink-0">al día</span>}
+                </div>
+              );
+            })}
+          </div>
+          <button className="btn-secondary text-xs" onClick={cargarVersiones}>Actualizar</button>
+        </div>
+      )}
 
       <div className="card p-5 space-y-3">
         <div>
