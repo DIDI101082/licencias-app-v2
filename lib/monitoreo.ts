@@ -23,7 +23,7 @@ export function usoDisco(d: Disco) {
 }
 
 export function discoCritico(discos: Disco[] | null) {
-  return (discos ?? []).some((d) => usoDisco(d) >= 90);
+  return (Array.isArray(discos) ? discos : []).some((d) => usoDisco(d) >= 90);
 }
 
 export function encendidoDesde(arranque: string | null) {

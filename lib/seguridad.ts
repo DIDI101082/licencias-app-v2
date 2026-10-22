@@ -22,7 +22,7 @@ const dias = (f: string) => Math.floor((Date.now() - new Date(f).getTime()) / 86
 
 export function adminsExtra(admins: any[] | null, permitidos: string[]) {
   const ok = permitidos.map((p) => p.trim().toLowerCase()).filter(Boolean);
-  return (admins ?? []).filter((a) => {
+  return (Array.isArray(admins) ? admins : []).filter((a) => {
     if (a.integrado) return false;
     const n = String(a.nombre ?? "").toLowerCase();
     const corto = n.split("\\").pop() ?? n;
@@ -109,7 +109,7 @@ export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado
       : { nivel: "ok", texto: "Activo" };
 
   // Antivirus
-  const activos = (d.av_productos ?? []).filter((p: any) => p.activo);
+  const activos = (Array.isArray(d.av_productos) ? d.av_productos : []).filter((p: any) => p.activo);
   let antivirus: Resultado;
   if (activos.length === 0) antivirus = { nivel: "problema", texto: "Sin antivirus activo" };
   else if (activos.some((p: any) => !p.actualizado)) antivirus = { nivel: "problema", texto: `${activos[0].nombre} desactualizado` };
@@ -123,7 +123,7 @@ export function evaluar(d: any, permitidos: string[]): Record<Control, Resultado
 
   // Admins
   let admins: Resultado = sin;
-  if (d.admins_locales) {
+  if (Array.isArray(d.admins_locales)) {
     const extra = adminsExtra(d.admins_locales, permitidos);
     admins = extra.length
       ? { nivel: "aviso", texto: extra.length === 1 ? String(extra[0].nombre) : `${extra.length} no permitidos` }
