@@ -196,13 +196,25 @@ Si ves algún error, sacale una captura y mandámela. Gracias!`;
           <p className="text-sm text-ink/50">Todavía no hay ninguna versión publicada. Los equipos usan el script instalado manualmente.</p>
         )}
         {publicadoOk && <p className="text-sm text-emerald-600">✓ Versión {AGENTE_VERSION} publicada. Los equipos se van a actualizar solos.</p>}
-        <button
-          className="btn-secondary disabled:opacity-50"
-          disabled={publicando || !config || config.script_version === AGENTE_VERSION}
-          onClick={publicarAgente}
-        >
-          {publicando ? "Publicando…" : config?.script_version === AGENTE_VERSION ? `Versión ${AGENTE_VERSION} ya publicada` : `Publicar versión ${AGENTE_VERSION}`}
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            className="btn-secondary disabled:opacity-50"
+            disabled={publicando || !config || config.script_version === AGENTE_VERSION}
+            onClick={publicarAgente}
+          >
+            {publicando ? "Publicando…" : config?.script_version === AGENTE_VERSION ? `Versión ${AGENTE_VERSION} ya publicada` : `Publicar versión ${AGENTE_VERSION}`}
+          </button>
+          {config?.script_version === AGENTE_VERSION && (
+            <button
+              className="btn-secondary disabled:opacity-50 text-amber-700"
+              disabled={publicando}
+              onClick={publicarAgente}
+              title="Vuelve a subir el script aunque la versión no cambió (útil si la base de datos se recreó)"
+            >
+              {publicando ? "Republicando…" : "Republicar"}
+            </button>
+          )}
+        </div>
       </div>
 
       <details className="card p-5">
