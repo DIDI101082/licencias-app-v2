@@ -33,7 +33,7 @@ const soporte = (d: any) => soporteWindows(d.so_nombre, d.so_version, d.so_build
 const fechaSoporte = (f: string | null) => (f ? new Date(f + "T12:00:00").toLocaleDateString("es-AR") : "");
 const textoRam = (d: any) => (d.ram_total_gb ? `${Math.round(d.ram_total_gb)} GB` : "Sin datos");
 const textoDiscos = (d: any) =>
-  ((d.discos ?? []) as Disco[]).map((x) => `${x.unidad} ${x.libre_gb} GB libres de ${x.total_gb} (${usoDisco(x)}%)`).join(" | ");
+  ((Array.isArray(d.discos) ? d.discos : []) as Disco[]).map((x) => `${x.unidad} ${x.libre_gb} GB libres de ${x.total_gb} (${usoDisco(x)}%)`).join(" | ");
 
 // Asignación del equipo a una persona en el inventario
 const ASIGNACION = { asignado: "Asignado", sin_asignar: "Sin asignar", sin_inventario: "Sin cargar en inventario" } as const;
@@ -133,7 +133,7 @@ export default function Seguridad() {
     asignacion: (d) => d.asignacion,
     soporte: (d) => soporte(d).texto.startsWith("Vence") ? "Por vencer" : soporte(d).texto,
     memoria: (d) => textoRam(d),
-    discos: (d) => (!d.discos?.length ? "Sin datos" : discoCritico(d.discos) ? "Disco casi lleno" : "Espacio OK"),
+    discos: (d) => (!Array.isArray(d.discos) || !d.discos.length ? "Sin datos" : discoCritico(d.discos) ? "Disco casi lleno" : "Espacio OK"),
   });
   const ordenadas = [...fc.filtradas].sort((a, b) => problemas(b) - problemas(a) || String(a.hostname).localeCompare(b.hostname));
 
@@ -146,8 +146,8 @@ export default function Seguridad() {
       d.hostname, TIPOS_EQUIPO[d.te as TipoEquipo].uno, d.inv_equipos?.codigo ?? "", d.usuario ?? "", d.asignado ?? d.asignacion, textoSistema(d), d.so_version ?? "", d.so_build ?? "", soporte(d).texto, fechaSoporte(soporte(d).fin), TEXTO_USUARIO_ADMIN[d.ua as keyof typeof TEXTO_USUARIO_ADMIN],
       ...CONTROLES.flatMap((c) => [ESTILO[d.ev[c.k].nivel as keyof typeof ESTILO].etiqueta, d.ev[c.k].texto]),
       d.ram_total_gb ? Math.round(d.ram_total_gb) : null, ramUso(d), textoDiscos(d),
-      d.discos?.length ? (discoCritico(d.discos) ? "Sí" : "No") : "",
-      d.ultimo_parche_titulo ?? "", (d.admins_locales ?? []).map((a: any) => a.nombre).join(" | "),
+      Array.isArray(d.discos) && d.discos.length ? (discoCritico(d.discos) ? "Sí" : "No") : "",
+      d.ultimo_parche_titulo ?? "", (Array.isArray(d.admins_locales) ? d.admins_locales : []).map((a: any) => a.nombre).join(" | "),
       new Date(d.seguridad_actualizado).toLocaleString("es-AR"),
     ]);
     exportarExcel(`seguridad-${tipo === "todos" ? "equipos" : TIPOS_EQUIPO[tipo].varios.toLowerCase().replace(/ /g, "-")}-${new Date().toISOString().slice(0, 10)}`, cab, filas,
@@ -311,7 +311,7 @@ export default function Seguridad() {
                       </> : <span className="text-ink/40">Sin datos</span>}
                     </td>
                     <td>
-                      {d.discos?.length
+                      {Array.isArray(d.discos) && d.discos.length
                         ? <div className="space-y-1.5">{(d.discos as Disco[]).map((x) => <BarraDisco key={x.unidad} d={x} />)}</div>
                         : <span className="text-sm text-ink/40">Sin datos</span>}
                     </td>
@@ -344,7 +344,7 @@ export default function Seguridad() {
                               </>
                             )}
                             {!d.cifrado_producto && <div className="text-xs text-ink/50 mb-1">Unidades (BitLocker)</div>}
-                            {(d.bitlocker_detalle ?? []).length === 0 ? <span className="text-ink/50">Sin información de BitLocker</span> :
+                            {!Array.isArray(d.bitlocker_detalle) || d.bitlocker_detalle.length === 0 ? <span className="text-ink/50">Sin información de BitLocker</span> :
                               d.bitlocker_detalle.map((u: any) => (
                                 <div key={u.unidad}>{u.unidad} · {u.estado.replace("_", " ")}{u.porcentaje != null && u.estado !== "sin_cifrar" ? ` (${u.porcentaje}%)` : ""}</div>
                               ))}
@@ -354,7 +354,7 @@ export default function Seguridad() {
                           </div>
                           <div>
                             <div className="text-xs text-ink/50 mb-1">Administradores locales</div>
-                            {(d.admins_locales ?? []).map((a: any) => {
+                            {(Array.isArray(d.admins_locales) ? d.admins_locales : []).map((a: any) => {
                               const esExtra = extra.includes(a);
                               return (
                                 <div key={a.nombre} className={esExtra ? "text-amber-700" : ""}>
@@ -372,7 +372,7 @@ export default function Seguridad() {
                           </div>
                           <div>
                             <div className="text-xs text-ink/50 mb-1">Antivirus</div>
-                            {(d.av_productos ?? []).map((p: any) => (
+                            {(Array.isArray(d.av_productos) ? d.av_productos : []).map((p: any) => (
                               <div key={p.nombre}>{p.nombre} <span className="text-xs text-ink/50">· {p.activo ? "activo" : "inactivo"} · {p.actualizado ? "actualizado" : "desactualizado"}</span></div>
                             ))}
                             {d.av_firmas_fecha && <div className="text-xs text-ink/50">Firmas de Defender: {fecha(d.av_firmas_fecha)}</div>}
