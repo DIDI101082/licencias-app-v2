@@ -11,6 +11,8 @@ const cabeceras = [
   { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   { key: "X-DNS-Prefetch-Control", value: "off" },
+  // CORS: solo se permiten pedidos desde el propio dominio (hallazgo #4 del pentest)
+  { key: "Access-Control-Allow-Origin", value: "https://cyber.accusystechnology.com" },
 ];
 
 /** @type {import('next').NextConfig} */
