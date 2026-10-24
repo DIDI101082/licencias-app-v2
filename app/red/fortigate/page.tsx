@@ -260,7 +260,7 @@ function Contenido() {
     { t: "FortiGate que responden", n: equipos.length ? `${responden} de ${equipos.length}` : "—", c: responden < equipos.length ? "text-red-600" : "text-ink", ir: "" },
     { t: "Vulnerabilidades explotadas (KEV)", n: kev, c: kev ? "text-red-600" : "text-ink", ir: "" },
     { t: "Configuración riesgosa (crítica o alta)", n: graves.length, c: graves.length ? "text-red-600" : "text-ink", ir: "vista=configuracion" },
-    { t: "Usuarios conectados por VPN SSL", n: vpnSsl.length, c: vpnSsl.length ? "text-emerald-600" : "text-ink", ir: "vista=vpn" },
+    { t: "Usuarios conectados por VPN SSL", n: vpnSsl.length, c: vpnSsl.length ? "text-emerald-600" : "text-ink", ir: "vista=vpn", extra: () => setPestanaVpn("activos") },
     { t: "Intentos fallidos de VPN (24 h)", n: fallos24.length, c: fallos24.length >= (estado?.umbral_fallos ?? 10) ? "text-amber-700" : "text-ink", ir: "vista=vpn" },
     { t: "Inicios de sesión de administración (24 h)", n: accesosVisibles.filter((x) => x.tipo === "inicio" && Date.parse(x.fecha) > ahora - 86400000).length, c: "text-ink", ir: "vista=accesos" },
     { t: "Amenazas no bloqueadas (24 h)", n: noBloqueadas.length, c: noBloqueadas.length ? "text-red-600" : "text-ink", ir: "vista=amenazas" },
@@ -389,7 +389,7 @@ function Contenido() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         {tarjetas.map((t) => (
-          <button key={t.t} onClick={() => ir(t.ir)} className="card p-5 text-left hover:border-brand-300 transition-colors">
+          <button key={t.t} onClick={() => { ir(t.ir); (t as { extra?: () => void }).extra?.(); }} className="card p-5 text-left hover:border-brand-300 transition-colors">
             <div className="text-xs text-ink/50 font-medium">{t.t}</div>
             <div className={`font-display text-3xl mt-1 tabular-nums ${t.c}`}>{t.n}</div>
           </button>
