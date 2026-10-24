@@ -55,20 +55,24 @@ export default function Inicio() {
     // Pantallazo de seguridad: FortiGate + ESET + Veeam
     const ahora = Date.now();
     const hace24 = new Date(ahora - 86400000).toISOString();
-    Promise.all([
-      sb.from("fg_vpn").select("tipo", { count: "exact", head: false }),
+    const BLOQUEADO = ["blocked", "dropped", "reset", "clear_session", "block", "deny", "quarantine"];
+    Promise.allSettled([
+      sb.from("fg_vpn").select("tipo"),
       sb.from("fg_vpn_fallos").select("id", { count: "exact", head: true }).gte("fecha", hace24),
-      sb.from("fg_amenazas").select("id", { count: "exact", head: true }).gte("fecha", hace24).eq("bloqueada", false),
-      sb.from("equipos").select("id", { count: "exact", head: true }).eq("cifrado_estado", "sin_cifrar"),
+      sb.from("fg_amenazas").select("accion").gte("fecha", hace24),
+      sb.from("inv_dispositivos").select("id", { count: "exact", head: true }).eq("estado_registro", "aprobado").eq("cifrado_estado", "sin_cifrar"),
       sb.from("backups_trabajos").select("ultimo_resultado").eq("ignorar", false).eq("habilitado", true),
-    ]).then(([vpn, fallos, amenazas, sincifrar, backups]) => {
-      const vpnSsl = (vpn.data ?? []).filter((v: { tipo: string | null }) => v.tipo?.toLowerCase().includes("ssl")).length;
-      const bJobs = backups.data ?? [];
+    ]).then(([vpnR, fallosR, amenazasR, sincifrarR, backupsR]) => {
+      const vpnData = vpnR.status === "fulfilled" ? (vpnR.value.data ?? []) : [];
+      const vpnSsl = vpnData.filter((v: { tipo: string | null }) => v.tipo?.toLowerCase().includes("ssl")).length;
+      const amenazasData = amenazasR.status === "fulfilled" ? (amenazasR.value.data ?? []) : [];
+      const amenazas24h = amenazasData.filter((a: { accion: string | null }) => !BLOQUEADO.includes((a.accion ?? "").toLowerCase())).length;
+      const bJobs = backupsR.status === "fulfilled" ? (backupsR.value.data ?? []) : [];
       setSeg({
         vpn_ssl: vpnSsl,
-        vpn_fallos_24h: fallos.count ?? 0,
-        amenazas_24h: amenazas.count ?? 0,
-        sin_cifrar: sincifrar.count ?? 0,
+        vpn_fallos_24h: fallosR.status === "fulfilled" ? (fallosR.value.count ?? 0) : 0,
+        amenazas_24h: amenazas24h,
+        sin_cifrar: sincifrarR.status === "fulfilled" ? (sincifrarR.value.count ?? 0) : 0,
         backups_fallidos: bJobs.filter((b: { ultimo_resultado: string | null }) => b.ultimo_resultado === "Failed").length,
         backups_ok: bJobs.filter((b: { ultimo_resultado: string | null }) => b.ultimo_resultado === "Success").length,
         backups_total: bJobs.length,
