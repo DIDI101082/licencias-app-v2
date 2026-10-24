@@ -18,6 +18,16 @@ type Datos = {
   vencimientos?: { descripcion: string; fecha: string; enlace: string }[];
 };
 
+type PantallazoSeg = {
+  vpn_ssl: number;
+  vpn_fallos_24h: number;
+  amenazas_24h: number;
+  sin_cifrar: number;
+  backups_fallidos: number;
+  backups_ok: number;
+  backups_total: number;
+};
+
 const SEV: [string, string, string][] = [["critica", "críticas", "bg-red-600 text-white"], ["alta", "altas", "bg-orange-500/15 text-orange-700"], ["media", "medias", "bg-amber-500/15 text-amber-700"], ["info", "informativas", "bg-line/[0.05] text-ink/60"]];
 const SEV_PILL: Record<string, [string, string]> = { critica: ["Crítica", "bg-red-600 text-white"], alta: ["Alta", "bg-orange-500/15 text-orange-700"], media: ["Media", "bg-amber-500/15 text-amber-700"], info: ["Info", "bg-line/[0.05] text-ink/60"] };
 
@@ -31,6 +41,7 @@ export default function Inicio() {
   const [ints, setInts] = useState<Integracion[] | null>(null);
   const [kpis, setKpis] = useState<Kpi[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [seg, setSeg] = useState<PantallazoSeg | null>(null);
 
   useEffect(() => {
     const sb = createClient();
@@ -40,6 +51,29 @@ export default function Inicio() {
     });
     sb.rpc("integraciones_estado").then(({ data }) => setInts((data as Integracion[]) ?? []));
     calcularIndicadores(sb).then(setKpis);
+
+    // Pantallazo de seguridad: FortiGate + ESET + Veeam
+    const ahora = Date.now();
+    const hace24 = new Date(ahora - 86400000).toISOString();
+    Promise.all([
+      sb.from("fg_vpn").select("tipo", { count: "exact", head: false }),
+      sb.from("fg_vpn_fallos").select("id", { count: "exact", head: true }).gte("fecha", hace24),
+      sb.from("fg_amenazas").select("id", { count: "exact", head: true }).gte("fecha", hace24).eq("bloqueada", false),
+      sb.from("equipos").select("id", { count: "exact", head: true }).eq("cifrado_estado", "sin_cifrar"),
+      sb.from("backups_trabajos").select("ultimo_resultado").eq("ignorar", false).eq("habilitado", true),
+    ]).then(([vpn, fallos, amenazas, sincifrar, backups]) => {
+      const vpnSsl = (vpn.data ?? []).filter((v: { tipo: string | null }) => v.tipo?.toLowerCase().includes("ssl")).length;
+      const bJobs = backups.data ?? [];
+      setSeg({
+        vpn_ssl: vpnSsl,
+        vpn_fallos_24h: fallos.count ?? 0,
+        amenazas_24h: amenazas.count ?? 0,
+        sin_cifrar: sincifrar.count ?? 0,
+        backups_fallidos: bJobs.filter((b: { ultimo_resultado: string | null }) => b.ultimo_resultado === "Failed").length,
+        backups_ok: bJobs.filter((b: { ultimo_resultado: string | null }) => b.ultimo_resultado === "Success").length,
+        backups_total: bJobs.length,
+      });
+    });
   }, []);
 
   const hora = Number(new Date().toLocaleString("es-AR", { hour: "numeric", hour12: false, timeZone: "America/Argentina/Buenos_Aires" }));
@@ -95,6 +129,40 @@ export default function Inicio() {
           <div className="text-xs text-ink/50">{ints ? (configuradas.length - bien ? `${configuradas.length - bien} con demora o sin reportar` : "Todas al día") : "Cargando…"}</div>
           {ints && configuradas.length > 0 && <Medidor v={(100 * bien) / configuradas.length} color={bien === configuradas.length ? "bg-emerald-500" : "bg-amber-500"} />}
         </Link>
+      </div>
+
+      {/* Pantallazo de seguridad */}
+      <div>
+        <h2 className="font-display text-base text-ink mb-3">Seguridad en tiempo real</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+          <Link href="/red/fortigate?vista=vpn" className="card p-4 hover:border-brand-300 transition-colors">
+            <div className="text-xs text-ink/50 font-medium">VPN SSL conectados</div>
+            <div className={`font-display text-3xl mt-1 tabular-nums ${seg?.vpn_ssl ? "text-emerald-600" : "text-ink"}`}>{seg == null ? "—" : seg.vpn_ssl}</div>
+            <div className="text-xs text-ink/40 mt-1">ahora mismo</div>
+          </Link>
+          <Link href="/red/fortigate?vista=vpn" className="card p-4 hover:border-brand-300 transition-colors">
+            <div className="text-xs text-ink/50 font-medium">Intentos fallidos VPN</div>
+            <div className={`font-display text-3xl mt-1 tabular-nums ${seg && seg.vpn_fallos_24h >= 10 ? "text-amber-600" : "text-ink"}`}>{seg == null ? "—" : seg.vpn_fallos_24h}</div>
+            <div className="text-xs text-ink/40 mt-1">últimas 24 h</div>
+          </Link>
+          <Link href="/red/fortigate?vista=amenazas" className="card p-4 hover:border-brand-300 transition-colors">
+            <div className="text-xs text-ink/50 font-medium">Amenazas no bloqueadas</div>
+            <div className={`font-display text-3xl mt-1 tabular-nums ${seg?.amenazas_24h ? "text-red-600" : "text-ink"}`}>{seg == null ? "—" : seg.amenazas_24h}</div>
+            <div className="text-xs text-ink/40 mt-1">últimas 24 h</div>
+          </Link>
+          <Link href="/endpoints/cifrado" className="card p-4 hover:border-brand-300 transition-colors">
+            <div className="text-xs text-ink/50 font-medium">Discos sin cifrar</div>
+            <div className={`font-display text-3xl mt-1 tabular-nums ${seg?.sin_cifrar ? "text-red-600" : "text-ink"}`}>{seg == null ? "—" : seg.sin_cifrar}</div>
+            <div className="text-xs text-ink/40 mt-1">equipos ESET</div>
+          </Link>
+          <Link href="/infraestructura/backups" className="card p-4 hover:border-brand-300 transition-colors">
+            <div className="text-xs text-ink/50 font-medium">Backups Veeam</div>
+            <div className={`font-display text-3xl mt-1 tabular-nums ${seg?.backups_fallidos ? "text-red-600" : "text-emerald-600"}`}>
+              {seg == null ? "—" : seg.backups_fallidos ? `${seg.backups_fallidos} fallido${seg.backups_fallidos > 1 ? "s" : ""}` : `${seg.backups_ok}/${seg.backups_total}`}
+            </div>
+            <div className="text-xs text-ink/40 mt-1">{seg?.backups_fallidos ? "requiere atención" : "todos exitosos"}</div>
+          </Link>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-[1.5fr_1fr] gap-4 items-start">
