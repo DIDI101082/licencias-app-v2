@@ -38,6 +38,7 @@ type Sdwan = { equipo: string; chequeo: string; enlace: string; estado: string |
 type Vista = "resumen" | "configuracion" | "cambios" | "vpn" | "accesos" | "amenazas" | "licencias" | "sdwan";
 type Acceso = { id: number; equipo: string; fecha: string; tipo: "inicio" | "fallo" | "cierre"; usuario: string; ip: string; via: string | null; motivo: string | null };
 type Exclusion = { id: number; usuario: string; ip: string; motivo: string | null; creado_por_nombre: string | null; creado: string };
+type ConexionHistorial = { equipo: string; usuario: string; ip: string | null; tipo: string | null; fecha_txt: string; fecha_date: string; fuera_horario: boolean };
 const VISTAS: [Vista, string][] = [
   ["resumen", "Resumen"], ["configuracion", "Configuración"], ["cambios", "Cambios"], ["vpn", "VPN"], ["accesos", "Inicios de sesión"],
   ["amenazas", "Amenazas"], ["licencias", "Licencias y certificados"], ["sdwan", "Enlaces y consumo"],
@@ -122,6 +123,17 @@ function Contenido() {
   const [verPoliticas, setVerPoliticas] = useState(false);
   const [fv, setFv] = useState({ texto: "", tipo: "", pais: "", soloFuera: false });
 
+  // Historial VPN
+  const [pestanaVpn, setPestanaVpn] = useState<"activos" | "historial">("activos");
+  const [calYear, setCalYear] = useState(() => new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
+  const [fechaSel, setFechaSel] = useState<string | null>(null);
+  const [equipoFiltroVpn, setEquipoFiltroVpn] = useState("");
+  const [diasActividad, setDiasActividad] = useState<Map<string, { total: number; fueraCnt: number }>>(new Map());
+  const [conexionesDia, setConexionesDia] = useState<ConexionHistorial[]>([]);
+  const [cargandoCal, setCargandoCal] = useState(false);
+  const [cargandoDia, setCargandoDia] = useState(false);
+
   const cargar = useCallback(async () => {
     const sb = createClient();
     const desde = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -167,6 +179,62 @@ function Contenido() {
     setCargando(false);
   }, []);
   useEffect(() => { cargar(); const t = setInterval(cargar, 60000); return () => clearInterval(t); }, [cargar]);
+
+  const cargarMesVpn = useCallback(async (year: number, month: number, equipo: string) => {
+    setCargandoCal(true);
+    const sb = createClient();
+    const desde = new Date(year, month, 1);
+    const hasta = new Date(year, month + 1, 0);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const { data } = await sb.rpc("fg_vpn_dias_con_actividad", {
+      p_desde: fmt(desde), p_hasta: fmt(hasta), p_equipo: equipo || null,
+    });
+    const map = new Map<string, { total: number; fueraCnt: number }>();
+    for (const row of (data ?? []) as { fecha: string; total: number; fuera_horario: number }[]) {
+      map.set(row.fecha, { total: row.total, fueraCnt: row.fuera_horario });
+    }
+    setDiasActividad(map);
+    setCargandoCal(false);
+  }, []);
+
+  const cargarDiaVpn = useCallback(async (f: string, equipo: string) => {
+    setCargandoDia(true);
+    const sb = createClient();
+    const { data } = await sb.rpc("fg_vpn_historial", {
+      p_desde: f, p_hasta: f, p_equipo: equipo || null,
+    });
+    setConexionesDia((data ?? []) as ConexionHistorial[]);
+    setCargandoDia(false);
+  }, []);
+
+  useEffect(() => {
+    if (pestanaVpn === "historial") {
+      cargarMesVpn(calYear, calMonth, equipoFiltroVpn);
+      setFechaSel(null);
+      setConexionesDia([]);
+    }
+  }, [pestanaVpn, calYear, calMonth, equipoFiltroVpn, cargarMesVpn]);
+
+  const prevMes = () => {
+    if (calMonth === 0) { setCalYear((y) => y - 1); setCalMonth(11); }
+    else setCalMonth((m) => m - 1);
+  };
+  const nextMes = () => {
+    if (calMonth === 11) { setCalYear((y) => y + 1); setCalMonth(0); }
+    else setCalMonth((m) => m + 1);
+  };
+
+  const exportarCsvVpn = () => {
+    if (!conexionesDia.length || !fechaSel) return;
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const filas = conexionesDia.map((c) =>
+      [c.fecha_txt, c.usuario, c.equipo, c.tipo ?? "", c.ip ?? "", c.fuera_horario ? "Sí" : "No"].map(esc).join(",")
+    );
+    const csv = "﻿" + ["Fecha,Usuario,Equipo,Tipo,IP,Fuera de horario", ...filas].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const a = document.createElement("a"); a.href = url; a.download = `vpn_${fechaSel}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const q = texto.trim().toLowerCase();
   const coincide = (...v: (string | null | undefined)[]) => !q || v.some((x) => x?.toLowerCase().includes(q));
@@ -541,98 +609,222 @@ function Contenido() {
       {/* VPN */}
       {vista === "vpn" && (
         <div className="space-y-4">
-          <div className="card overflow-x-auto">
-            <div className="px-4 pt-4 flex flex-wrap items-end justify-between gap-3">
-              <div className="font-medium text-ink">
-                Conectados ahora{" "}
-                <span className="text-sm font-normal text-ink/50">
-                  {vpnFiltrada.length === vpnEquipo.length ? `(${vpnEquipo.length})` : `(${vpnFiltrada.length} de ${vpnEquipo.length})`}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <input type="search" className="input w-52" placeholder="Usuario, IP, ciudad, proveedor…" aria-label="Filtrar conectados"
-                  value={fv.texto} onChange={(e) => setFv({ ...fv, texto: e.target.value })} />
-                <select className="input w-auto" aria-label="Tipo de VPN" value={fv.tipo} onChange={(e) => setFv({ ...fv, tipo: e.target.value })}>
-                  <option value="">SSL e IPsec</option>
-                  {tiposVpn.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <select className="input w-auto" aria-label="País" value={fv.pais} onChange={(e) => setFv({ ...fv, pais: e.target.value })}>
-                  <option value="">Todos los países</option>
-                  {paisesVpn.map(([c, n]) => <option key={c} value={c}>{bandera(c)} {n}</option>)}
-                  {vpnEquipo.some((v) => !v.pais_codigo) && <option value="?">Sin ubicar todavía</option>}
-                </select>
-                <label className="flex items-center gap-1.5 text-sm text-ink/70">
-                  <input type="checkbox" checked={fv.soloFuera} onChange={(e) => setFv({ ...fv, soloFuera: e.target.checked })} />
-                  Solo desde países no permitidos
-                </label>
-                {(fv.texto || fv.tipo || fv.pais || fv.soloFuera) && (
-                  <button type="button" className="text-sm text-brand-600 hover:underline" onClick={() => setFv({ texto: "", tipo: "", pais: "", soloFuera: false })}>Limpiar</button>
-                )}
-              </div>
-            </div>
-            <table className="data w-full">
-              <thead><tr><th>Usuario</th><th>Tipo</th><th>Desde</th><th>IP pública</th><th>IP del túnel</th><th>Conectado</th><th>Equipo</th></tr></thead>
-              <tbody>
-                {!vpnEquipo.length && vacio(7, "No hay nadie conectado por VPN.")}
-                {vpnEquipo.length > 0 && !vpnFiltrada.length && vacio(7, "Nadie coincide con el filtro.")}
-                {vpnFiltrada.map((v) => (
-                  <tr key={`${v.equipo}:${v.tipo}:${v.usuario}:${v.ip_publica}`}>
-                    <td className="text-sm font-medium">{v.usuario}</td>
-                    <td className="text-sm">{v.tipo}</td>
-                    <td className="text-sm">
-                      {v.pais_codigo ? <span className={paisOk(v.pais_codigo) ? "" : "pill bg-red-600 text-white"}>{bandera(v.pais_codigo)} {v.pais ?? v.pais_codigo}</span> : "—"}
-                      {v.ciudad && <span className="text-ink/50"> · {v.ciudad}</span>}
-                      {v.isp && <div className="text-xs text-ink/45">{v.isp}</div>}
-                    </td>
-                    <td className="text-sm font-mono">{v.ip_publica || "—"}</td>
-                    <td className="text-sm font-mono text-ink/60">{v.ip_tunel ?? "—"}</td>
-                    <td className="text-sm text-ink/70 whitespace-nowrap">{v.desde ? hace(v.desde, ahora) : "—"}</td>
-                    <td className="text-sm">{v.equipo}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Sub-pestañas */}
+          <div role="tablist" aria-label="Sección VPN" className="flex gap-1 rounded-xl bg-line/[0.05] p-1 self-start w-fit">
+            <button role="tab" aria-selected={pestanaVpn === "activos"} onClick={() => setPestanaVpn("activos")}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${pestanaVpn === "activos" ? "bg-surface text-ink shadow-sm" : "text-ink/55 hover:text-ink"}`}>
+              Conectados ahora
+            </button>
+            <button role="tab" aria-selected={pestanaVpn === "historial"} onClick={() => setPestanaVpn("historial")}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${pestanaVpn === "historial" ? "bg-surface text-ink shadow-sm" : "text-ink/55 hover:text-ink"}`}>
+              Historial
+            </button>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-4">
-            <div className="card overflow-x-auto">
-              <div className="px-4 pt-4 font-medium text-ink">Intentos fallidos por IP (7 días)</div>
-              <table className="data w-full">
-                <thead><tr><th>IP</th><th>Intentos</th><th>Usuarios probados</th><th>Último</th></tr></thead>
-                <tbody>
-                  {!topIp.length && vacio(4, "Sin intentos fallidos.")}
-                  {topIp.filter(([ip, x]) => coincide(ip, ...x.usuarios)).map(([ip, x]) => (
-                    <tr key={ip}>
-                      <td className="text-sm font-mono">{ip}</td>
-                      <td className={`text-sm tabular-nums ${x.n >= (estado?.umbral_fallos ?? 10) ? "text-red-600 font-medium" : ""}`}>{x.n}</td>
-                      <td className="text-xs text-ink/70 max-w-xs">{[...x.usuarios].slice(0, 8).join(", ") || "—"}{x.usuarios.size > 8 ? ` y ${x.usuarios.size - 8} más` : ""}</td>
-                      <td className="text-sm text-ink/70 whitespace-nowrap">{hace(x.ultima, ahora)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="card overflow-x-auto">
-              <div className="px-4 pt-4 font-medium text-ink">Intentos fallidos por usuario (7 días)</div>
-              <table className="data w-full">
-                <thead><tr><th>Usuario</th><th>Intentos</th><th>Desde</th></tr></thead>
-                <tbody>
-                  {!topUsuario.length && vacio(3, "Sin intentos fallidos.")}
-                  {topUsuario.filter(([u]) => coincide(u)).map(([u, x]) => (
-                    <tr key={u}>
-                      <td className="text-sm font-medium">{u}</td>
-                      <td className={`text-sm tabular-nums ${x.n >= (estado?.umbral_fallos ?? 10) ? "text-red-600 font-medium" : ""}`}>{x.n}</td>
-                      <td className="text-sm text-ink/70">{x.ips.size} {x.ips.size === 1 ? "IP" : "IP distintas"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <p className="text-xs text-ink/50">
-            Muchos intentos desde una misma IP con usuarios distintos es un ataque de diccionario: conviene bloquearla (o limitar la VPN por país con
-            una política de geolocalización) y exigir doble factor en la VPN.
-          </p>
+          {/* Conectados ahora */}
+          {pestanaVpn === "activos" && (
+            <>
+              <div className="card overflow-x-auto">
+                <div className="px-4 pt-4 flex flex-wrap items-end justify-between gap-3">
+                  <div className="font-medium text-ink">
+                    Conectados ahora{" "}
+                    <span className="text-sm font-normal text-ink/50">
+                      {vpnFiltrada.length === vpnEquipo.length ? `(${vpnEquipo.length})` : `(${vpnFiltrada.length} de ${vpnEquipo.length})`}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input type="search" className="input w-52" placeholder="Usuario, IP, ciudad, proveedor…" aria-label="Filtrar conectados"
+                      value={fv.texto} onChange={(e) => setFv({ ...fv, texto: e.target.value })} />
+                    <select className="input w-auto" aria-label="Tipo de VPN" value={fv.tipo} onChange={(e) => setFv({ ...fv, tipo: e.target.value })}>
+                      <option value="">SSL e IPsec</option>
+                      {tiposVpn.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <select className="input w-auto" aria-label="País" value={fv.pais} onChange={(e) => setFv({ ...fv, pais: e.target.value })}>
+                      <option value="">Todos los países</option>
+                      {paisesVpn.map(([c, n]) => <option key={c} value={c}>{bandera(c)} {n}</option>)}
+                      {vpnEquipo.some((v) => !v.pais_codigo) && <option value="?">Sin ubicar todavía</option>}
+                    </select>
+                    <label className="flex items-center gap-1.5 text-sm text-ink/70">
+                      <input type="checkbox" checked={fv.soloFuera} onChange={(e) => setFv({ ...fv, soloFuera: e.target.checked })} />
+                      Solo desde países no permitidos
+                    </label>
+                    {(fv.texto || fv.tipo || fv.pais || fv.soloFuera) && (
+                      <button type="button" className="text-sm text-brand-600 hover:underline" onClick={() => setFv({ texto: "", tipo: "", pais: "", soloFuera: false })}>Limpiar</button>
+                    )}
+                  </div>
+                </div>
+                <table className="data w-full">
+                  <thead><tr><th>Usuario</th><th>Tipo</th><th>Desde</th><th>IP pública</th><th>IP del túnel</th><th>Conectado</th><th>Equipo</th></tr></thead>
+                  <tbody>
+                    {!vpnEquipo.length && vacio(7, "No hay nadie conectado por VPN.")}
+                    {vpnEquipo.length > 0 && !vpnFiltrada.length && vacio(7, "Nadie coincide con el filtro.")}
+                    {vpnFiltrada.map((v) => (
+                      <tr key={`${v.equipo}:${v.tipo}:${v.usuario}:${v.ip_publica}`}>
+                        <td className="text-sm font-medium">{v.usuario}</td>
+                        <td className="text-sm">{v.tipo}</td>
+                        <td className="text-sm">
+                          {v.pais_codigo ? <span className={paisOk(v.pais_codigo) ? "" : "pill bg-red-600 text-white"}>{bandera(v.pais_codigo)} {v.pais ?? v.pais_codigo}</span> : "—"}
+                          {v.ciudad && <span className="text-ink/50"> · {v.ciudad}</span>}
+                          {v.isp && <div className="text-xs text-ink/45">{v.isp}</div>}
+                        </td>
+                        <td className="text-sm font-mono">{v.ip_publica || "—"}</td>
+                        <td className="text-sm font-mono text-ink/60">{v.ip_tunel ?? "—"}</td>
+                        <td className="text-sm text-ink/70 whitespace-nowrap">{v.desde ? hace(v.desde, ahora) : "—"}</td>
+                        <td className="text-sm">{v.equipo}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="grid lg:grid-cols-2 gap-4">
+                <div className="card overflow-x-auto">
+                  <div className="px-4 pt-4 font-medium text-ink">Intentos fallidos por IP (7 días)</div>
+                  <table className="data w-full">
+                    <thead><tr><th>IP</th><th>Intentos</th><th>Usuarios probados</th><th>Último</th></tr></thead>
+                    <tbody>
+                      {!topIp.length && vacio(4, "Sin intentos fallidos.")}
+                      {topIp.filter(([ip, x]) => coincide(ip, ...x.usuarios)).map(([ip, x]) => (
+                        <tr key={ip}>
+                          <td className="text-sm font-mono">{ip}</td>
+                          <td className={`text-sm tabular-nums ${x.n >= (estado?.umbral_fallos ?? 10) ? "text-red-600 font-medium" : ""}`}>{x.n}</td>
+                          <td className="text-xs text-ink/70 max-w-xs">{[...x.usuarios].slice(0, 8).join(", ") || "—"}{x.usuarios.size > 8 ? ` y ${x.usuarios.size - 8} más` : ""}</td>
+                          <td className="text-sm text-ink/70 whitespace-nowrap">{hace(x.ultima, ahora)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="card overflow-x-auto">
+                  <div className="px-4 pt-4 font-medium text-ink">Intentos fallidos por usuario (7 días)</div>
+                  <table className="data w-full">
+                    <thead><tr><th>Usuario</th><th>Intentos</th><th>Desde</th></tr></thead>
+                    <tbody>
+                      {!topUsuario.length && vacio(3, "Sin intentos fallidos.")}
+                      {topUsuario.filter(([u]) => coincide(u)).map(([u, x]) => (
+                        <tr key={u}>
+                          <td className="text-sm font-medium">{u}</td>
+                          <td className={`text-sm tabular-nums ${x.n >= (estado?.umbral_fallos ?? 10) ? "text-red-600 font-medium" : ""}`}>{x.n}</td>
+                          <td className="text-sm text-ink/70">{x.ips.size} {x.ips.size === 1 ? "IP" : "IP distintas"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <p className="text-xs text-ink/50">
+                Muchos intentos desde una misma IP con usuarios distintos es un ataque de diccionario: conviene bloquearla (o limitar la VPN por país con
+                una política de geolocalización) y exigir doble factor en la VPN.
+              </p>
+            </>
+          )}
+
+          {/* Historial VPN */}
+          {pestanaVpn === "historial" && (() => {
+            const primerDia = new Date(calYear, calMonth, 1).getDay();
+            const diasEnMes = new Date(calYear, calMonth + 1, 0).getDate();
+            const offset = (primerDia + 6) % 7; // 0=Lun … 6=Dom
+            const celdas = offset + diasEnMes;
+            const filas = Math.ceil(celdas / 7);
+            const mesNombre = new Date(calYear, calMonth, 1).toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+            return (
+              <div className="space-y-4">
+                {/* Calendario */}
+                <div className="card p-4 space-y-4">
+                  {/* Controles de navegación */}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <button onClick={prevMes} className="w-7 h-7 rounded-md bg-line/[0.07] hover:bg-line/[0.12] flex items-center justify-center text-ink/60 hover:text-ink transition-colors" aria-label="Mes anterior">‹</button>
+                      <span className="text-sm font-medium w-40 text-center capitalize">{mesNombre}</span>
+                      <button onClick={nextMes} className="w-7 h-7 rounded-md bg-line/[0.07] hover:bg-line/[0.12] flex items-center justify-center text-ink/60 hover:text-ink transition-colors" aria-label="Mes siguiente">›</button>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <select className="input w-auto" aria-label="Equipo" value={equipoFiltroVpn} onChange={(e) => setEquipoFiltroVpn(e.target.value)}>
+                        <option value="">Todos los equipos</option>
+                        {equipos.map((eq) => <option key={eq.nombre} value={eq.nombre}>{eq.nombre}</option>)}
+                      </select>
+                      <div className="flex items-center gap-3 text-xs text-ink/50">
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />Normal</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />Fuera de horario</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Grid del calendario */}
+                  <div className="select-none">
+                    {/* Cabeceras días */}
+                    <div className="grid grid-cols-7 mb-1">
+                      {["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"].map((d) => (
+                        <div key={d} className="text-center text-xs font-medium text-ink/40 py-1">{d}</div>
+                      ))}
+                    </div>
+                    {/* Celdas */}
+                    <div className="grid grid-cols-7 gap-px bg-line/[0.06] rounded-lg overflow-hidden">
+                      {Array.from({ length: filas * 7 }, (_, i) => {
+                        const dNum = i - offset + 1;
+                        if (dNum < 1 || dNum > diasEnMes) return <div key={i} className="bg-surface/50 h-12" />;
+                        const fStr = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(dNum).padStart(2, "0")}`;
+                        const act = diasActividad.get(fStr);
+                        const isSel = fechaSel === fStr;
+                        const isHoy = fStr === new Date().toISOString().slice(0, 10);
+                        return (
+                          <button key={i} onClick={() => {
+                            setFechaSel(fStr);
+                            cargarDiaVpn(fStr, equipoFiltroVpn);
+                          }}
+                            className={`relative bg-surface h-12 flex flex-col items-center justify-center gap-0.5 transition-colors hover:bg-line/[0.06] ${isSel ? "ring-2 ring-inset ring-brand-500" : ""}`}>
+                            <span className={`text-sm tabular-nums leading-none ${isHoy ? "font-semibold text-brand-600" : act ? "text-ink" : "text-ink/35"}`}>{dNum}</span>
+                            {act && (
+                              <div className="flex gap-0.5">
+                                {act.total - act.fueraCnt > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                                {act.fueraCnt > 0 && <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {cargandoCal && <p className="text-center text-xs text-ink/40 mt-2">Cargando…</p>}
+                  </div>
+                </div>
+
+                {/* Tabla del día seleccionado */}
+                {fechaSel && (
+                  <div className="card overflow-x-auto">
+                    <div className="px-4 pt-4 flex flex-wrap items-center justify-between gap-3">
+                      <div className="font-medium text-ink">
+                        <span className="capitalize">{new Date(fechaSel + "T12:00:00").toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</span>
+                        {!cargandoDia && <span className="text-sm font-normal text-ink/50 ml-2">({conexionesDia.length} conexiones)</span>}
+                      </div>
+                      {conexionesDia.length > 0 && (
+                        <button onClick={exportarCsvVpn}
+                          className="px-3 py-1.5 rounded-lg text-sm font-medium bg-line/[0.07] hover:bg-line/[0.12] text-ink/70 hover:text-ink transition-colors">
+                          Exportar CSV
+                        </button>
+                      )}
+                    </div>
+                    <table className="data w-full">
+                      <thead><tr><th>Usuario</th><th>Equipo</th><th>Tipo</th><th>IP</th><th>Hora</th><th>Horario</th></tr></thead>
+                      <tbody>
+                        {cargandoDia && <tr><td colSpan={6} className="text-center text-ink/40 py-8">Cargando…</td></tr>}
+                        {!cargandoDia && !conexionesDia.length && <tr><td colSpan={6} className="text-center text-ink/40 py-8">Sin conexiones ese día.</td></tr>}
+                        {!cargandoDia && conexionesDia.map((c, i) => (
+                          <tr key={i}>
+                            <td className="text-sm font-medium">{c.usuario}</td>
+                            <td className="text-sm">{c.equipo}</td>
+                            <td className="text-sm">{c.tipo ?? "—"}</td>
+                            <td className="text-sm font-mono">{c.ip ?? "—"}</td>
+                            <td className="text-sm tabular-nums">{c.fecha_txt.slice(11, 19)}</td>
+                            <td><span className={`pill text-xs ${c.fuera_horario ? "bg-orange-500/15 text-orange-700" : "bg-emerald-500/15 text-emerald-700"}`}>{c.fuera_horario ? "Fuera" : "Normal"}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
