@@ -252,6 +252,9 @@ function Contenido() {
   const reporteViejo = estado?.ultimo_reporte ? ahora - Date.parse(estado.ultimo_reporte) > (estado.minutos_sin_reporte ?? 20) * 60000 : false;
   const paisOk = (c: string | null) => !c || (estado?.paises_vpn ?? ["AR"]).includes(c.toUpperCase());
 
+  // Filtro de "Conectados ahora" (necesario antes de tarjetas)
+  const vpnEquipo = vpn.filter((v) => deEquipo(v.equipo));
+
   const tarjetas = [
     { t: "FortiGate que responden", n: equipos.length ? `${responden} de ${equipos.length}` : "—", c: responden < equipos.length ? "text-red-600" : "text-ink", ir: "" },
     { t: "Vulnerabilidades explotadas (KEV)", n: kev, c: kev ? "text-red-600" : "text-ink", ir: "" },
@@ -285,7 +288,6 @@ function Contenido() {
   }, [fallos, filtroEquipo]);
 
   // Filtro de "Conectados ahora"
-  const vpnEquipo = vpn.filter((v) => deEquipo(v.equipo));
   const tiposVpn = [...new Set(vpnEquipo.map((v) => v.tipo))].sort();
   const paisesVpn = [...new Map(vpnEquipo.filter((v) => v.pais_codigo).map((v) => [v.pais_codigo!.toUpperCase(), v.pais ?? v.pais_codigo!])).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
