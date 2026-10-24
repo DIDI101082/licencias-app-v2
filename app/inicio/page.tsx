@@ -97,7 +97,7 @@ export default function Inicio() {
       sb.from("virt_hosts_vista").select("estado"),
       sb.from("virt_vms").select("estado"),
       sb.from("virt_hallazgos").select("severidad").neq("ambito", "storage").neq("ambito", "pool"),
-      sb.from("srv_servidores").select("ultimo_parche, reinicio_pendiente").eq("activo", true),
+      sb.from("srv_servidores").select("id, inv_dispositivos(ultimo_parche, reinicio_pendiente)").eq("activo", true),
     ]).then(([hostsR, vmsR, hallR, srvR]) => {
       const hosts = hostsR.status === "fulfilled" ? (hostsR.value.data ?? []) : [];
       const vms = vmsR.status === "fulfilled" ? (vmsR.value.data ?? []) : [];
@@ -111,11 +111,12 @@ export default function Inicio() {
         vms_encendidas: vms.filter((v: { estado: string | null }) => v.estado === "PoweredOn").length,
         hallazgos_graves: hall.filter((h: { severidad: string | null }) => h.severidad === "critica" || h.severidad === "alta").length,
         srvs_total: srvs.length,
-        srvs_sin_parche: srvs.filter((s: { ultimo_parche: string | null }) => {
-          if (!s.ultimo_parche) return true;
-          return (ahoraMs - Date.parse(s.ultimo_parche)) / 86400000 > DIAS_SIN_PARCHE;
+        srvs_sin_parche: srvs.filter((s: any) => {
+          const up = s.inv_dispositivos?.ultimo_parche as string | null | undefined;
+          if (!up) return true;
+          return (ahoraMs - Date.parse(up)) / 86400000 > DIAS_SIN_PARCHE;
         }).length,
-        srvs_reinicio: srvs.filter((s: { reinicio_pendiente: boolean | null }) => s.reinicio_pendiente === true).length,
+        srvs_reinicio: srvs.filter((s: any) => s.inv_dispositivos?.reinicio_pendiente === true).length,
       });
     });
   }, []);
