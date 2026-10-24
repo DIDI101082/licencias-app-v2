@@ -28,6 +28,17 @@ type PantallazoSeg = {
   backups_total: number;
 };
 
+type PantallazoInfra = {
+  hosts_total: number;
+  hosts_ok: number;
+  vms_total: number;
+  vms_encendidas: number;
+  hallazgos_graves: number;
+  srvs_total: number;
+  srvs_sin_parche: number;
+  srvs_reinicio: number;
+};
+
 const SEV: [string, string, string][] = [["critica", "críticas", "bg-red-600 text-white"], ["alta", "altas", "bg-orange-500/15 text-orange-700"], ["media", "medias", "bg-amber-500/15 text-amber-700"], ["info", "informativas", "bg-line/[0.05] text-ink/60"]];
 const SEV_PILL: Record<string, [string, string]> = { critica: ["Crítica", "bg-red-600 text-white"], alta: ["Alta", "bg-orange-500/15 text-orange-700"], media: ["Media", "bg-amber-500/15 text-amber-700"], info: ["Info", "bg-line/[0.05] text-ink/60"] };
 
@@ -42,6 +53,7 @@ export default function Inicio() {
   const [kpis, setKpis] = useState<Kpi[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [seg, setSeg] = useState<PantallazoSeg | null>(null);
+  const [infra, setInfra] = useState<PantallazoInfra | null>(null);
 
   useEffect(() => {
     const sb = createClient();
@@ -78,6 +90,34 @@ export default function Inicio() {
         backups_total: bJobs.length,
       });
     });
+
+    // Pantallazo de infraestructura: Virtualización + Servidores
+    const DIAS_SIN_PARCHE = 35;
+    Promise.allSettled([
+      sb.from("virt_hosts_vista").select("estado"),
+      sb.from("virt_vms").select("estado"),
+      sb.from("virt_hallazgos").select("severidad").neq("ambito", "storage").neq("ambito", "pool"),
+      sb.from("srv_servidores").select("ultimo_parche, reinicio_pendiente").eq("activo", true),
+    ]).then(([hostsR, vmsR, hallR, srvR]) => {
+      const hosts = hostsR.status === "fulfilled" ? (hostsR.value.data ?? []) : [];
+      const vms = vmsR.status === "fulfilled" ? (vmsR.value.data ?? []) : [];
+      const hall = hallR.status === "fulfilled" ? (hallR.value.data ?? []) : [];
+      const srvs = srvR.status === "fulfilled" ? (srvR.value.data ?? []) : [];
+      const ahoraMs = Date.now();
+      setInfra({
+        hosts_total: hosts.length,
+        hosts_ok: hosts.filter((h: { estado: string | null }) => h.estado === "Connected").length,
+        vms_total: vms.length,
+        vms_encendidas: vms.filter((v: { estado: string | null }) => v.estado === "PoweredOn").length,
+        hallazgos_graves: hall.filter((h: { severidad: string | null }) => h.severidad === "critica" || h.severidad === "alta").length,
+        srvs_total: srvs.length,
+        srvs_sin_parche: srvs.filter((s: { ultimo_parche: string | null }) => {
+          if (!s.ultimo_parche) return true;
+          return (ahoraMs - Date.parse(s.ultimo_parche)) / 86400000 > DIAS_SIN_PARCHE;
+        }).length,
+        srvs_reinicio: srvs.filter((s: { reinicio_pendiente: boolean | null }) => s.reinicio_pendiente === true).length,
+      });
+    });
   }, []);
 
   const hora = Number(new Date().toLocaleString("es-AR", { hour: "numeric", hour12: false, timeZone: "America/Argentina/Buenos_Aires" }));
@@ -92,8 +132,6 @@ export default function Inicio() {
   const ssPct = ss?.maximo ? Math.round((100 * ss.actual) / ss.maximo) : null;
   const configuradas = (ints ?? []).filter((i) => i.estado !== "sin_configurar");
   const bien = configuradas.filter((i) => i.estado === "ok").length;
-  const maxDia = Math.max(1, ...(d?.por_dia ?? []).map((x) => x.n));
-
   return (
     <div className="space-y-6">
       <div>
@@ -233,21 +271,47 @@ export default function Inicio() {
             )}
           </div>
 
-          {(d?.por_dia ?? []).length > 0 && (
-            <div className="card p-5">
-              <div className="flex items-baseline justify-between gap-3">
-                <h2 className="font-display text-base text-ink">Alertas nuevas por día</h2>
-                <span className="text-xs text-ink/50">últimos 14 días</span>
-              </div>
-              <div className="flex items-end gap-1 h-16 mt-3" role="img" aria-label={`Alertas nuevas por día: máximo ${maxDia}`}>
-                {d!.por_dia!.map((x, i) => (
-                  <div key={x.dia} title={`${new Date(x.dia + "T12:00").toLocaleDateString("es-AR")}: ${x.n}`}
-                    className={`flex-1 rounded-t ${i === d!.por_dia!.length - 1 ? "bg-brand-600" : "bg-brand-100"}`} style={{ height: `${Math.max(3, (100 * x.n) / maxDia)}%` }} />
-                ))}
-              </div>
-              <div className="flex justify-between text-[11px] text-ink/40 mt-1"><span>hace 13 días</span><span>hoy</span></div>
+          <div className="card p-5">
+            <div className="flex items-baseline justify-between gap-3 mb-2">
+              <h2 className="font-display text-base text-ink">Virtualización</h2>
+              <Link href="/servidores/virtualizacion" className="text-sm text-brand-600 hover:underline">Detalle</Link>
             </div>
-          )}
+            {!infra ? <p className="text-sm text-ink/50">Cargando…</p> : infra.vms_total === 0 ? <p className="text-sm text-ink/50">Sin datos de vCenter.</p> : (
+              <ul className="space-y-1.5 text-sm">
+                <li className="flex justify-between">
+                  <span className="text-ink/60">Hosts conectados</span>
+                  <span className={infra.hosts_ok < infra.hosts_total ? "text-red-600 font-medium" : "text-emerald-700"}>{infra.hosts_ok} / {infra.hosts_total}</span>
+                </li>
+                <li className="flex justify-between">
+                  <span className="text-ink/60">VMs encendidas</span>
+                  <span className="tabular-nums">{infra.vms_encendidas} <span className="text-ink/40">/ {infra.vms_total}</span></span>
+                </li>
+                <li className="flex justify-between">
+                  <span className="text-ink/60">Hallazgos críticos/altos</span>
+                  <span className={infra.hallazgos_graves ? "text-red-600 font-medium" : "text-emerald-700"}>{infra.hallazgos_graves || "Ninguno"}</span>
+                </li>
+              </ul>
+            )}
+          </div>
+
+          <div className="card p-5">
+            <div className="flex items-baseline justify-between gap-3 mb-2">
+              <h2 className="font-display text-base text-ink">Servidores · Parches</h2>
+              <Link href="/servidores/parches" className="text-sm text-brand-600 hover:underline">Detalle</Link>
+            </div>
+            {!infra ? <p className="text-sm text-ink/50">Cargando…</p> : infra.srvs_total === 0 ? <p className="text-sm text-ink/50">Sin servidores registrados.</p> : (
+              <ul className="space-y-1.5 text-sm">
+                <li className="flex justify-between">
+                  <span className="text-ink/60">Sin parches (+35 días)</span>
+                  <span className={infra.srvs_sin_parche ? "text-amber-600 font-medium" : "text-emerald-700"}>{infra.srvs_sin_parche ? `${infra.srvs_sin_parche} de ${infra.srvs_total}` : "Al día"}</span>
+                </li>
+                <li className="flex justify-between">
+                  <span className="text-ink/60">Esperan reinicio</span>
+                  <span className={infra.srvs_reinicio ? "text-amber-600 font-medium" : "text-ink/60"}>{infra.srvs_reinicio || "Ninguno"}</span>
+                </li>
+              </ul>
+            )}
+          </div>
         </div>
       </div>
     </div>
