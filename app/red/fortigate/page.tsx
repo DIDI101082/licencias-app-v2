@@ -254,12 +254,13 @@ function Contenido() {
 
   // Filtro de "Conectados ahora" (necesario antes de tarjetas)
   const vpnEquipo = vpn.filter((v) => deEquipo(v.equipo));
+  const vpnSsl = vpnEquipo.filter((v) => v.tipo?.toLowerCase().includes("ssl"));
 
   const tarjetas = [
     { t: "FortiGate que responden", n: equipos.length ? `${responden} de ${equipos.length}` : "—", c: responden < equipos.length ? "text-red-600" : "text-ink", ir: "" },
     { t: "Vulnerabilidades explotadas (KEV)", n: kev, c: kev ? "text-red-600" : "text-ink", ir: "" },
     { t: "Configuración riesgosa (crítica o alta)", n: graves.length, c: graves.length ? "text-red-600" : "text-ink", ir: "vista=configuracion" },
-    { t: "Usuarios conectados por VPN", n: vpnEquipo.length, c: vpnEquipo.length ? "text-emerald-600" : "text-ink", ir: "vista=vpn" },
+    { t: "Usuarios conectados por VPN SSL", n: vpnSsl.length, c: vpnSsl.length ? "text-emerald-600" : "text-ink", ir: "vista=vpn" },
     { t: "Intentos fallidos de VPN (24 h)", n: fallos24.length, c: fallos24.length >= (estado?.umbral_fallos ?? 10) ? "text-amber-700" : "text-ink", ir: "vista=vpn" },
     { t: "Inicios de sesión de administración (24 h)", n: accesosVisibles.filter((x) => x.tipo === "inicio" && Date.parse(x.fecha) > ahora - 86400000).length, c: "text-ink", ir: "vista=accesos" },
     { t: "Amenazas no bloqueadas (24 h)", n: noBloqueadas.length, c: noBloqueadas.length ? "text-red-600" : "text-ink", ir: "vista=amenazas" },
