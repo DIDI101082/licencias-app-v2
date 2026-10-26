@@ -47,13 +47,17 @@ function Medidor({ v, color }: { v: number; color: string }) {
 }
 
 export default function Inicio() {
-  const { perfil } = usePerfil();
+  const { perfil, puedeEditar } = usePerfil();
   const [d, setD] = useState<Datos | null>(null);
   const [ints, setInts] = useState<Integracion[] | null>(null);
   const [kpis, setKpis] = useState<Kpi[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [seg, setSeg] = useState<PantallazoSeg | null>(null);
   const [infra, setInfra] = useState<PantallazoInfra | null>(null);
+  const [confirmarId, setConfirmarId] = useState<number | null>(null);
+  const [notaConfirmar, setNotaConfirmar] = useState("");
+  const [confirmando, setConfirmando] = useState(false);
+  const [avisoConf, setAvisoConf] = useState<string | null>(null);
 
   useEffect(() => {
     const sb = createClient();
@@ -125,6 +129,28 @@ export default function Inicio() {
   const saludo = hora < 12 ? "Buen día" : hora < 20 ? "Buenas tardes" : "Buenas noches";
   const nombre = (perfil?.nombre ?? "").split(/[\s@]/)[0];
   const fecha = new Date().toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Argentina/Buenos_Aires" });
+
+  async function confirmarAlerta() {
+    if (!confirmarId || notaConfirmar.trim().length < 3) return;
+    setConfirmando(true);
+    const { error } = await createClient().rpc("alertas_confirmar", {
+      p_ids: [confirmarId],
+      p_nota: notaConfirmar.trim(),
+      p_quitar: false,
+    });
+    setConfirmando(false);
+    if (error) {
+      setError(error.message);
+    } else {
+      setAvisoConf("Alerta confirmada y cerrada.");
+      setConfirmarId(null);
+      setNotaConfirmar("");
+      // Refrescar datos
+      createClient().rpc("inicio_datos").then(({ data }) => {
+        if (data) setD(data as Datos);
+      });
+    }
+  }
 
   const pt = puntaje(kpis);
   const cumplimiento = pt.pct;
@@ -214,18 +240,50 @@ export default function Inicio() {
             <h2 className="font-display text-base text-ink">Lo urgente hoy</h2>
             <Link href="/auditoria/alertas" className="text-sm text-brand-600 hover:underline">Ver todas las alertas</Link>
           </div>
+          {avisoConf && <div className="mb-2 p-2 rounded-lg bg-emerald-50 text-sm text-emerald-700">{avisoConf}</div>}
           {!d ? <p className="text-sm text-ink/50">Cargando…</p>
             : d.urgentes == null ? <p className="text-sm text-ink/50">El detalle de las alertas se ve con la solapa Logs.</p>
             : !d.urgentes.length ? <p className="text-sm text-emerald-700">No hay alertas abiertas.</p>
             : (
               <ul className="divide-y divide-line/[0.06]">
                 {d.urgentes.map((u) => (
-                  <li key={u.id} className="py-2.5 flex gap-3 items-start">
-                    <span className={`pill shrink-0 w-16 justify-center text-center ${SEV_PILL[u.severidad]?.[1] ?? ""}`}>{SEV_PILL[u.severidad]?.[0] ?? u.severidad}</span>
-                    <div className="min-w-0 flex-1">
-                      <Link href={u.enlace ?? "/auditoria/alertas"} className="font-medium text-ink hover:text-brand-700">{u.titulo}</Link>
-                      <div className="text-xs text-ink/55 truncate">{[u.detalle, hace(u.abierta)].filter(Boolean).join(" · ")}</div>
+                  <li key={u.id} className="py-2.5">
+                    <div className="flex gap-3 items-start">
+                      <span className={`pill shrink-0 w-16 justify-center text-center ${SEV_PILL[u.severidad]?.[1] ?? ""}`}>{SEV_PILL[u.severidad]?.[0] ?? u.severidad}</span>
+                      <div className="min-w-0 flex-1">
+                        <Link href={u.enlace ?? "/auditoria/alertas"} className="font-medium text-ink hover:text-brand-700">{u.titulo}</Link>
+                        <div className="text-xs text-ink/55 truncate">{[u.detalle, hace(u.abierta)].filter(Boolean).join(" · ")}</div>
+                      </div>
+                      {puedeEditar && (
+                        <button
+                          className="shrink-0 text-xs text-ink/40 hover:text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded transition-colors"
+                          title="Confirmar alerta"
+                          onClick={() => { setConfirmarId(confirmarId === u.id ? null : u.id); setNotaConfirmar(""); setAvisoConf(null); }}
+                        >
+                          {confirmarId === u.id ? "Cancelar" : "✓ Confirmar"}
+                        </button>
+                      )}
                     </div>
+                    {confirmarId === u.id && (
+                      <div className="mt-2 ml-[76px] flex gap-2 items-center">
+                        <input
+                          className="input text-sm flex-1"
+                          placeholder="Qué se hizo (mín. 3 caracteres)"
+                          value={notaConfirmar}
+                          onChange={(e) => setNotaConfirmar(e.target.value)}
+                          maxLength={500}
+                          autoFocus
+                          onKeyDown={(e) => e.key === "Enter" && confirmarAlerta()}
+                        />
+                        <button
+                          className="btn-primary text-sm"
+                          disabled={confirmando || notaConfirmar.trim().length < 3}
+                          onClick={confirmarAlerta}
+                        >
+                          {confirmando ? "…" : "Confirmar"}
+                        </button>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
