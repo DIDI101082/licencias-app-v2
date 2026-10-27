@@ -134,7 +134,7 @@ begin
   insert into inv_dispositivos as d (
     uuid_equipo, hostname, numero_serie, fabricante, modelo, so_nombre, so_version, so_build,
     so_arquitectura, procesador, nucleos, ram_total_gb, ram_libre_gb, discos, almacenamiento,
-    ip, mac, usuario, dominio, arranque, bateria_pct, antivirus_activo, agente_version,
+    ip, mac, usuario, dominio, arranque, bateria_pct, antivirus_activo, monitores, agente_version,
     equipo_id, ultimo_reporte, estado_registro, secreto_hash, ip_registro, ip_publica
   ) values (
     v_uuid,
@@ -159,6 +159,7 @@ begin
     nullif(p_datos->>'arranque', '')::timestamptz,
     nullif(p_datos->>'bateria_pct', '')::int,
     nullif(p_datos->>'antivirus_activo', '')::boolean,
+    coalesce(p_datos->'monitores', '[]'::jsonb),
     p_datos->>'agente_version',
     v_equipo,
     now(),
@@ -189,6 +190,11 @@ begin
     arranque = excluded.arranque,
     bateria_pct = excluded.bateria_pct,
     antivirus_activo = excluded.antivirus_activo,
+    monitores = case
+      when jsonb_array_length(coalesce(excluded.monitores, '[]'::jsonb)) > 0
+      then excluded.monitores
+      else d.monitores
+    end,
     agente_version = excluded.agente_version,
     equipo_id = coalesce(excluded.equipo_id, d.equipo_id),
     ip_publica = excluded.ip_publica,
