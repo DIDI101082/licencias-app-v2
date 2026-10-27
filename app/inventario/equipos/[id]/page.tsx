@@ -9,7 +9,6 @@ import { ESTADOS, CONDICIONES, dinero, fecha, diasHasta, claseCodigo } from "@/l
 import { usePerfil } from "@/components/PerfilContext";
 import BarraDisco from "@/components/BarraDisco";
 import { conectado, hace, encendidoDesde, type Disco } from "@/lib/monitoreo";
-import { CONTROLES, ESTILO, evaluar } from "@/lib/seguridad";
 import { textoUbicacion } from "@/lib/geo";
 
 const CAMPOS_LOG: Record<string, string> = {
@@ -42,7 +41,6 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
   const [celulares, setCelulares] = useState<any[]>([]);
   const [stockPer, setStockPer] = useState<any[]>([]);
   const [perSel, setPerSel] = useState("");
-  const [permitidos, setPermitidos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [empSel, setEmpSel] = useState("");
   const [ordenEstado, setOrdenEstado] = useState<"idle" | "enviando" | "pendiente" | "ejecutando" | "completada" | "error">("idle");
@@ -60,10 +58,6 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
       sb.from("inv_dispositivos").select("*").eq("equipo_id", params.id).eq("estado_registro", "aprobado").order("ultimo_reporte", { ascending: false }).limit(1),
     ]);
     setVivo(dv.data?.[0] ?? null);
-    if (dv.data?.[0]?.seguridad_actualizado) {
-      const { data: p } = await sb.rpc("inv_admins_permitidos");
-      setPermitidos((p as string[]) ?? []);
-    }
     setE(eq.data); setAsig(a.data ?? []); setMant(m.data ?? []); setLog(l.data ?? []);
     // Otros equipos de la misma persona (periféricos primero) y periféricos disponibles para entregarle
     if (eq.data?.empleado_id) {
@@ -381,23 +375,6 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
                   </ul>
                 </div>
               )}
-              {vivo.seguridad_actualizado && (() => {
-                const ev = evaluar(vivo, permitidos);
-                return (
-                  <div className="mt-4 pt-3 border-t border-line/[0.06]">
-                    <div className="text-xs text-ink/50 mb-2">Seguridad</div>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                      {CONTROLES.map((c) => (
-                        <div key={c.k} className="flex items-center gap-1.5 text-sm">
-                          <span className={`h-2 w-2 rounded-full shrink-0 ${ESTILO[ev[c.k].nivel].punto}`} aria-hidden />
-                          <span className="text-ink/50">{c.titulo}:</span>
-                          <span className={ESTILO[ev[c.k].nivel].texto}>{ev[c.k].texto}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
               {/* Parches pendientes + botón Windows Update */}
               {vivo.parches_pendientes != null && (
                 <div className="mt-4 pt-3 border-t border-line/[0.06]">
