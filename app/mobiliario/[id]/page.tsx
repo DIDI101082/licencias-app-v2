@@ -29,6 +29,14 @@ export default function DetalleMobiliario() {
     });
   }, [id]);
 
+  async function eliminar() {
+    if (!confirm("¿Eliminar este elemento permanentemente? Esta acción no se puede deshacer.")) return;
+    const sb = createClient();
+    await sb.from("mob_movimientos").delete().eq("mobiliario_id", id);
+    await sb.from("mob_mobiliario").delete().eq("id", id);
+    router.push("/mobiliario");
+  }
+
   async function darDeBaja() {
     const motivo = prompt("Motivo de la baja:");
     if (motivo === null) return;
@@ -128,6 +136,11 @@ export default function DetalleMobiliario() {
             {!esBaja && esAdmin && (
               <button className="btn-danger" onClick={darDeBaja}>
                 Dar de baja
+              </button>
+            )}
+            {esAdmin && (
+              <button className="btn-danger" onClick={eliminar}>
+                Eliminar
               </button>
             )}
           </div>
