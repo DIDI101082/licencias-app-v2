@@ -39,6 +39,7 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
   const [qr, setQr] = useState("");
   const [vivo, setVivo] = useState<any>(null);
   const [otros, setOtros] = useState<any[]>([]);
+  const [celulares, setCelulares] = useState<any[]>([]);
   const [stockPer, setStockPer] = useState<any[]>([]);
   const [perSel, setPerSel] = useState("");
   const [permitidos, setPermitidos] = useState<string[]>([]);
@@ -66,16 +67,20 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
     setE(eq.data); setAsig(a.data ?? []); setMant(m.data ?? []); setLog(l.data ?? []);
     // Otros equipos de la misma persona (periféricos primero) y periféricos disponibles para entregarle
     if (eq.data?.empleado_id) {
-      const [o, st] = await Promise.all([
+      const [o, st, cel] = await Promise.all([
         sb.from("inv_v_equipos").select("id, codigo, categoria, grupo, marca, modelo, numero_serie")
           .eq("empleado_id", eq.data.empleado_id).neq("id", params.id).order("codigo"),
         sb.from("inv_v_equipos").select("id, codigo, categoria, marca, modelo, numero_serie")
           .eq("estado", "en_stock").eq("grupo", "Periféricos").order("categoria").limit(300),
+        sb.from("cel_celulares").select("id, marca, modelo, numero_linea, imei, estado")
+          .eq("empleado_id", eq.data.empleado_id).neq("estado", "baja"),
       ]);
       setOtros((o.data ?? []).sort((x: any, y: any) => Number(y.grupo === "Periféricos") - Number(x.grupo === "Periféricos")));
       setStockPer(st.data ?? []);
+      setCelulares(cel.data ?? []);
     } else {
       setOtros([]);
+      setCelulares([]);
     }
     if (eq.data) setQr(await QRCode.toDataURL(`${window.location.origin}/inventario/equipos/${params.id}`, { margin: 0, width: 160 }));
   }, [params.id]);
@@ -216,10 +221,24 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
           {e.empleado && (
             <div className="card p-5 space-y-3">
               <h2 className="font-medium text-ink">Otros equipos de {e.empleado}</h2>
-              {otros.length === 0 ? (
+              {otros.length === 0 && celulares.length === 0 ? (
                 <p className="text-sm text-ink/50">No tiene periféricos ni otros equipos asignados.</p>
               ) : (
                 <ul className="divide-y divide-line/[0.05]">
+                  {celulares.map((c) => (
+                    <li key={`cel-${c.id}`} className="flex items-center justify-between gap-3 py-2 text-sm">
+                      <span className="flex items-center gap-2 min-w-0">
+                        <Link href={`/celulares/${c.id}`} className="font-mono text-xs px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 shrink-0">
+                          📱 Celular
+                        </Link>
+                        <span className="min-w-0">
+                          <span className="text-ink">{[c.marca, c.modelo].filter(Boolean).join(" ") || "Celular"}</span>
+                          {c.numero_linea && <span className="text-ink/60"> · {c.numero_linea}</span>}
+                          {c.imei && <span className="block text-xs text-ink/40 truncate font-mono">IMEI {c.imei}</span>}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
                   {otros.map((o) => (
                     <li key={o.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                       <span className="flex items-center gap-2 min-w-0">
