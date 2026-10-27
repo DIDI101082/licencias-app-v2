@@ -343,6 +343,25 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
                 ) : vivo.antivirus_activo === false && <Dato t="Antivirus"><span className="text-red-600">Desactivado</span></Dato>}
               </dl>
               <div className="space-y-2">{(vivo.discos as Disco[]).map((d) => <BarraDisco key={d.unidad} d={d} />)}</div>
+              {Array.isArray(vivo.monitores) && vivo.monitores.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-line/[0.06]">
+                  <div className="text-xs text-ink/50 mb-2">Monitor{vivo.monitores.length > 1 ? "es" : ""} conectado{vivo.monitores.length > 1 ? "s" : ""}</div>
+                  <ul className="space-y-1">
+                    {(vivo.monitores as { nombre: string; fabricante: string | null; ancho_px: number; alto_px: number }[]).map((m, i) => (
+                      <li key={i} className="flex items-center gap-2 text-sm">
+                        <svg className="h-4 w-4 text-ink/40 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+                        </svg>
+                        <span className="text-ink">{m.nombre}</span>
+                        {m.ancho_px && m.alto_px && (
+                          <span className="text-ink/50 text-xs">{m.ancho_px}×{m.alto_px}</span>
+                        )}
+                        {m.fabricante && <span className="text-ink/40 text-xs">· {m.fabricante}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {vivo.seguridad_actualizado && (() => {
                 const ev = evaluar(vivo, permitidos);
                 return (
