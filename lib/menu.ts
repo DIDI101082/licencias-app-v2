@@ -91,6 +91,11 @@ export const TEMAS: Tema[] = [
     { href: "/mobiliario/movimientos", label: "Movimientos" },
     { href: "/mobiliario/qr", label: "Generar QR" },
   ] },
+  { id: "celulares", label: "Celulares", titulo: "Inventario de celulares corporativos", paginas: [
+    { href: "/celulares", label: "Celulares" },
+    { href: "/celulares/movimientos", label: "Movimientos" },
+    { href: "/celulares/qr", label: "Generar QR" },
+  ] },
 ];
 
 // Por módulo (para permisos y grupos de acceso): las mismas páginas, agrupadas por su módulo
@@ -101,7 +106,7 @@ export const MENU: SeccionMenu[] = MODULOS.map((m) => ({
 }));
 
 // Páginas que solo coinciden con la dirección exacta (el resto abarca sus subpáginas)
-const EXACTAS = ["/", "/inicio", "/helpdesk", "/inventario", "/inventario/ubicacion", "/auditoria", "/servidores", "/red", "/mobiliario"];
+const EXACTAS = ["/", "/inicio", "/helpdesk", "/inventario", "/inventario/ubicacion", "/auditoria", "/servidores", "/red", "/mobiliario", "/celulares"];
 
 export function esActual(href: string, pathname: string) {
   if (EXACTAS.includes(href)) return pathname === href;
