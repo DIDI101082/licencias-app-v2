@@ -10,6 +10,14 @@ import { ThFiltro, FiltrosActivos, useFiltrosColumna } from "@/components/Filtro
 
 function Listado() {
   const { puedeEditar, esAdmin } = usePerfil();
+
+  async function eliminar(id: number, codigo: string) {
+    if (!confirm(`¿Eliminar ${codigo} permanentemente? Esta acción no se puede deshacer.`)) return;
+    const sb = createClient();
+    await sb.from("mob_movimientos").delete().eq("mobiliario_id", id);
+    await sb.from("mob_mobiliario").delete().eq("id", id);
+    cargar();
+  }
   const [items, setItems] = useState<MobiliarioItem[]>([]);
   const [cargando, setCargando] = useState(true);
   const [texto, setTexto] = useState("");
@@ -18,12 +26,13 @@ function Listado() {
   const [piso, setPiso] = useState("");
   const [sector, setSector] = useState("");
 
-  const cargar = () =>
+  function cargar() {
     createClient()
       .from("mob_v_mobiliario")
       .select("*")
       .order("id", { ascending: false })
       .then(({ data }) => { setItems((data ?? []) as MobiliarioItem[]); setCargando(false); });
+  }
 
   useEffect(() => { cargar(); }, []);
 
@@ -170,15 +179,28 @@ function Listado() {
                 </td>
                 <td className="text-ink/60">{fecha(e.fecha_ingreso)}</td>
                 <td>
-                  <Link
-                    href={`/mobiliario/qr?id=${e.id}`}
-                    className="text-ink/40 hover:text-ink transition-colors"
-                    title="Generar QR"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                      <path fillRule="evenodd" d="M3 4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4Zm2 2V5h1v1H5Zm-2 7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3Zm2 2v-1h1v1H5Zm8-12a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1h-3Zm1 2v1h1V5h-1Zm-1 7a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1h1a1 1 0 0 1 0 2h-1v1a1 1 0 0 1-2 0v-1h-1a1 1 0 0 1-1-1v-1h-1a1 1 0 0 1 0-2h1Zm1 2v-1h1v1h-1Z" clipRule="evenodd" />
-                    </svg>
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/mobiliario/qr?id=${e.id}`}
+                      className="text-ink/40 hover:text-ink transition-colors"
+                      title="Generar QR"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                        <path fillRule="evenodd" d="M3 4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4Zm2 2V5h1v1H5Zm-2 7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3Zm2 2v-1h1v1H5Zm8-12a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1h-3Zm1 2v1h1V5h-1Zm-1 7a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1h1a1 1 0 0 1 0 2h-1v1a1 1 0 0 1-2 0v-1h-1a1 1 0 0 1-1-1v-1h-1a1 1 0 0 1 0-2h1Zm1 2v-1h1v1h-1Z" clipRule="evenodd" />
+                      </svg>
+                    </Link>
+                    {esAdmin && (
+                      <button
+                        onClick={() => eliminar(e.id, e.codigo)}
+                        className="text-red-400 hover:text-red-600 transition-colors"
+                        title="Eliminar"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                          <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
