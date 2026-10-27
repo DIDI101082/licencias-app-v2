@@ -168,3 +168,18 @@ tr[data-mt-oculta] { display: none; }
   /* Al imprimir se ve la tabla entera, no solo la página actual (los filtros sí se respetan) */
   tr[data-mt-oculta="pagina"] { display: table-row; }
 }
+
+
+/* ---------- Etiquetas QR de mobiliario ---------- */
+@media print {
+  /* Ocultar todo excepto el área de impresión */
+  body > * { display: none !important; }
+  main > * { display: none !important; }
+  .print-area { display: block !important; }
+
+  .etiqueta-qr {
+    border: 1px solid #888 !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
