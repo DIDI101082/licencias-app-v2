@@ -3,7 +3,7 @@
 // Nota: el código PowerShell es solo ASCII (sin tildes) para que Windows
 // PowerShell 5.1 lo lea bien en cualquier configuración regional.
 
-export const AGENTE_VERSION = "2.7";
+export const AGENTE_VERSION = "2.8";
 
 // Diagnostico del disco C (agente 2.1): que ocupa el espacio y en que estado fisico esta el disco.
 // Recorrer todo C: puede tardar varios minutos, asi que corre en una tarea programada aparte
@@ -484,6 +484,16 @@ try {
   $versionSO = Obtener { (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').DisplayVersion }
   $bateria   = Obtener { (Get-CimInstance Win32_Battery | Select-Object -First 1).EstimatedChargeRemaining }
   $antivirus = Obtener { (Get-MpComputerStatus).AntivirusEnabled }
+  $monitores = @(Obtener {
+    Get-CimInstance Win32_DesktopMonitor | Where-Object { $_.ScreenWidth -and $_.ScreenWidth -gt 0 } | ForEach-Object {
+      [ordered]@{
+        nombre     = if ($_.Name) { ($_.Name -replace '\s+', ' ').Trim() } else { 'Monitor' }
+        fabricante = if ($_.MonitorManufacturer) { $_.MonitorManufacturer.Trim() } else { $null }
+        ancho_px   = [int]$_.ScreenWidth
+        alto_px    = [int]$_.ScreenHeight
+      }
+    }
+  })
 
   $datos = [ordered]@{
     uuid             = $csp.UUID
@@ -508,6 +518,7 @@ try {
     arranque         = $os.LastBootUpTime.ToUniversalTime().ToString('o')
     bateria_pct      = $bateria
     antivirus_activo = $antivirus
+    monitores        = $monitores
     agente_version   = $Version
   }
 
