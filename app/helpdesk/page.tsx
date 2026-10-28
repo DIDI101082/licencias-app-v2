@@ -89,6 +89,14 @@ export default function Tickets() {
   const [diasQuieto, setDiasQuieto] = useState(7);
   const [texto, setTexto] = useState("");
   const [verConfig, setVerConfig] = useState(false);
+  const [verTeams, setVerTeams] = useState(false);
+  const [teamsInfo, setTeamsInfo] = useState<{ activo: boolean; sectores: string; webhook: boolean; ultimo: string | null; error: string | null } | null>(null);
+  const [teamsWebhook, setTeamsWebhook] = useState("");
+  const [teamsSectores, setTeamsSectores] = useState("");
+  const [teamsActivo, setTeamsActivo] = useState(true);
+  const [teamsGuardando, setTeamsGuardando] = useState(false);
+  const [teamsProbando, setTeamsProbando] = useState(false);
+  const [teamsMensaje, setTeamsMensaje] = useState<{ ok: boolean; texto: string } | null>(null);
   const [pagina, setPagina] = useState(1);
   const [ahora, setAhora] = useState(Date.now());
 
@@ -157,6 +165,41 @@ export default function Tickets() {
   const sinSeguimiento = todos.filter((t) => t.grupo !== "cerrado" && !t.seg_leido).length;
   // En "Asignados" quien atiende es el área; en "Generados", el otro sector
   const txtFalta = bandejaActual === "asignado" ? "Falta nuestra respuesta" : "Falta respuesta del otro sector";
+
+  const cargarTeams = async () => {
+    const sb = createClient();
+    const { data, error } = await sb.rpc("helpdesk_aviso_ver");
+    if (error) { setTeamsMensaje({ ok: false, texto: /helpdesk_aviso_ver/.test(error.message) ? "Falta ejecutar supabase/helpdesk-avisos.sql en Supabase." : error.message }); return; }
+    setTeamsInfo(data);
+    setTeamsSectores(data?.sectores ?? "Ciberseguridad");
+    setTeamsActivo(data?.activo ?? true);
+    setTeamsMensaje(null);
+  };
+
+  const guardarTeams = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTeamsGuardando(true); setTeamsMensaje(null);
+    const sb = createClient();
+    const payload: Record<string, unknown> = { activo: teamsActivo, sectores: teamsSectores };
+    if (teamsWebhook.trim()) payload.webhook = teamsWebhook.trim();
+    else if (!teamsInfo?.webhook) payload.webhook = "";
+    const { error } = await sb.rpc("helpdesk_aviso_guardar", { p: payload });
+    setTeamsGuardando(false);
+    if (error) { setTeamsMensaje({ ok: false, texto: error.message }); return; }
+    setTeamsWebhook("");
+    setTeamsMensaje({ ok: true, texto: "Configuración guardada." });
+    await cargarTeams();
+  };
+
+  const probarTeams = async () => {
+    setTeamsProbando(true); setTeamsMensaje(null);
+    const sb = createClient();
+    const { data, error } = await sb.rpc("helpdesk_aviso_probar");
+    setTeamsProbando(false);
+    if (error) { setTeamsMensaje({ ok: false, texto: error.message }); return; }
+    setTeamsMensaje({ ok: true, texto: data ?? "Mensaje de prueba enviado." });
+    await cargarTeams();
+  };
 
   // Lee desde el helpdesk el seguimiento de los tickets sin cerrar, de a lotes chicos, hasta terminar
   async function actualizarSeguimientos() {
@@ -270,6 +313,7 @@ export default function Tickets() {
           <Link href="/helpdesk/reporte" className="btn-secondary">Reporte</Link>
           {esAdmin && <button className="btn-secondary" onClick={actualizarSeguimientos} disabled={seg.ocupado}>Actualizar seguimientos</button>}
           {esAdmin && <button className="btn-secondary" onClick={() => setVerConfig(!verConfig)} aria-expanded={verConfig}>Configurar lectura</button>}
+          {esAdmin && <button className="btn-secondary" onClick={() => { setVerTeams(!verTeams); if (!verTeams && !teamsInfo) cargarTeams(); }} aria-expanded={verTeams}>Configurar Teams</button>}
         </div>
       </div>
       {seg.texto && <p className="text-sm text-ink/60" role="status">{seg.texto}</p>}
@@ -281,6 +325,95 @@ export default function Tickets() {
       )}
 
       {esAdmin && verConfig && <TicketsLectura alLeer={cargar} />}
+
+      {esAdmin && verTeams && (
+        <div className="card p-6 space-y-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="font-medium text-ink">Aviso a Teams — canal de HelpDesk</h2>
+              <p className="text-sm text-ink/60 mt-0.5">Cuando entra un ticket nuevo asignado a los sectores elegidos, se envía una tarjeta al canal de Teams configurado.</p>
+            </div>
+            {teamsInfo && (
+              <span className={`pill shrink-0 ${teamsInfo.activo ? "bg-emerald-50 text-emerald-700" : "bg-line/[0.05] text-ink/50"}`}>
+                {teamsInfo.activo ? "Activo" : "Inactivo"}
+              </span>
+            )}
+          </div>
+
+          {teamsInfo?.error && (
+            <p className="text-sm text-red-600 bg-red-50 rounded-lg px-4 py-3">
+              Último error: {teamsInfo.error}
+            </p>
+          )}
+          {teamsInfo?.ultimo && (
+            <p className="text-xs text-ink/50">Último aviso enviado: {new Date(teamsInfo.ultimo).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}</p>
+          )}
+
+          <form onSubmit={guardarTeams} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-ink mb-1.5">
+                Webhook del canal de Teams
+              </label>
+              <input
+                type="url"
+                className="input w-full"
+                placeholder={teamsInfo?.webhook ? "Webhook configurado — pegá uno nuevo para reemplazarlo" : "https://…webhook.office.com/…"}
+                value={teamsWebhook}
+                onChange={(e) => setTeamsWebhook(e.target.value)}
+              />
+              <p className="text-xs text-ink/50 mt-1">
+                {teamsInfo?.webhook
+                  ? "Ya hay un webhook guardado. Dejá el campo vacío para conservarlo, o pegá uno nuevo para reemplazarlo."
+                  : "En Teams: canal → ··· → Conectores → Incoming Webhook → Configurar."}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-ink mb-1.5">
+                Sectores a monitorear
+              </label>
+              <input
+                type="text"
+                className="input w-full"
+                placeholder="Ciberseguridad"
+                value={teamsSectores}
+                onChange={(e) => setTeamsSectores(e.target.value)}
+              />
+              <p className="text-xs text-ink/50 mt-1">Separados por coma si son varios. Solo se avisan tickets asignados a estos sectores.</p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={teamsActivo}
+                onClick={() => setTeamsActivo(!teamsActivo)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${teamsActivo ? "bg-brand-600" : "bg-line/30"}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${teamsActivo ? "translate-x-6" : "translate-x-1"}`} />
+              </button>
+              <span className="text-sm text-ink">Aviso activo</span>
+            </div>
+
+            {teamsMensaje && (
+              <p className={`text-sm rounded-lg px-4 py-3 ${teamsMensaje.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
+                {teamsMensaje.texto}
+              </p>
+            )}
+
+            <div className="flex gap-3 flex-wrap">
+              <button type="submit" className="btn-primary" disabled={teamsGuardando}>
+                {teamsGuardando ? "Guardando…" : "Guardar"}
+              </button>
+              {teamsInfo?.webhook && (
+                <button type="button" className="btn-secondary" onClick={probarTeams} disabled={teamsProbando}>
+                  {teamsProbando ? "Enviando…" : "Probar"}
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      )}
 
       {hayGenerados && hayAsignados && (
         <div>
