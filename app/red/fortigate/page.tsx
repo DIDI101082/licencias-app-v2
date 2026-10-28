@@ -86,6 +86,14 @@ function Contenido() {
 
   const [estado, setEstado] = useState<EstadoFortiGate | null>(null);
   const [wh, setWh] = useState({ url: "", guardando: false, probando: false, aviso: null as { ok: boolean; texto: string } | null });
+  const [horarioInfo, setHorarioInfo] = useState<{ activo: boolean; desde: number; hasta: number; webhook: boolean; ultimo: string | null; error: string | null } | null>(null);
+  const [horarioWebhook, setHorarioWebhook] = useState("");
+  const [horarioDesde, setHorarioDesde] = useState(20);
+  const [horarioHasta, setHorarioHasta] = useState(7);
+  const [horarioActivo, setHorarioActivo] = useState(true);
+  const [horarioGuardando, setHorarioGuardando] = useState(false);
+  const [horarioProbando, setHorarioProbando] = useState(false);
+  const [horarioMensaje, setHorarioMensaje] = useState<{ ok: boolean; texto: string } | null>(null);
   const [equipos, setEquipos] = useState<Equipo[]>([]);
   const [hallazgos, setHallazgos] = useState<Hallazgo[]>([]);
   const [politicas, setPoliticas] = useState<Politica[]>([]);
@@ -168,6 +176,7 @@ function Contenido() {
     setCargando(false);
   }, []);
   useEffect(() => { cargar(); const t = setInterval(cargar, 60000); return () => clearInterval(t); }, [cargar]);
+  useEffect(() => { if (config && esAdmin) cargarHorario(); }, [config, esAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = texto.trim().toLowerCase();
   const coincide = (...v: (string | null | undefined)[]) => !q || v.some((x) => x?.toLowerCase().includes(q));
@@ -283,6 +292,41 @@ function Contenido() {
     setWh((w) => ({ ...w, probando: false, aviso: error ? { ok: false, texto: error.message } : { ok: data === "Enviado", texto: data === "Enviado" ? "Mensaje de prueba enviado correctamente." : data ?? "Sin respuesta." } }));
   }
 
+  async function cargarHorario() {
+    const { data, error } = await createClient().rpc("fg_horario_ver");
+    if (!error && data) {
+      const d = data as { activo: boolean; desde: number; hasta: number; webhook: boolean; ultimo: string | null; error: string | null };
+      setHorarioInfo(d);
+      setHorarioActivo(d.activo);
+      setHorarioDesde(d.desde);
+      setHorarioHasta(d.hasta);
+    }
+  }
+
+  async function guardarHorario() {
+    setHorarioGuardando(true);
+    setHorarioMensaje(null);
+    const p: Record<string, unknown> = { activo: horarioActivo, desde: horarioDesde, hasta: horarioHasta };
+    if (horarioWebhook.trim()) p.webhook = horarioWebhook.trim();
+    const { error } = await createClient().rpc("fg_horario_guardar", { p });
+    if (error) {
+      setHorarioMensaje({ ok: false, texto: error.message });
+    } else {
+      setHorarioMensaje({ ok: true, texto: "Configuración guardada." });
+      setHorarioWebhook("");
+      await cargarHorario();
+    }
+    setHorarioGuardando(false);
+  }
+
+  async function probarHorario() {
+    setHorarioProbando(true);
+    setHorarioMensaje(null);
+    const { data, error } = await createClient().rpc("fg_horario_probar");
+    setHorarioMensaje(error ? { ok: false, texto: error.message } : { ok: true, texto: typeof data === "string" ? data : "Mensaje de prueba enviado." });
+    setHorarioProbando(false);
+  }
+
   async function guardarEnlace() {
     if (!editando) return;
     const { error } = await createClient().rpc("fg_enlace_guardar", { p: {
@@ -376,6 +420,120 @@ function Contenido() {
             La URL debe ser de Microsoft (webhook.office.com, logic.azure.com, powerplatform.com o powerautomate.com).
             Solo se envían alertas de severidad crítica o alta. Las de severidad media y baja siguen llegando solo al canal general de alertas.
           </p>
+        </div>
+      )}
+
+      {/* Canal de Teams para accesos fuera de horario */}
+      {config && esAdmin && (
+        <div className="card p-5 space-y-4">
+          <div>
+            <h2 className="font-display text-lg text-ink">Alerta VPN fuera de horario</h2>
+            <p className="text-sm text-ink/60 mt-1 max-w-2xl">
+              Cuando un administrador inicia sesión en el FortiGate fuera del horario laboral, se envía una alerta al canal
+              de Teams <strong>Alerta VPN fuera de horario</strong>. Cada acceso se avisa una sola vez, dentro de las 24 horas siguientes.
+              Creá un webhook entrante en ese canal y pegá la URL acá.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-ink/60">Canal:</span>
+              {horarioInfo?.webhook
+                ? <span className="font-mono text-emerald-700 bg-emerald-50 rounded px-2 py-0.5">✓ Configurado</span>
+                : <span className="text-ink/40">No configurado</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-ink/60">Estado:</span>
+              <button
+                className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${horarioActivo ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-line/[0.08] text-ink/40 hover:bg-line/[0.12]"}`}
+                onClick={() => setHorarioActivo(!horarioActivo)}
+              >
+                {horarioActivo ? "Activo" : "Inactivo"}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-4 items-end">
+            <div className="flex-1 min-w-[20rem]">
+              <label className="block text-sm text-ink/70 mb-1">URL del webhook de Teams</label>
+              <input
+                className="input w-full"
+                type="url"
+                placeholder="https://…webhook.office.com/…"
+                value={horarioWebhook}
+                onChange={(e) => { setHorarioWebhook(e.target.value); setHorarioMensaje(null); }}
+              />
+            </div>
+            <div className="flex gap-3 items-end">
+              <div>
+                <label className="block text-sm text-ink/70 mb-1">Desde (hora)</label>
+                <input
+                  className="input w-20 text-center"
+                  type="number"
+                  min={0} max={23}
+                  value={horarioDesde}
+                  onChange={(e) => setHorarioDesde(Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-ink/70 mb-1">Hasta (hora)</label>
+                <input
+                  className="input w-20 text-center"
+                  type="number"
+                  min={0} max={23}
+                  value={horarioHasta}
+                  onChange={(e) => setHorarioHasta(Number(e.target.value))}
+                />
+              </div>
+            </div>
+          </div>
+
+          <p className="text-xs text-ink/50">
+            Hora Argentina. El rango por defecto es de 20:00 a 07:00 (fuera del horario laboral). El valor &quot;Desde&quot; es la hora de inicio del período fuera de horario y &quot;Hasta&quot; es la hora de fin (exclusive).
+          </p>
+
+          <div className="flex flex-wrap gap-2 items-center">
+            <button className="btn-primary" disabled={horarioGuardando} onClick={guardarHorario}>
+              {horarioGuardando ? "Guardando…" : "Guardar configuración"}
+            </button>
+            {horarioInfo?.webhook && (
+              <button className="btn-secondary" disabled={horarioProbando} onClick={probarHorario}>
+                {horarioProbando ? "Enviando…" : "Enviar mensaje de prueba"}
+              </button>
+            )}
+            {horarioInfo?.webhook && (
+              <button
+                className="text-sm text-ink/40 hover:text-red-600"
+                onClick={() => {
+                  setHorarioWebhook(" ");
+                  setTimeout(() => {
+                    createClient().rpc("fg_horario_guardar", { p: { webhook: "" } }).then(cargarHorario);
+                    setHorarioWebhook("");
+                  }, 0);
+                }}
+              >
+                Quitar webhook
+              </button>
+            )}
+          </div>
+
+          {horarioMensaje && (
+            <p role="alert" className={`text-sm rounded px-3 py-2 ${horarioMensaje.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
+              {horarioMensaje.texto}
+            </p>
+          )}
+
+          {horarioInfo?.error && !horarioMensaje && (
+            <p className="text-xs text-red-600 bg-red-50 rounded px-3 py-2">
+              <strong>Último error:</strong> {horarioInfo.error}
+            </p>
+          )}
+
+          {horarioInfo?.ultimo && (
+            <p className="text-xs text-ink/50">
+              Último aviso enviado: {new Date(horarioInfo.ultimo).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}
+            </p>
+          )}
         </div>
       )}
 
