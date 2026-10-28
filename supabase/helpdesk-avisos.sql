@@ -51,16 +51,21 @@ begin
 
   begin
     begin
-      perform http_set_curlopt('CURLOPT_TIMEOUT_MS', '8000');
+      perform extensions.http_set_curlopt('CURLOPT_TIMEOUT_MS', '8000');
     exception when others then null;
     end;
-    select * into r from http_post(c.aviso_webhook, jsonb_build_object(
-      'type', 'message',
-      'attachments', jsonb_build_array(jsonb_build_object(
-        'contentType', 'application/vnd.microsoft.card.adaptive', 'contentUrl', null,
-        'content', jsonb_build_object('$schema', 'http://adaptivecards.io/schemas/adaptive-card.json', 'type', 'AdaptiveCard', 'version', '1.4',
-                                      'msteams', jsonb_build_object('width', 'Full'), 'body', v_body, 'actions', v_acciones))))::text,
-      'application/json');
+    select * into r from extensions.http((
+      'POST',
+      c.aviso_webhook,
+      array[extensions.http_header('Content-Type', 'application/json')],
+      'application/json',
+      jsonb_build_object(
+        'type', 'message',
+        'attachments', jsonb_build_array(jsonb_build_object(
+          'contentType', 'application/vnd.microsoft.card.adaptive', 'contentUrl', null,
+          'content', jsonb_build_object('$schema', 'http://adaptivecards.io/schemas/adaptive-card.json', 'type', 'AdaptiveCard', 'version', '1.4',
+                                        'msteams', jsonb_build_object('width', 'Full'), 'body', v_body, 'actions', v_acciones))))::text
+    )::extensions.http_request);
     if r.status between 200 and 299 then
       update tickets_config set aviso_ultimo = now(), aviso_error = null where id = 1;
       return null;
