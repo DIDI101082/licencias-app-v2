@@ -43,8 +43,6 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
   const [perSel, setPerSel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [empSel, setEmpSel] = useState("");
-  const [ordenEstado, setOrdenEstado] = useState<"idle" | "enviando" | "pendiente" | "ejecutando" | "completada" | "error">("idle");
-  const [ordenMsg, setOrdenMsg] = useState<string | null>(null);
   const [condDev, setCondDev] = useState("bueno");
   const [nuevoMant, setNuevoMant] = useState({ tipo: "correctivo", descripcion: "", costo: "", fecha: new Date().toISOString().slice(0, 10) });
 
@@ -105,24 +103,6 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
     if (error) return setError(error.message);
     setNuevoMant({ ...nuevoMant, descripcion: "", costo: "" });
     cargar();
-  }
-
-  async function enviarWindowsUpdate() {
-    if (!vivo?.id) return;
-    setOrdenEstado("enviando"); setOrdenMsg(null);
-    const sb = createClient();
-    const { data: ordenId, error: errOrd } = await sb.rpc("inv_crear_orden", { p_dispositivo_id: vivo.id, p_tipo: "windows_update" });
-    if (errOrd) { setOrdenEstado("error"); setOrdenMsg(errOrd.message); return; }
-    setOrdenEstado("pendiente"); setOrdenMsg("Orden enviada. El agente la ejecutará en el próximo ciclo.");
-    // Polling cada 20s hasta completada/error (máx 10 min)
-    let intentos = 0;
-    const poll = setInterval(async () => {
-      intentos++;
-      const { data } = await sb.from("inv_ordenes").select("estado, resultado").eq("id", ordenId).single();
-      if (data?.estado === "completada") { clearInterval(poll); setOrdenEstado("completada"); setOrdenMsg(data.resultado ?? "Completada"); }
-      else if (data?.estado === "error")  { clearInterval(poll); setOrdenEstado("error");      setOrdenMsg(data.resultado ?? "Error"); }
-      else if (intentos >= 30)            { clearInterval(poll); setOrdenEstado("pendiente");  setOrdenMsg("Orden enviada. El agente la ejecutará en el próximo ciclo."); }
-    }, 20000);
   }
 
   async function eliminar() {
@@ -373,50 +353,6 @@ export default function FichaEquipo({ params }: { params: { id: string } }) {
                       </li>
                     ))}
                   </ul>
-                </div>
-              )}
-              {/* Parches pendientes + botón Windows Update */}
-              {vivo.parches_pendientes != null && (
-                <div className="mt-4 pt-3 border-t border-line/[0.06]">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="text-sm">
-                      {vivo.parches_pendientes.cantidad === 0
-                        ? <span className="text-green-600">Sin actualizaciones pendientes</span>
-                        : <span className={vivo.parches_pendientes.cantidad > 5 ? "text-red-600 font-medium" : "text-amber-600"}>
-                            {vivo.parches_pendientes.cantidad} actualización{vivo.parches_pendientes.cantidad !== 1 ? "es" : ""} pendiente{vivo.parches_pendientes.cantidad !== 1 ? "s" : ""}
-                          </span>}
-                    </div>
-                    {vivo.parches_pendientes.cantidad > 0 && (
-                      <button
-                        className="btn-secondary text-xs py-1 px-3 disabled:opacity-50"
-                        disabled={ordenEstado === "enviando" || ordenEstado === "pendiente" || ordenEstado === "ejecutando"}
-                        onClick={enviarWindowsUpdate}
-                      >
-                        {ordenEstado === "enviando"   ? "Enviando…"
-                         : ordenEstado === "pendiente" || ordenEstado === "ejecutando" ? "Actualizando…"
-                         : "Actualizar ahora"}
-                      </button>
-                    )}
-                  </div>
-                  {ordenMsg && (
-                    <p className={`mt-1.5 text-xs ${ordenEstado === "completada" ? "text-green-600" : ordenEstado === "error" ? "text-red-600" : "text-ink/50"}`}>
-                      {ordenMsg}
-                    </p>
-                  )}
-                  {vivo.parches_pendientes.actualizaciones?.length > 0 && (
-                    <ul className="mt-2 space-y-0.5 text-xs text-ink/60">
-                      {(vivo.parches_pendientes.actualizaciones as any[]).slice(0, 5).map((a: any, i: number) => (
-                        <li key={i} className="flex items-start gap-1">
-                          {a.critica && <span className="text-red-500 shrink-0">●</span>}
-                          {!a.critica && <span className="text-ink/30 shrink-0">●</span>}
-                          <span>{a.titulo}{a.kb ? ` (${a.kb})` : ""}</span>
-                        </li>
-                      ))}
-                      {vivo.parches_pendientes.actualizaciones.length > 5 && (
-                        <li className="text-ink/40">y {vivo.parches_pendientes.actualizaciones.length - 5} más…</li>
-                      )}
-                    </ul>
-                  )}
                 </div>
               )}
               {vivo.apps_cantidad != null && (
