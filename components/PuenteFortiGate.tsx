@@ -10,6 +10,8 @@ const hex = (b: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(b)).map((
 export type EstadoFortiGate = {
   configurado: boolean; ultimo_reporte: string | null; version_puente: string | null; alertas: boolean; alertar_cambios: boolean;
   umbral_fallos: number; dias_aviso: number; paises_vpn: string[]; minutos_sin_reporte: number; umbral_uso?: number;
+  /** Dominio del webhook dedicado de FortiGate (sin URL completa por seguridad) */
+  webhook?: string | null;
 };
 
 const vacio = (nombre = ""): EquipoFortiGate => ({ nombre, url: "", clave: "", ignorarCert: true, backup: false });
