@@ -7,6 +7,7 @@ import { usePerfil } from "@/components/PerfilContext";
 import { calcularIndicadores, puntaje, type Kpi } from "@/lib/indicadores";
 import { hace } from "@/lib/monitoreo";
 import { ESTADO_INT, type Integracion } from "@/components/integraciones";
+import LoUrgenteHoy from "@/components/LoUrgenteHoy";
 
 type Datos = {
   alertas?: Record<string, number>;
@@ -40,7 +41,6 @@ type PantallazoInfra = {
 };
 
 const SEV: [string, string, string][] = [["critica", "críticas", "bg-red-600 text-white"], ["alta", "altas", "bg-orange-500/15 text-orange-700"], ["media", "medias", "bg-amber-500/15 text-amber-700"], ["info", "informativas", "bg-line/[0.05] text-ink/60"]];
-const SEV_PILL: Record<string, [string, string]> = { critica: ["Crítica", "bg-red-600 text-white"], alta: ["Alta", "bg-orange-500/15 text-orange-700"], media: ["Media", "bg-amber-500/15 text-amber-700"], info: ["Info", "bg-line/[0.05] text-ink/60"] };
 
 function Medidor({ v, color }: { v: number; color: string }) {
   return <div className="h-1.5 rounded-full bg-line/[0.08] mt-3 overflow-hidden"><div className={`h-full ${color}`} style={{ width: `${Math.max(0, Math.min(100, v))}%` }} /></div>;
@@ -235,60 +235,19 @@ export default function Inicio() {
       </div>
 
       <div className="grid lg:grid-cols-[1.5fr_1fr] gap-4 items-start">
-        <div className="card p-5">
-          <div className="flex items-baseline justify-between gap-3 mb-2">
-            <h2 className="font-display text-base text-ink">Lo urgente hoy</h2>
-            <Link href="/auditoria/alertas" className="text-sm text-brand-600 hover:underline">Ver todas las alertas</Link>
-          </div>
-          {avisoConf && <div className="mb-2 p-2 rounded-lg bg-emerald-50 text-sm text-emerald-700">{avisoConf}</div>}
-          {!d ? <p className="text-sm text-ink/50">Cargando…</p>
-            : d.urgentes == null ? <p className="text-sm text-ink/50">El detalle de las alertas se ve con la solapa Logs.</p>
-            : !d.urgentes.length ? <p className="text-sm text-emerald-700">No hay alertas abiertas.</p>
-            : (
-              <ul className="divide-y divide-line/[0.06]">
-                {d.urgentes.map((u) => (
-                  <li key={u.id} className="py-2.5">
-                    <div className="flex gap-3 items-start">
-                      <span className={`pill shrink-0 w-16 justify-center text-center ${SEV_PILL[u.severidad]?.[1] ?? ""}`}>{SEV_PILL[u.severidad]?.[0] ?? u.severidad}</span>
-                      <div className="min-w-0 flex-1">
-                        <Link href={u.enlace ?? "/auditoria/alertas"} className="font-medium text-ink hover:text-brand-700">{u.titulo}</Link>
-                        <div className="text-xs text-ink/55 truncate">{[u.detalle, hace(u.abierta)].filter(Boolean).join(" · ")}</div>
-                      </div>
-                      {puedeEditar && (
-                        <button
-                          className="shrink-0 text-xs text-ink/40 hover:text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded transition-colors"
-                          title="Confirmar alerta"
-                          onClick={() => { setConfirmarId(confirmarId === u.id ? null : u.id); setNotaConfirmar(""); setAvisoConf(null); }}
-                        >
-                          {confirmarId === u.id ? "Cancelar" : "✓ Confirmar"}
-                        </button>
-                      )}
-                    </div>
-                    {confirmarId === u.id && (
-                      <div className="mt-2 ml-[76px] flex gap-2 items-center">
-                        <input
-                          className="input text-sm flex-1"
-                          placeholder="Qué se hizo (mín. 3 caracteres)"
-                          value={notaConfirmar}
-                          onChange={(e) => setNotaConfirmar(e.target.value)}
-                          maxLength={500}
-                          autoFocus
-                          onKeyDown={(e) => e.key === "Enter" && confirmarAlerta()}
-                        />
-                        <button
-                          className="btn-primary text-sm"
-                          disabled={confirmando || notaConfirmar.trim().length < 3}
-                          onClick={confirmarAlerta}
-                        >
-                          {confirmando ? "…" : "Confirmar"}
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-        </div>
+        <LoUrgenteHoy
+          urgentes={d?.urgentes}
+          avisoConf={avisoConf}
+          confirmarId={confirmarId}
+          notaConfirmar={notaConfirmar}
+          confirmando={confirmando}
+          puedeEditar={puedeEditar}
+          cargando={!d}
+          onConfirmar={confirmarAlerta}
+          onSetConfirmarId={setConfirmarId}
+          onSetNotaConfirmar={setNotaConfirmar}
+          onSetAvisoConf={setAvisoConf}
+        />
 
         <div className="space-y-4">
           <div className="card p-5">
