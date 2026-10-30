@@ -817,15 +817,18 @@ function Obtener-CifradoEset {
   if (Test-Path $archivo) {
     $texto = (Get-Content -Path $archivo -Raw -ErrorAction Stop) -replace '(?s)<(script|style)[^>]*>.*?</\1>', ' ' -replace '<[^>]+>', ' ' -replace '&nbsp;', ' ' -replace '&amp;', '&' -replace '\s+', ' '
     $texto = $texto.Trim()
-    $t = $texto.ToLower()
+    # Status.html es un log cronologico: las entradas antiguas estan primero y pueden decir "not encrypted"
+    # aunque el equipo ya este cifrado. Se evalua solo el final del archivo (entrada mas reciente).
+    $ultimo = if ($texto.Length -gt 500) { $texto.Substring($texto.Length - 500) } else { $texto }
+    $t = $ultimo.ToLower()
     $estado = 'desconocido'
     if ($t -match 'not encrypted|is not encrypted|no est. cifrad|sin cifrar|unencrypted') { $estado = 'sin_cifrar' }
     elseif ($t -match 'failed|error al|fall. ') { $estado = 'error' }
     elseif ($t -match 'waiting for|pre-boot password|restart is required|safe start|must restart|reinicio|reiniciar') { $estado = 'pendiente' }
     elseif ($t -match 'encrypting|encryption in progress|in progress|cifrando|en curso|decrypting') { $estado = 'cifrando' }
     elseif ($t -match 'encrypted|cifrad') { $estado = 'cifrado' }
-    $corto = $texto
-    if ($corto.Length -gt 800) { $corto = $corto.Substring(0, 800) }
+    # Guardar los ultimos 800 caracteres en detalle (los mas recientes, utiles para debug)
+    $corto = if ($texto.Length -gt 800) { $texto.Substring($texto.Length - 800) } else { $texto }
     return @{ producto = 'ESET Full Disk Encryption'; estado = $estado; detalle = $corto }
   }
   if (Test-Path $carpeta) {
