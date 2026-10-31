@@ -10,6 +10,7 @@ type Estado = { empleado_id: string; empleado: string; area: string | null; capa
 type Emp = { id: string; nombre: string; apellido: string; area: string | null };
 type Campana = { id: number; nombre: string; fecha: string; plantilla: string | null; enviados: number; clics: number; credenciales: number; reportaron: number; notas: string | null };
 type Resultado = { campana_id: number; empleado_id: string; clic: boolean; credenciales: boolean; reporto: boolean };
+type ResultadoArea = { campana_id: number; area: string; enviados: number; clics: number; credenciales: number; reportaron: number };
 
 const fd = (f: string | null) => (f ? new Date(f + "T12:00:00").toLocaleDateString("es-AR") : "—");
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "—");
@@ -239,15 +240,20 @@ function Phishing() {
   const empleados = useEmpleados();
   const [camps, setCamps] = useState<Campana[]>([]);
   const [res, setRes] = useState<Resultado[]>([]);
+  const [resArea, setResArea] = useState<ResultadoArea[]>([]);
   const [nueva, setNueva] = useState(false);
   const [verInforme, setVerInforme] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const cargar = async () => {
     const sb = createClient();
-    const [c, r] = await Promise.all([sb.from("phishing_campanas").select("*").order("fecha", { ascending: false }), sb.from("phishing_resultados").select("*")]);
+    const [c, r, ra] = await Promise.all([
+      sb.from("phishing_campanas").select("*").order("fecha", { ascending: false }),
+      sb.from("phishing_resultados").select("*"),
+      sb.from("phishing_resultados_area").select("*"),
+    ]);
     if (c.error) return setError(c.error.message.includes("phishing") ? "Falta ejecutar concientizacion.sql en Supabase." : c.error.message);
-    setCamps((c.data ?? []) as Campana[]); setRes((r.data ?? []) as Resultado[]);
+    setCamps((c.data ?? []) as Campana[]); setRes((r.data ?? []) as Resultado[]); setResArea((ra.data ?? []) as ResultadoArea[]);
   };
   useEffect(() => { cargar(); }, []);
 
@@ -272,7 +278,7 @@ function Phishing() {
       </div>
       {nueva && <NuevaCampana empleados={empleados} onListo={() => { setNueva(false); cargar(); }} />}
 
-      {verInforme && <InformePhishing camps={camps} res={res} empleados={empleados} />}
+      {verInforme && <InformePhishing camps={camps} res={res} empleados={empleados} resArea={resArea} />}
 
       {!verInforme && ult && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -324,31 +330,35 @@ function Phishing() {
 
 type AreaStats = { area: string; enviados: number; clics: number; credenciales: number; reportaron: number };
 
-function calcularPorArea(campanas: Campana[], resultados: Resultado[], empleados: Emp[]): AreaStats[] {
+function calcularPorArea(campanas: Campana[], resultados: Resultado[], empleados: Emp[], resultadosArea: ResultadoArea[]): AreaStats[] {
   const m = new Map<string, AreaStats>();
-  // Usar resultados por persona cuando existan
-  const porCampana = new Map<number, { idSet: Set<string> }>();
-  for (const r of resultados) {
-    if (!porCampana.has(r.campana_id)) porCampana.set(r.campana_id, { idSet: new Set() });
-    porCampana.get(r.campana_id)!.idSet.add(r.empleado_id);
-  }
   for (const camp of campanas) {
-    const rCamp = resultados.filter((r) => r.campana_id === camp.id);
-    if (rCamp.length > 0) {
-      // Datos por persona disponibles
-      for (const r of rCamp) {
-        const emp = empleados.find((e) => e.id === r.empleado_id);
-        const area = emp?.area ?? "Sin área";
+    // Prioridad 1: datos pre-agregados por área (campañas importadas desde GoPhish sin tracking individual)
+    const areaRows = resultadosArea.filter((r) => r.campana_id === camp.id);
+    if (areaRows.length > 0) {
+      for (const r of areaRows) {
+        const v = m.get(r.area) ?? { area: r.area, enviados: 0, clics: 0, credenciales: 0, reportaron: 0 };
+        v.enviados += r.enviados; v.clics += r.clics; v.credenciales += r.credenciales; v.reportaron += r.reportaron;
+        m.set(r.area, v);
+      }
+    } else {
+      // Prioridad 2: resultados por persona
+      const rCamp = resultados.filter((r) => r.campana_id === camp.id);
+      if (rCamp.length > 0) {
+        for (const r of rCamp) {
+          const emp = empleados.find((e) => e.id === r.empleado_id);
+          const area = emp?.area ?? "Sin área";
+          const v = m.get(area) ?? { area, enviados: 0, clics: 0, credenciales: 0, reportaron: 0 };
+          v.enviados++; if (r.clic || r.credenciales) v.clics++; if (r.credenciales) v.credenciales++; if (r.reporto) v.reportaron++;
+          m.set(area, v);
+        }
+      } else if (camp.enviados > 0) {
+        // Prioridad 3: solo totales (sin desglose)
+        const area = "Total sin desglose por área";
         const v = m.get(area) ?? { area, enviados: 0, clics: 0, credenciales: 0, reportaron: 0 };
-        v.enviados++; if (r.clic || r.credenciales) v.clics++; if (r.credenciales) v.credenciales++; if (r.reporto) v.reportaron++;
+        v.enviados += camp.enviados; v.clics += camp.clics; v.credenciales += camp.credenciales; v.reportaron += camp.reportaron;
         m.set(area, v);
       }
-    } else if (camp.enviados > 0) {
-      // Solo totales: acumular en "Sin datos por persona"
-      const area = "Total sin desglose por persona";
-      const v = m.get(area) ?? { area, enviados: 0, clics: 0, credenciales: 0, reportaron: 0 };
-      v.enviados += camp.enviados; v.clics += camp.clics; v.credenciales += camp.credenciales; v.reportaron += camp.reportaron;
-      m.set(area, v);
     }
   }
   return Array.from(m.values()).sort((a, b) => (b.clics / (b.enviados || 1)) - (a.clics / (a.enviados || 1)));
@@ -360,7 +370,7 @@ function BarraRiesgo({ valor, max }: { valor: number; max: number }) {
   return <div className="h-1.5 w-20 rounded-full bg-line/[0.08] overflow-hidden"><div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} /></div>;
 }
 
-function InformePhishing({ camps, res, empleados }: { camps: Campana[]; res: Resultado[]; empleados: Emp[] }) {
+function InformePhishing({ camps, res, empleados, resArea }: { camps: Campana[]; res: Resultado[]; empleados: Emp[]; resArea: ResultadoArea[] }) {
   const años = useMemo(() => Array.from(new Set(camps.map((c) => c.fecha.slice(0, 4)))).sort().reverse(), [camps]);
   const [año1, setAño1] = useState(() => años[0] ?? "");
   const [año2, setAño2] = useState(() => años[1] ?? "");
@@ -368,8 +378,8 @@ function InformePhishing({ camps, res, empleados }: { camps: Campana[]; res: Res
   const camps1 = useMemo(() => camps.filter((c) => c.fecha.startsWith(año1)), [camps, año1]);
   const camps2 = useMemo(() => camps.filter((c) => c.fecha.startsWith(año2)), [camps, año2]);
 
-  const stats1 = useMemo(() => calcularPorArea(camps1, res, empleados), [camps1, res, empleados]);
-  const stats2 = useMemo(() => calcularPorArea(camps2, res, empleados), [camps2, res, empleados]);
+  const stats1 = useMemo(() => calcularPorArea(camps1, res, empleados, resArea), [camps1, res, empleados, resArea]);
+  const stats2 = useMemo(() => calcularPorArea(camps2, res, empleados, resArea), [camps2, res, empleados, resArea]);
 
   const totales = (stats: AreaStats[]) => stats.reduce((a, b) => ({ area: "TOTAL", enviados: a.enviados + b.enviados, clics: a.clics + b.clics, credenciales: a.credenciales + b.credenciales, reportaron: a.reportaron + b.reportaron }), { area: "TOTAL", enviados: 0, clics: 0, credenciales: 0, reportaron: 0 });
 
@@ -508,8 +518,9 @@ function InformePhishing({ camps, res, empleados }: { camps: Campana[]; res: Res
         </table>
       </div>
       <p className="text-xs text-ink/40">
-        El desglose por área requiere que las campañas estén cargadas con resultados por persona.
-        Las campañas con solo totales aparecen como "Total sin desglose por persona".
+        El desglose por área usa: (1) datos por sector importados desde GoPhish, (2) resultados por persona si están cargados,
+        o (3) solo totales cuando no hay ninguno de los dos.
+        En campañas importadas desde GoPhish: "Clic %" = usuarios que hicieron clic en el enlace; "Contraseña %" = usuarios que ingresaron datos.
         Δ Clic = diferencia en puntos porcentuales respecto al año de comparación (positivo = empeoró).
       </p>
     </div>
