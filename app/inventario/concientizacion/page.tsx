@@ -240,6 +240,7 @@ function Phishing() {
   const [camps, setCamps] = useState<Campana[]>([]);
   const [res, setRes] = useState<Resultado[]>([]);
   const [nueva, setNueva] = useState(false);
+  const [verInforme, setVerInforme] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const cargar = async () => {
@@ -264,11 +265,16 @@ function Phishing() {
     <div className="space-y-4">
       <div className="flex justify-between items-center gap-2">
         <p className="text-sm text-ink/60">Cargá el resultado de cada simulación (la hagas con Microsoft Attack Simulator, GoPhish u otra herramienta).</p>
-        {puedeEditar && <button className="btn-primary" onClick={() => setNueva(!nueva)}>Cargar campaña</button>}
+        <div className="flex gap-2">
+          {camps.length > 0 && <button className="btn-secondary" onClick={() => setVerInforme(!verInforme)}>{verInforme ? "Cerrar informe" : "Ver informe anual"}</button>}
+          {puedeEditar && <button className="btn-primary" onClick={() => setNueva(!nueva)}>Cargar campaña</button>}
+        </div>
       </div>
       {nueva && <NuevaCampana empleados={empleados} onListo={() => { setNueva(false); cargar(); }} />}
 
-      {ult && (
+      {verInforme && <InformePhishing camps={camps} res={res} empleados={empleados} />}
+
+      {!verInforme && ult && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="card p-4"><div className="text-xs text-ink/50">Última campaña</div><div className="text-sm text-ink mt-2 font-medium">{ult.nombre}</div><div className="text-xs text-ink/50">{fd(ult.fecha)}</div></div>
           <div className="card p-4"><div className="text-xs text-ink/50">Hicieron clic</div><div className={`font-display text-3xl mt-1 ${ult.clics ? "text-red-600" : "text-ink"}`}>{pct(ult.clics, ult.enviados)}</div></div>
@@ -277,39 +283,235 @@ function Phishing() {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="card overflow-hidden lg:col-span-2">
-          <table className="data w-full">
-            <thead><tr><th>Campaña</th><th>Enviados</th><th>Clic</th><th>Contraseña</th><th>Reportaron</th>{puedeEditar && <th></th>}</tr></thead>
-            <tbody>
-              {!camps.length && <tr><td colSpan={6} className="text-center text-ink/50 py-6">Todavía no hay campañas cargadas.</td></tr>}
-              {camps.map((c) => (
-                <tr key={c.id}>
-                  <td><div className="text-ink font-medium">{c.nombre}</div><div className="text-xs text-ink/50">{fd(c.fecha)}{c.plantilla ? ` · ${c.plantilla}` : ""}</div></td>
-                  <td className="tabular-nums text-sm">{c.enviados}</td>
-                  <td className="tabular-nums text-sm">{c.clics} <span className="text-ink/40">({pct(c.clics, c.enviados)})</span></td>
-                  <td className="tabular-nums text-sm">{c.credenciales} <span className="text-ink/40">({pct(c.credenciales, c.enviados)})</span></td>
-                  <td className="tabular-nums text-sm">{c.reportaron} <span className="text-ink/40">({pct(c.reportaron, c.enviados)})</span></td>
-                  {puedeEditar && <td className="text-right"><button className="text-xs text-ink/40 hover:text-red-600" onClick={async () => {
-                    if (!confirm(`¿Borrar la campaña "${c.nombre}"?`)) return;
-                    const { error } = await createClient().from("phishing_campanas").delete().eq("id", c.id);
-                    if (error) setError(error.message); else cargar();
-                  }}>Borrar</button></td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {!verInforme && (
+        <div className="grid lg:grid-cols-3 gap-4">
+          <div className="card overflow-hidden lg:col-span-2">
+            <table className="data w-full">
+              <thead><tr><th>Campaña</th><th>Enviados</th><th>Clic</th><th>Contraseña</th><th>Reportaron</th>{puedeEditar && <th></th>}</tr></thead>
+              <tbody>
+                {!camps.length && <tr><td colSpan={6} className="text-center text-ink/50 py-6">Todavía no hay campañas cargadas.</td></tr>}
+                {camps.map((c) => (
+                  <tr key={c.id}>
+                    <td><div className="text-ink font-medium">{c.nombre}</div><div className="text-xs text-ink/50">{fd(c.fecha)}{c.plantilla ? ` · ${c.plantilla}` : ""}</div></td>
+                    <td className="tabular-nums text-sm">{c.enviados}</td>
+                    <td className="tabular-nums text-sm">{c.clics} <span className="text-ink/40">({pct(c.clics, c.enviados)})</span></td>
+                    <td className="tabular-nums text-sm">{c.credenciales} <span className="text-ink/40">({pct(c.credenciales, c.enviados)})</span></td>
+                    <td className="tabular-nums text-sm">{c.reportaron} <span className="text-ink/40">({pct(c.reportaron, c.enviados)})</span></td>
+                    {puedeEditar && <td className="text-right"><button className="text-xs text-ink/40 hover:text-red-600" onClick={async () => {
+                      if (!confirm(`¿Borrar la campaña "${c.nombre}"?`)) return;
+                      const { error } = await createClient().from("phishing_campanas").delete().eq("id", c.id);
+                      if (error) setError(error.message); else cargar();
+                    }}>Borrar</button></td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="card p-5">
+            <h2 className="font-medium text-ink mb-1">Cayeron más de una vez</h2>
+            <p className="text-xs text-ink/50 mb-3">Solo con campañas cargadas por persona. Conviene una capacitación individual.</p>
+            {!reincidentes.length ? <p className="text-sm text-ink/50">Nadie por ahora.</p> : (
+              <ul className="space-y-1.5 text-sm">
+                {reincidentes.map(({ e, n }) => <li key={e!.id} className="flex justify-between"><span>{e!.apellido}, {e!.nombre}</span><span className="text-red-600 tabular-nums">{n} veces</span></li>)}
+              </ul>
+            )}
+          </div>
         </div>
-        <div className="card p-5">
-          <h2 className="font-medium text-ink mb-1">Cayeron más de una vez</h2>
-          <p className="text-xs text-ink/50 mb-3">Solo con campañas cargadas por persona. Conviene una capacitación individual.</p>
-          {!reincidentes.length ? <p className="text-sm text-ink/50">Nadie por ahora.</p> : (
-            <ul className="space-y-1.5 text-sm">
-              {reincidentes.map(({ e, n }) => <li key={e!.id} className="flex justify-between"><span>{e!.apellido}, {e!.nombre}</span><span className="text-red-600 tabular-nums">{n} veces</span></li>)}
-            </ul>
-          )}
+      )}
+    </div>
+  );
+}
+
+type AreaStats = { area: string; enviados: number; clics: number; credenciales: number; reportaron: number };
+
+function calcularPorArea(campanas: Campana[], resultados: Resultado[], empleados: Emp[]): AreaStats[] {
+  const m = new Map<string, AreaStats>();
+  // Usar resultados por persona cuando existan
+  const porCampana = new Map<number, { idSet: Set<string> }>();
+  for (const r of resultados) {
+    if (!porCampana.has(r.campana_id)) porCampana.set(r.campana_id, { idSet: new Set() });
+    porCampana.get(r.campana_id)!.idSet.add(r.empleado_id);
+  }
+  for (const camp of campanas) {
+    const rCamp = resultados.filter((r) => r.campana_id === camp.id);
+    if (rCamp.length > 0) {
+      // Datos por persona disponibles
+      for (const r of rCamp) {
+        const emp = empleados.find((e) => e.id === r.empleado_id);
+        const area = emp?.area ?? "Sin área";
+        const v = m.get(area) ?? { area, enviados: 0, clics: 0, credenciales: 0, reportaron: 0 };
+        v.enviados++; if (r.clic || r.credenciales) v.clics++; if (r.credenciales) v.credenciales++; if (r.reporto) v.reportaron++;
+        m.set(area, v);
+      }
+    } else if (camp.enviados > 0) {
+      // Solo totales: acumular en "Sin datos por persona"
+      const area = "Total sin desglose por persona";
+      const v = m.get(area) ?? { area, enviados: 0, clics: 0, credenciales: 0, reportaron: 0 };
+      v.enviados += camp.enviados; v.clics += camp.clics; v.credenciales += camp.credenciales; v.reportaron += camp.reportaron;
+      m.set(area, v);
+    }
+  }
+  return Array.from(m.values()).sort((a, b) => (b.clics / (b.enviados || 1)) - (a.clics / (a.enviados || 1)));
+}
+
+function BarraRiesgo({ valor, max }: { valor: number; max: number }) {
+  const pct = max ? (valor / max) * 100 : 0;
+  const color = pct > 30 ? "bg-red-500" : pct > 15 ? "bg-amber-400" : "bg-emerald-500";
+  return <div className="h-1.5 w-20 rounded-full bg-line/[0.08] overflow-hidden"><div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} /></div>;
+}
+
+function InformePhishing({ camps, res, empleados }: { camps: Campana[]; res: Resultado[]; empleados: Emp[] }) {
+  const años = useMemo(() => Array.from(new Set(camps.map((c) => c.fecha.slice(0, 4)))).sort().reverse(), [camps]);
+  const [año1, setAño1] = useState(() => años[0] ?? "");
+  const [año2, setAño2] = useState(() => años[1] ?? "");
+
+  const camps1 = useMemo(() => camps.filter((c) => c.fecha.startsWith(año1)), [camps, año1]);
+  const camps2 = useMemo(() => camps.filter((c) => c.fecha.startsWith(año2)), [camps, año2]);
+
+  const stats1 = useMemo(() => calcularPorArea(camps1, res, empleados), [camps1, res, empleados]);
+  const stats2 = useMemo(() => calcularPorArea(camps2, res, empleados), [camps2, res, empleados]);
+
+  const totales = (stats: AreaStats[]) => stats.reduce((a, b) => ({ area: "TOTAL", enviados: a.enviados + b.enviados, clics: a.clics + b.clics, credenciales: a.credenciales + b.credenciales, reportaron: a.reportaron + b.reportaron }), { area: "TOTAL", enviados: 0, clics: 0, credenciales: 0, reportaron: 0 });
+
+  const t1 = totales(stats1);
+  const t2 = totales(stats2);
+  const maxClicPct = Math.max(...[...stats1, ...stats2].map((s) => s.enviados ? (s.clics / s.enviados) * 100 : 0), 1);
+
+  const areas = Array.from(new Set([...stats1.map((s) => s.area), ...stats2.map((s) => s.area)]));
+
+  function FilaArea({ area, s1, s2 }: { area: string; s1?: AreaStats; s2?: AreaStats }) {
+    const p = (a: number, b: number) => b ? `${Math.round((a / b) * 100)}%` : "—";
+    const delta = (v1: number, e1: number, v2: number, e2: number) => {
+      if (!e1 || !e2) return null;
+      const diff = Math.round((v1 / e1 - v2 / e2) * 100);
+      if (diff === 0) return <span className="text-ink/40">=</span>;
+      return <span className={diff > 0 ? "text-red-500" : "text-emerald-600"}>{diff > 0 ? `+${diff}` : diff}pp</span>;
+    };
+    return (
+      <tr>
+        <td className="font-medium text-ink text-sm">{area}</td>
+        {s1 ? (<>
+          <td className="text-sm tabular-nums text-center">{s1.enviados}</td>
+          <td className="text-sm text-center">
+            <span className={`tabular-nums font-medium ${s1.enviados && s1.clics / s1.enviados > 0.2 ? "text-red-600" : "text-ink"}`}>{p(s1.clics, s1.enviados)}</span>
+            <BarraRiesgo valor={s1.clics} max={s1.enviados ? s1.enviados * (maxClicPct / 100) * (s1.enviados / s1.enviados) : 1} />
+          </td>
+          <td className="text-sm tabular-nums text-center">{p(s1.credenciales, s1.enviados)}</td>
+          <td className="text-sm tabular-nums text-center text-emerald-700">{p(s1.reportaron, s1.enviados)}</td>
+        </>) : <td colSpan={4} className="text-center text-ink/30 text-xs">sin datos</td>}
+        {año2 && (s2 ? (<>
+          <td className="text-sm tabular-nums text-center">{s2.enviados}</td>
+          <td className="text-sm tabular-nums text-center">{p(s2.clics, s2.enviados)}</td>
+          <td className="text-sm tabular-nums text-center">{p(s2.credenciales, s2.enviados)}</td>
+          <td className="text-sm tabular-nums text-center text-emerald-700">{p(s2.reportaron, s2.enviados)}</td>
+          <td className="text-sm text-center">{delta(s1?.clics ?? 0, s1?.enviados ?? 0, s2.clics, s2.enviados)}</td>
+        </>) : <td colSpan={5} className="text-center text-ink/30 text-xs">sin datos</td>)}
+      </tr>
+    );
+  }
+
+  return (
+    <div className="card p-5 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-lg text-ink">Informe anual de simulaciones de phishing</h2>
+        <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center text-sm">
+            <select className="input w-auto" value={año1} onChange={(e) => setAño1(e.target.value)}>
+              {años.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+            {años.length > 1 && <>
+              <span className="text-ink/40">vs.</span>
+              <select className="input w-auto" value={año2} onChange={(e) => setAño2(e.target.value)}>
+                <option value="">— sin comparar —</option>
+                {años.filter((a) => a !== año1).map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </>}
+          </div>
+          <button className="btn-secondary text-sm" onClick={() => window.print()}>Imprimir / PDF</button>
         </div>
       </div>
+
+      {/* Resumen totales */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: "Enviados", v1: t1.enviados, v2: t2.enviados, formato: (n: number) => String(n) },
+          { label: "Clic %", v1: t1.clics, v2: t2.clics, base1: t1.enviados, base2: t2.enviados, rojo: true },
+          { label: "Contraseña %", v1: t1.credenciales, v2: t2.credenciales, base1: t1.enviados, base2: t2.enviados, rojo: true },
+          { label: "Reportaron %", v1: t1.reportaron, v2: t2.reportaron, base1: t1.enviados, base2: t2.enviados, verde: true },
+        ].map(({ label, v1, v2, base1, base2, rojo, verde }) => {
+          const val1 = base1 != null ? pct(v1, base1) : String(v1);
+          const val2 = año2 && base2 != null ? pct(v2, base2) : año2 ? String(v2) : null;
+          return (
+            <div key={label} className="card p-4">
+              <div className="text-xs text-ink/50">{label} {año1}</div>
+              <div className={`font-display text-3xl mt-1 ${rojo && v1 > 0 ? "text-red-600" : verde ? "text-emerald-700" : "text-ink"}`}>{val1}</div>
+              {val2 && <div className="text-xs text-ink/50 mt-1">{año2}: <span className="font-medium text-ink">{val2}</span></div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Tabla por área */}
+      <div className="overflow-x-auto">
+        <table className="data w-full">
+          <thead>
+            <tr>
+              <th rowSpan={2} className="align-bottom">Dirección / Área</th>
+              <th colSpan={4} className="text-center bg-brand-50/50">{año1}</th>
+              {año2 && <th colSpan={5} className="text-center bg-line/[0.03]">{año2}</th>}
+            </tr>
+            <tr>
+              <th className="bg-brand-50/50 text-center">Enviados</th>
+              <th className="bg-brand-50/50 text-center">Clic %</th>
+              <th className="bg-brand-50/50 text-center">Contraseña %</th>
+              <th className="bg-brand-50/50 text-center">Reportaron %</th>
+              {año2 && <>
+                <th className="bg-line/[0.03] text-center">Enviados</th>
+                <th className="bg-line/[0.03] text-center">Clic %</th>
+                <th className="bg-line/[0.03] text-center">Contraseña %</th>
+                <th className="bg-line/[0.03] text-center">Reportaron %</th>
+                <th className="bg-line/[0.03] text-center">Δ Clic</th>
+              </>}
+            </tr>
+          </thead>
+          <tbody>
+            {areas.length === 0 && <tr><td colSpan={9} className="text-center text-ink/50 py-6">Sin datos para los años seleccionados.</td></tr>}
+            {areas.map((area) => (
+              <FilaArea key={area} area={area}
+                s1={stats1.find((s) => s.area === area)}
+                s2={stats2.find((s) => s.area === area)} />
+            ))}
+          </tbody>
+          {areas.length > 0 && (
+            <tfoot>
+              <tr className="font-semibold bg-line/[0.03]">
+                <td className="text-sm">TOTAL</td>
+                <td className="text-sm tabular-nums text-center">{t1.enviados}</td>
+                <td className="text-sm tabular-nums text-center">{pct(t1.clics, t1.enviados)}</td>
+                <td className="text-sm tabular-nums text-center">{pct(t1.credenciales, t1.enviados)}</td>
+                <td className="text-sm tabular-nums text-center text-emerald-700">{pct(t1.reportaron, t1.enviados)}</td>
+                {año2 && <>
+                  <td className="text-sm tabular-nums text-center">{t2.enviados}</td>
+                  <td className="text-sm tabular-nums text-center">{pct(t2.clics, t2.enviados)}</td>
+                  <td className="text-sm tabular-nums text-center">{pct(t2.credenciales, t2.enviados)}</td>
+                  <td className="text-sm tabular-nums text-center text-emerald-700">{pct(t2.reportaron, t2.enviados)}</td>
+                  <td className="text-sm tabular-nums text-center">
+                    {t1.enviados && t2.enviados ? (() => {
+                      const diff = Math.round((t1.clics / t1.enviados - t2.clics / t2.enviados) * 100);
+                      return <span className={diff > 0 ? "text-red-500" : "text-emerald-600"}>{diff > 0 ? `+${diff}` : diff}pp</span>;
+                    })() : "—"}
+                  </td>
+                </>}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+      <p className="text-xs text-ink/40">
+        El desglose por área requiere que las campañas estén cargadas con resultados por persona.
+        Las campañas con solo totales aparecen como "Total sin desglose por persona".
+        Δ Clic = diferencia en puntos porcentuales respecto al año de comparación (positivo = empeoró).
+      </p>
     </div>
   );
 }
