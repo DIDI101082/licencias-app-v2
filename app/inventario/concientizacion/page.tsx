@@ -342,9 +342,9 @@ function calcularPorArea(campanas: Campana[], resultados: Resultado[], empleados
         m.set(r.area, v);
       }
     } else {
-      // Prioridad 2: resultados por persona
+      // Prioridad 2: resultados por persona (solo si cubren ≥50% del total enviado)
       const rCamp = resultados.filter((r) => r.campana_id === camp.id);
-      if (rCamp.length > 0) {
+      if (rCamp.length > 0 && (!camp.enviados || rCamp.length * 2 >= camp.enviados)) {
         for (const r of rCamp) {
           const emp = empleados.find((e) => e.id === r.empleado_id);
           const area = emp?.area ?? "Sin área";
@@ -459,6 +459,70 @@ function InformePhishing({ camps, res, empleados, resArea }: { camps: Campana[];
             </div>
           );
         })}
+      </div>
+
+      {/* Banner: mejoró o empeoró */}
+      {año2 && t1.enviados > 0 && t2.enviados > 0 && (() => {
+        const r1 = (t1.clics + t1.credenciales) / t1.enviados;
+        const r2 = (t2.clics + t2.credenciales) / t2.enviados;
+        const mejoro = r1 < r2;
+        const diff = Math.abs(Math.round((r1 - r2) * 100));
+        return (
+          <div className={`rounded-lg p-3 text-sm flex items-center gap-3 ${mejoro ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>
+            <span className="text-2xl">{mejoro ? "✅" : "⚠️"}</span>
+            <div>
+              <span className="font-semibold">{mejoro ? "Mejoró" : "Empeoró"} respecto a {año2}:</span>
+              {" "}el riesgo total pasó de{" "}
+              <span className="font-semibold">{Math.round(r2 * 100)}%</span> ({año2}) a{" "}
+              <span className="font-semibold">{Math.round(r1 * 100)}%</span> ({año1})
+              {diff > 0 && <span> — {mejoro ? `−${diff}pp` : `+${diff}pp`}</span>}.
+              {" "}(Riesgo = clics + credenciales sobre enviados.)
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Por campaña */}
+      <div>
+        <h3 className="text-sm font-medium text-ink/60 mb-2">Detalle por campaña</h3>
+        <div className="overflow-x-auto">
+          <table className="data w-full">
+            <thead>
+              <tr>
+                <th>Campaña</th>
+                <th className="text-center">Enviados</th>
+                <th className="text-center">Clic %</th>
+                <th className="text-center">Credencial %</th>
+                <th className="text-center">Riesgo total %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...camps1.map((c) => ({ ...c, año: año1 })), ...(año2 ? camps2.map((c) => ({ ...c, año: año2 })) : [])]
+                .sort((a, b) => a.fecha.localeCompare(b.fecha))
+                .map((c) => {
+                  const riesgo = c.enviados ? (c.clics + c.credenciales) / c.enviados : 0;
+                  const p = (n: number) => c.enviados ? `${Math.round((n / c.enviados) * 100)}%` : "—";
+                  return (
+                    <tr key={c.id}>
+                      <td>
+                        <div className="font-medium text-ink text-sm">{c.nombre}</div>
+                        <div className="text-xs text-ink/50">
+                          {new Date(c.fecha + "T12:00:00").toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" })}
+                          {" · "}<span className="font-medium">{c.año}</span>
+                        </div>
+                      </td>
+                      <td className="text-sm tabular-nums text-center">{c.enviados}</td>
+                      <td className="text-sm tabular-nums text-center">{p(c.clics)}</td>
+                      <td className="text-sm tabular-nums text-center">{p(c.credenciales)}</td>
+                      <td className={`text-sm tabular-nums text-center font-semibold ${riesgo > 0.2 ? "text-red-600" : riesgo > 0.1 ? "text-amber-600" : "text-emerald-700"}`}>
+                        {c.enviados ? `${Math.round(riesgo * 100)}%` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Tabla por área */}
