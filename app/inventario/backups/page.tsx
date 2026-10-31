@@ -11,7 +11,7 @@ type Trabajo = {
 };
 type Estado = {
   configurado: boolean; ultimo_reporte: string | null; servidor: string | null; version: string | null;
-  horas_max_sin_exito: number; horas_max_sin_reporte: number; alertas: boolean;
+  horas_max_sin_exito: number; horas_max_sin_reporte: number; alertas: boolean; notif_finalizacion: boolean;
 };
 
 const fh = (f: string | null) => (f ? new Date(f).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", dateStyle: "short", timeStyle: "short" }) : "—");
@@ -148,7 +148,7 @@ export default function Backups() {
 }
 
 function Configuracion({ estado, onCambio }: { estado: Estado; onCambio: () => void }) {
-  const [f, setF] = useState({ horas_max_sin_exito: estado.horas_max_sin_exito, horas_max_sin_reporte: estado.horas_max_sin_reporte, alertas: estado.alertas });
+  const [f, setF] = useState({ horas_max_sin_exito: estado.horas_max_sin_exito, horas_max_sin_reporte: estado.horas_max_sin_reporte, alertas: estado.alertas, notif_finalizacion: estado.notif_finalizacion ?? true });
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [script, setScript] = useState<string | null>(null);
   const sb = createClient();
@@ -198,7 +198,8 @@ function Configuracion({ estado, onCambio }: { estado: Estado; onCambio: () => v
             <input type="number" min={1} max={72} className="input mt-1" value={f.horas_max_sin_reporte} onChange={(e) => setF({ ...f, horas_max_sin_reporte: Number(e.target.value) })} />
           </label>
         </div>
-        <label className="flex items-center gap-2 text-sm mt-3"><input type="checkbox" checked={f.alertas} onChange={(e) => setF({ ...f, alertas: e.target.checked })} /> Enviar alertas (Teams y sistema de tickets)</label>
+        <label className="flex items-center gap-2 text-sm mt-3"><input type="checkbox" checked={f.alertas} onChange={(e) => setF({ ...f, alertas: e.target.checked })} /> Enviar alertas cuando un backup falla o supera el tiempo máximo</label>
+        <label className="flex items-center gap-2 text-sm mt-2"><input type="checkbox" checked={f.notif_finalizacion} onChange={(e) => setF({ ...f, notif_finalizacion: e.target.checked })} /> Notificar por Teams cada vez que un trabajo finaliza (exitoso, con advertencias o fallido)</label>
         <button className="btn-secondary mt-3" onClick={async () => {
           const { error } = await sb.rpc("backups_config_guardar", { p: f });
           setMsg(error ? { ok: false, texto: error.message } : { ok: true, texto: "Guardado." });
