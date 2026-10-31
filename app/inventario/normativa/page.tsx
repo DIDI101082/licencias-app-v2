@@ -145,6 +145,7 @@ function Contenido() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2 print:hidden">
+          <Link href="/inventario/normativa/nist" className="btn-secondary">NIST CSF 2.0</Link>
           {marco === "ISO27001" && <Link href="/inventario/normativa/soa" className="btn-secondary">Declaración de aplicabilidad</Link>}
           <Link href="/inventario/normativa/riesgos" className="btn-secondary">Registro de riesgos</Link>
           <button className="btn-secondary" onClick={() => window.print()}>Exportar PDF</button>
