@@ -48,6 +48,7 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/apps-entra", label: "Aplicaciones de Entra ID" },
     { href: "/red/fortigate", label: "FortiGate" },
     { href: "/inventario/wifi", label: "WiFi" },
+    { href: "/inventario/supabase", label: "Salud de Supabase" },
   ] },
   { id: "infraestructura", label: "Infraestructura", titulo: "Servidores, virtualización, backups y red", paginas: [
     { href: "/servidores", label: "Servidores" },
