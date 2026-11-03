@@ -51,6 +51,7 @@ export const TEMAS: Tema[] = [
     { href: "/red/fortigate", label: "FortiGate" },
     { href: "/red/forti-ems", label: "FortiClient EMS" },
     { href: "/inventario/wifi", label: "WiFi" },
+    { href: "/inventario/supabase", label: "Salud de Supabase" },
   ] },
   { id: "infraestructura", label: "Infraestructura", titulo: "Servidores, virtualización, backups y red", paginas: [
     { href: "/servidores", label: "Servidores" },
