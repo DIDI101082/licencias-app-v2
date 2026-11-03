@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server";
 import { getPerfil } from "@/lib/supabase/server";
 
+function extraerIssues(raw: any): any[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === "object") {
+    // La API puede devolver { checks: [...] }, { results: [...] }, { data: [...] }, etc.
+    const posibles = ["checks", "results", "data", "issues", "lint"];
+    for (const k of posibles) {
+      if (Array.isArray(raw[k])) return raw[k];
+    }
+  }
+  return [];
+}
+
 export async function GET() {
   try {
     const { perfil } = await getPerfil();
@@ -31,7 +43,8 @@ export async function GET() {
             `https://api.supabase.com/v1/projects/${p.id}/advisors/security`,
             { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
           );
-          const issues: any[] = res.ok ? await res.json() : [];
+          const raw = res.ok ? await res.json() : [];
+          const issues = extraerIssues(raw);
           return { project: { id: p.id, name: p.name, region: p.region, status: p.status }, issues };
         } catch {
           return { project: { id: p.id, name: p.name, region: p.region, status: p.status }, issues: [], error: true };
@@ -40,7 +53,8 @@ export async function GET() {
     );
 
     results.sort((a, b) => {
-      const criticos = (r: any) => r.issues.filter((i: any) => i.level === "ERROR").length;
+      const criticos = (r: any) =>
+        Array.isArray(r.issues) ? r.issues.filter((i: any) => i.level === "ERROR").length : 0;
       return criticos(b) - criticos(a);
     });
 
