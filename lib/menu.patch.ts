@@ -42,14 +42,11 @@ export const TEMAS: Tema[] = [
     { href: "/inventario/monitoreo", label: "Monitoreo" },
     { href: "/inventario/migracion-w11", label: "Migración a Windows 11" },
   ] },
-  { id: "perimetro", label: "Perímetro", titulo: "Perímetro, correo y nube", paginas: [
-    { href: "/inventario/superficie", label: "Superficie expuesta" },
-    { href: "/inventario/correo", label: "Correo y dominio" },
+  { id: "perimetro", label: "Perímetro", titulo: "Perímetro y nube", paginas: [
     { href: "/inventario/cloudflare", label: "Cloudflare" },
     { href: "/inventario/securescore", label: "Secure Score" },
     { href: "/inventario/apps-entra", label: "Aplicaciones de Entra ID" },
     { href: "/red/fortigate", label: "FortiGate" },
-    { href: "/red/forti-ems", label: "FortiClient EMS" },
     { href: "/inventario/wifi", label: "WiFi" },
     { href: "/inventario/supabase", label: "Salud de Supabase" },
   ] },
@@ -90,6 +87,16 @@ export const TEMAS: Tema[] = [
     { href: "/auditoria", label: "Cambios" },
     { href: "/auditoria/sesiones", label: "Inicios de sesión" },
   ] },
+  { id: "mobiliario", label: "Mobiliario", titulo: "Registro y seguimiento de mobiliario", paginas: [
+    { href: "/mobiliario", label: "Mobiliario" },
+    { href: "/mobiliario/movimientos", label: "Movimientos" },
+    { href: "/mobiliario/qr", label: "Generar QR" },
+  ] },
+  { id: "celulares", label: "Celulares", titulo: "Inventario de celulares corporativos", paginas: [
+    { href: "/celulares", label: "Celulares" },
+    { href: "/celulares/movimientos", label: "Movimientos" },
+    { href: "/celulares/qr", label: "Generar QR" },
+  ] },
 ];
 
 // Por módulo (para permisos y grupos de acceso): las mismas páginas, agrupadas por su módulo
@@ -100,7 +107,7 @@ export const MENU: SeccionMenu[] = MODULOS.map((m) => ({
 }));
 
 // Páginas que solo coinciden con la dirección exacta (el resto abarca sus subpáginas)
-const EXACTAS = ["/", "/inicio", "/helpdesk", "/inventario", "/inventario/ubicacion", "/auditoria", "/servidores", "/red"];
+const EXACTAS = ["/", "/inicio", "/helpdesk", "/inventario", "/inventario/ubicacion", "/auditoria", "/servidores", "/red", "/mobiliario", "/celulares"];
 
 export function esActual(href: string, pathname: string) {
   if (EXACTAS.includes(href)) return pathname === href;
@@ -159,4 +166,5 @@ export function ubicar(temas: { id: string; paginas: Pagina[] }[], pathname: str
   for (const t of temas) for (const p of t.paginas) {
     if (esActual(p.href, pathname) && (!mejor || p.href.length > mejor.href.length)) mejor = { tema: t.id, href: p.href };
   }
-  return mejor;}
+  return mejor;
+}
